@@ -1,0 +1,45 @@
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./base.css";
+
+/* ============================================================
+   Tailwind v4 @theme 매핑
+   - tokens.css(하이픈 변수) → Tailwind 유틸리티
+   - 기존 클래스명(ink2/ink3/line2) 유지 위해 별칭 매핑
+   - --accent* 는 var 참조라 학원별 테마 런타임 override 가능
+   ============================================================ */
+@theme inline {
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-weak: var(--accent-weak);
+  --color-brand: var(--text-brand);
+
+  --color-ink: var(--ink);
+  --color-ink2: var(--ink-2);
+  --color-ink3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line2: var(--line-2);
+  --color-fill: var(--fill);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+
+  --color-side: var(--side);
+  --color-side-ink: var(--side-ink);
+  --color-side-ink-strong: var(--side-ink-strong);
+
+  --color-danger: var(--danger);
+  --color-danger-ink: var(--danger-ink);
+  --color-danger-weak: var(--danger-weak);
+  --color-warn: var(--warn);
+  --color-warn-ink: var(--warn-ink);
+  --color-warn-weak: var(--warn-weak);
+  --color-info: var(--info);
+  --color-info-ink: var(--info-ink);
+  --color-info-weak: var(--info-weak);
+  --color-gold: var(--gold);
+  --color-gold-weak: var(--gold-weak);
+  --color-placeholder: var(--text-placeholder);
+
+  --font-sans: var(--font);
+}
