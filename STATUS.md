@@ -5,12 +5,12 @@
 > 완료 표기는 저장소 증거(테스트·타입·CI) 기준으로만 ✅.
 
 ## 한 줄
-3차 리뷰 백엔드 준비도 **7.5** (1차 4.5 → 2차 6.2 → 7.5). R3 P0(권한 actor-binding·환불 무결성)까지 반영 완료 — 도메인 테스트 **91/91**.
+3차 리뷰 백엔드 준비도 **7.5** (1차 4.5 → 2차 6.2 → 7.5). R3 P0 + B4(로그인·시뮬 격리) + **M1(마케팅 계약)** 반영 — 테스트 **99/99** (domain 91 + event-contracts 8).
 
 ## 검증 방법 (재현 가능)
 ```bash
-npm install && npm test   # 91 tests
-npm run typecheck && npm run build
+npm install && npm test   # 99 tests (전 워크스페이스)
+npm run typecheck && npm run lint && npm run build
 ```
 
 ## ✅ 완료 (계약 + 자동 테스트로 닫힘)
@@ -35,9 +35,14 @@ npm run typecheck && npm run build
 - **결제 simulator 격리** (R3 P1-6): `paySuccess` 제거 → `paymentSubmitted`(AUTHORIZED, 청구서 미변경) ≠ `paymentCaptured`(시뮬 webhook 확정). 결제 화면 "PG 시뮬레이션" 배지, 완료 화면 "승인 확인 중" 단계, **receipt 없이 완료 URL 직접 접근 시 성공 단정 금지**("결제 상태 다시 확인")
 - **web lint 에러 5건 전부 수정**(render-mutation·effect setState·`<a>`→Link) → **CI에 lint 추가** (0 errors)
 
+### ✅ M1 — 마케팅 내장 설계 계약 (리뷰 부록 A P0)
+- **이벤트 4종 분리** (A-2): Domain=`@pacefolio/domain`(혼합 금지 명시) / Analytics·Attribution·Audit=**`@pacefolio/event-contracts`** 신설
+- **코드 강제 규칙 + 테스트 8종**: 이벤트명 검증(동적값·한글·긴숫자 거부) · **PII 가드**(이름·전화·생년·건강·금액원문·토큰 금지 — 키+값패턴) · **UTM sanitize**(allowlist·CRLF·길이·전화/이메일 거부) · 공유루프 4단계 분리(클릭≠완료) · 신뢰수준 맵(전환=server/pg) · 추적동의 5목적 분리(분석≠광고귀속≠외부광고)
+- **docs/marketing 8종** (A-18): EVENT-CATALOG(14개 초기 이벤트·보관·동의) · METRIC-REGISTRY(북극성 분자/분모=가구 기준·절감시간=추정 표기) · ATTRIBUTION(30일 window·서버 결합) · SHARE-PRIVACY(PortfolioShare·OG 파생이미지·철회) · PUBLIC-CONTENT(발행 상태머신+guard) · SEO-AEO(FAQ리치결과 종료 정정·llms.txt 🧪실험·가격 비공개) · GROWTH-SNAPSHOT(projection 분리·HealthScore 설명가능·소수표본 억제) · COPY-CHANNEL(채널별 금액 매트릭스)
+
 ## ⬜ 남은 것 (배치)
 - **B4 잔여**: 앱별 `_data.ts`→공용 fixture 전환 · 사진 자산(PhotoAsset)별 동의 검증 · `/demo`·`/stage` 프로덕션 env guard
-- **M1 — 마케팅 계약** (B4와 병행): 이벤트 4종 분리(Domain/Analytics/Attribution/Audit) · EVENT-CATALOG·METRIC-REGISTRY 등 docs/marketing 8종 · UTM allowlist · Owner 성장판·HQ 관제 mock · 공유 개인정보 계약
+- **M1 잔여(P1)**: Owner 성장판 4카드·HQ funnel/health **mock 화면** · `packages/copy` 카탈로그
 - **B5 — 인프라 골격**: Admin `apps/console-admin` 물리분리 · retention matrix(법률 검토 후 숫자) · runtime schema · domain dist build · OpenAPI lint/생성타입 CI · inbox/outbox·AuditLog 구현
 - 열린 결정: 결제 정산 방식(결제선생 모델 벤치마크) · warm↔clean 디자인 톤
 

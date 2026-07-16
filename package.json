@@ -10,7 +10,7 @@
     "build": "npm run build -w web",
     "start": "npm run start -w web",
     "lint": "npm run lint -w web",
-    "test": "npm run test -w @pacefolio/domain",
-    "typecheck": "npm run typecheck -w @pacefolio/domain"
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
   }
 }

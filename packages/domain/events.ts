@@ -2,6 +2,8 @@
    PACEFOLIO 공유 도메인 — 도메인 이벤트 봉투 (F13, 리뷰 P0-3)
    앱 간 흐름을 잇는 이벤트. 최종 기준데이터는 엔티티에 저장,
    이벤트는 상태변경 전달 수단(데이터모델 대체 아님).
+   ⚠️ 마케팅·분석·귀속·감사 이벤트를 여기에 추가하지 않는다(마케팅 리뷰 A-2)
+      → @pacefolio/event-contracts (Analytics/Attribution/Audit 분리).
    ========================================================= */
 import type { DomainEventType, Role } from "./enums";
 import type {
