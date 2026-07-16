@@ -13,8 +13,7 @@ export const viewport: Viewport = {
   themeColor: "#12b5a5",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // 접근성(리뷰 P0): 저시력 사용자 화면 확대 허용 — maximumScale/userScalable 제거
 };
 
 export default function RootLayout({

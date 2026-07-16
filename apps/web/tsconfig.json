@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@pacefolio/domain": ["../../packages/domain/index.ts"]
     }
   },
   "include": [

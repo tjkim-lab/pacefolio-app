@@ -47,8 +47,14 @@ export default function StagePage() {
           </span>
         </div>
         <div className="flex-1" />
-        <span className="hidden md:block text-[12px] text-white/45">
-          각 폰 안에서 하단탭으로 이동 · 서로 연동은 아직 없음(각자 독립 데모)
+        <a
+          href="/stage/live"
+          className="text-[12px] font-bold px-3 h-8 rounded-lg bg-emerald-400/90 text-black hover:brightness-105 transition flex items-center gap-1"
+        >
+          🔗 라이브 연결 데모
+        </a>
+        <span className="hidden lg:block text-[12px] text-white/45">
+          각 폰 안에서 하단탭으로 이동 · 3앱 병렬(독립 mock)
         </span>
         <button
           onClick={resetAll}

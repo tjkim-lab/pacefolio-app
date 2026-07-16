@@ -1,0 +1,177 @@
+openapi: 3.1.0
+info:
+  title: PACEFOLIO API (초안)
+  version: 0.1.0-draft
+  description: >
+    백엔드 착수 前 계약 초안. 도메인 모델 = lib/domain, 규칙 = docs/02~09.
+    ⚠️ 미확정 — 대표 엔드포인트만. 모든 요청은 서버가 (1)역할 능력 can()
+    (2)테넌트/소유 스코프 를 검증(docs/04). 클라 입력 role/academyId 불신.
+
+servers:
+  - url: https://api.pacefolio.example/v1
+
+security:
+  - sessionCookie: []
+
+tags:
+  - name: attendance
+  - name: billing
+  - name: linking
+
+paths:
+  /academies/{academyId}/participants:
+    get:
+      tags: [attendance]
+      summary: 학원 원생 목록 (테넌트 격리)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Participant' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /academies/{academyId}/attendance-notices:
+    post:
+      tags: [attendance]
+      summary: 보호자 결석 통보(예정) — GUARDIAN, 검증된 자녀만
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AttendanceNoticeInput' } } }
+      responses:
+        '201': { description: 생성, content: { application/json: { schema: { $ref: '#/components/schemas/AttendanceNotice' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /academies/{academyId}/attendance-records:
+    post:
+      tags: [attendance]
+      summary: 코치 실제 출결 확정 — COACH, 담당 반만 (예정과 별개 트랙)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AttendanceRecordInput' } } }
+      responses:
+        '201': { description: 확정 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /academies/{academyId}/payments:
+    post:
+      tags: [billing]
+      summary: 합산 결제 준비 — GUARDIAN. 금액은 서버 재계산, 멱등.
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PaymentInput' } } }
+      responses:
+        '201': { description: 결제 준비/승인 대기 (UI 성공 ≠ PG CAPTURED), content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /academies/{academyId}/refunds:
+    post:
+      tags: [billing]
+      summary: 환불 요청 — GUARDIAN 발의(상호승인 필요)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201': { description: 요청됨(REQUESTED). 원장 승인 전 실행 안 됨 }
+
+  /guardian-links:
+    post:
+      tags: [linking]
+      summary: 보호자-자녀 연결 — OTP + 학원 등록정보 일치 필요(이름만 불가)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LinkAttempt' } } }
+      responses:
+        '200': { description: 검증 결과(PENDING/VERIFIED/REJECTED), content: { application/json: { schema: { $ref: '#/components/schemas/LinkResult' } } } }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: pf_session
+
+  parameters:
+    AcademyId:
+      name: academyId
+      in: path
+      required: true
+      schema: { type: string }
+      description: 테넌트 격리 축. 세션 소속과 불일치 시 403.
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string }
+      description: 결제·환불·청구확정 중복 방지(리뷰 P0-5).
+
+  responses:
+    Unauthorized: { description: 미인증/세션 만료, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Forbidden: { description: 권한/테넌트 스코프 위반, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    IdempotencyConflict: { description: 동일 Idempotency-Key 재요청, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Unprocessable: { description: 검증 실패(금액 불일치 등), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, enum: [UNAUTHORIZED, FORBIDDEN, TENANT_SCOPE, NOT_FOUND, IDEMPOTENCY_CONFLICT, AMOUNT_MISMATCH, CONSENT_REQUIRED, VERIFICATION_REQUIRED] }
+        message: { type: string }
+    Participant:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        ageLabel: { type: string }
+    AttendanceNoticeInput:
+      type: object
+      required: [participantId, classSessionId, type]
+      properties:
+        participantId: { type: string }
+        classSessionId: { type: string }
+        type: { type: string, enum: [ABSENCE, LATE, EARLY_LEAVE] }
+        reason: { type: string }
+    AttendanceNotice:
+      allOf: [{ $ref: '#/components/schemas/AttendanceNoticeInput' }]
+    AttendanceRecordInput:
+      type: object
+      required: [participantId, classSessionId, status]
+      properties:
+        participantId: { type: string }
+        classSessionId: { type: string }
+        status: { type: string, enum: [PRESENT, ABSENT, LATE, EARLY_LEAVE, EXCUSED] }
+    PaymentInput:
+      type: object
+      required: [invoiceIds]
+      properties:
+        invoiceIds: { type: array, items: { type: string } }
+    Payment:
+      type: object
+      properties:
+        id: { type: string }
+        amount: { type: integer, description: 서버 계산(원) }
+        status: { type: string, enum: [PENDING, AUTHORIZED, CAPTURED, FAILED, CANCELLED, PARTIALLY_REFUNDED, REFUNDED] }
+    LinkAttempt:
+      type: object
+      required: [academyId, childName, childBirth, relationshipType]
+      properties:
+        academyId: { type: string }
+        childName: { type: string }
+        childBirth: { type: string, format: date }
+        relationshipType: { type: string, enum: [MOTHER, FATHER, GRANDPARENT, LEGAL_GUARDIAN, OTHER] }
+    LinkResult:
+      type: object
+      properties:
+        status: { type: string, enum: [PENDING, VERIFIED, REJECTED] }
+        participantId: { type: string }
+        reason: { type: string }

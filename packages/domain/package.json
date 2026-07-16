@@ -1,0 +1,9 @@
+{
+  "name": "@pacefolio/domain",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  }
+}
