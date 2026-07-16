@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
-  title: PACEFOLIO API (초안)
-  version: 0.1.0-draft
+  title: PACEFOLIO API
+  version: 0.2.0-draft
   description: >
-    백엔드 착수 前 계약 초안. 도메인 모델 = lib/domain, 규칙 = docs/02~09.
-    ⚠️ 미확정 — 대표 엔드포인트만. 모든 요청은 서버가 (1)역할 능력 can()
-    (2)테넌트/소유 스코프 를 검증(docs/04). 클라 입력 role/academyId 불신.
+    백엔드 착수 前 계약 (R2 B3b 재작성). 도메인 모델 = packages/domain, 규칙 = docs/02~09.
+    모든 요청은 서버가 (1)역할 능력 canAny() (2)테넌트/소유/담당 스코프(authorization.ts)를 검증.
+    클라이언트가 준 role·academyId·participantId·otpVerified 등은 절대 신뢰하지 않는다.
+    enum 값은 packages/domain/enums.ts 와 x-domain-enum 마커로 자동 대조된다(test/openapi-drift.test.ts).
 
 servers:
   - url: https://api.pacefolio.example/v1
@@ -14,52 +15,151 @@ security:
   - sessionCookie: []
 
 tags:
+  - name: auth
+  - name: linking
   - name: attendance
   - name: billing
-  - name: linking
+  - name: consent
+  - name: account
+  - name: admin
+  - name: webhooks
 
 paths:
-  /academies/{academyId}/participants:
-    get:
-      tags: [attendance]
-      summary: 학원 원생 목록 (테넌트 격리)
+  # ── 인증 · 세션 (리뷰 R2 P0-10 최소 계약) ─────────────────────
+  /auth/{provider}/start:
+    post:
+      tags: [auth]
+      security: []
+      summary: 소셜 로그인 시작 — 카카오(앵커)·네이버·구글·애플
       parameters:
-        - $ref: '#/components/parameters/AcademyId'
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [kakao, naver, google, apple] }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Participant' } } } } }
+        '200': { description: 'authorize URL + state', content: { application/json: { schema: { type: object, properties: { authorizeUrl: { type: string }, state: { type: string } } } } } }
+  /auth/{provider}/callback:
+    get:
+      tags: [auth]
+      security: []
+      summary: OAuth callback — 세션 발급. 신규 사용자는 약관·동의 단계로.
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string }
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '세션 쿠키 설정. body = Session', content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+  /sessions/me:
+    get:
+      tags: [auth]
+      summary: 현재 세션·소속·역할 — route guard 의 진실. 멤버십은 서버 도출.
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /sessions/refresh:
+    post:
+      tags: [auth]
+      summary: 세션 갱신
+      responses:
+        '200': { description: 갱신됨 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /sessions/logout:
+    post:
+      tags: [auth]
+      summary: 로그아웃(현재 기기)
+      responses: { '204': { description: 세션 폐기 } }
+  /sessions/logout-all:
+    post:
+      tags: [auth]
+      summary: 모든 기기 로그아웃 — 멤버십 ENDED·탈퇴 시에도 서버가 강제 호출
+      responses: { '204': { description: 전체 세션 폐기 } }
 
+  # ── 보호자-자녀 연결 (P0-5·6: OTP 주체 = 서버 증적) ─────────────
+  /otp/challenges:
+    post:
+      tags: [linking]
+      summary: 휴대전화 OTP 발송 — rate limit·재시도 횟수·잠금 정책 적용
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [phone], properties: { phone: { type: string } } } } }
+      responses:
+        '201': { description: 발송됨(challengeId), content: { application/json: { schema: { type: object, properties: { challengeId: { type: string }, expiresAt: { type: string, format: date-time } } } } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /otp/verifications:
+    post:
+      tags: [linking]
+      summary: OTP 검증 → 서버가 GuardianVerificationSession 발급(boolean 아님)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [challengeId, code], properties: { challengeId: { type: string }, code: { type: string } } } } }
+      responses:
+        '201': { description: 검증 세션, content: { application/json: { schema: { type: object, properties: { verificationSessionId: { type: string }, expiresAt: { type: string, format: date-time } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /guardian-links:
+    post:
+      tags: [linking]
+      summary: >
+        보호자-자녀 연결 — 서버 OTP 증적 + 학원 선등록 보호자 연락처(또는 초대코드) 결합.
+        이름·생년 일치만으로 자동 VERIFIED 금지(guardian-linking.ts evaluateLink 재현).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/GuardianLinkRequest' } } }
+      responses:
+        '200': { description: 검증 결과, content: { application/json: { schema: { $ref: '#/components/schemas/LinkResult' } } } }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+
+  # ── 출결 (예정 ≠ 실제) ────────────────────────────────────────
   /academies/{academyId}/attendance-notices:
     post:
       tags: [attendance]
-      summary: 보호자 결석 통보(예정) — GUARDIAN, 검증된 자녀만
+      summary: 보호자 결석/지각 통보(예정) — 검증(VERIFIED)된 자녀만
       parameters:
         - $ref: '#/components/parameters/AcademyId'
+        - $ref: '#/components/parameters/RequestId'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/AttendanceNoticeInput' } } }
       responses:
-        '201': { description: 생성, content: { application/json: { schema: { $ref: '#/components/schemas/AttendanceNotice' } } } }
+        '201': { description: 생성(전체 엔티티 — id·작성자·시각 포함), content: { application/json: { schema: { $ref: '#/components/schemas/AttendanceNotice' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
-
   /academies/{academyId}/attendance-records:
     post:
       tags: [attendance]
-      summary: 코치 실제 출결 확정 — COACH, 담당 반만 (예정과 별개 트랙)
+      summary: 코치 실제 출결 확정 — ClassAssignment(ACTIVE) 담당 반만
       parameters:
         - $ref: '#/components/parameters/AcademyId'
+        - $ref: '#/components/parameters/RequestId'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/AttendanceRecordInput' } } }
       responses:
-        '201': { description: 확정 }
+        '201': { description: 확정(전체 엔티티), content: { application/json: { schema: { $ref: '#/components/schemas/AttendanceRecord' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  # ── 청구 · 결제 · 환불 (P0-1·2·4·7) ──────────────────────────
+  /academies/{academyId}/invoices:
+    get:
+      tags: [billing]
+      summary: 청구서 목록 — 보호자는 연결 자녀분만, 원장은 학원 전체
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/PageCursor'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/InvoicePage' } } } }
   /academies/{academyId}/payments:
     post:
       tags: [billing]
-      summary: 합산 결제 준비 — GUARDIAN. 금액은 서버 재계산, 멱등.
+      summary: >
+        합산 결제 준비 — 서버가 invoiceIds 로 금액 재계산·allocation 생성.
+        같은 학원 Invoice 만 혼합 가능(canGuardianPayInvoices). 멱등 의미 = idempotency.ts:
+        같은 key+body → 기존 응답 재생(Idempotency-Replayed: true), 다른 body → 409, 처리중 → 202.
       parameters:
         - $ref: '#/components/parameters/AcademyId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -67,31 +167,150 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/PaymentInput' } } }
       responses:
-        '201': { description: 결제 준비/승인 대기 (UI 성공 ≠ PG CAPTURED), content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '201': { description: '결제 준비(UI 성공 ≠ PG CAPTURED — 완료 화면은 GET 으로 재조회)', content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '202': { description: 동일 멱등키 처리 중 — 폴링 }
         '409': { $ref: '#/components/responses/IdempotencyConflict' }
         '422': { $ref: '#/components/responses/Unprocessable' }
-
+  /academies/{academyId}/payments/{paymentId}:
+    get:
+      tags: [billing]
+      summary: 결제 상태 재조회 — 완료 URL 직접 접근 시에도 서버가 진실(P0-4)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: paymentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 'allocations + provider 상태 포함', content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
   /academies/{academyId}/refunds:
     post:
       tags: [billing]
-      summary: 환불 요청 — GUARDIAN 발의(상호승인 필요)
+      summary: 환불 요청 — 귀속은 PaymentAllocation 기준(P0-2). 상호승인 전 실행 안 됨.
       parameters:
         - $ref: '#/components/parameters/AcademyId'
         - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RefundRequest' } } }
       responses:
-        '201': { description: 요청됨(REQUESTED). 원장 승인 전 실행 안 됨 }
-
-  /guardian-links:
+        '201': { description: REQUESTED, content: { application/json: { schema: { $ref: '#/components/schemas/Refund' } } } }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /academies/{academyId}/refunds/{refundId}/approvals:
     post:
-      tags: [linking]
-      summary: 보호자-자녀 연결 — OTP + 학원 등록정보 일치 필요(이름만 불가)
+      tags: [billing]
+      summary: >
+        환불 승인 — side 는 서버가 세션 역할로 도출(요청 body 의 side 는 참고용 아님, 검증 대상).
+        동일 사용자가 양측 승인 불가(state-machines.ts canApplyRefundApproval).
       parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: refundId, in: path, required: true, schema: { type: string } }
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/LinkAttempt' } } }
+        content: { application/json: { schema: { type: object, required: [side], properties: { side: { type: string, enum: [GUARDIAN, ACADEMY] } } } } }
       responses:
-        '200': { description: 검증 결과(PENDING/VERIFIED/REJECTED), content: { application/json: { schema: { $ref: '#/components/schemas/LinkResult' } } } }
+        '200': { description: 승인 반영(양측 완료 시 MUTUALLY_APPROVED), content: { application/json: { schema: { $ref: '#/components/schemas/Refund' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 동일인 양측 승인 시도 등, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── PG 웹훅 (P0-3) ───────────────────────────────────────────
+  /webhooks/pg/{provider}:
+    post:
+      tags: [webhooks]
+      security: []
+      summary: >
+        PG 웹훅 수신 — 처리 순서: 서명검증 → (provider, providerEventId) 중복확인 →
+        raw payload inbox 저장 → webhooks.ts decidePaymentWebhook(중복/역순/재조회 판단) →
+        상태변경+outbox 를 한 트랜잭션으로. 오래된 이벤트가 최종 상태를 되돌리지 않는다.
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string } }
+        - { name: X-PG-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PgWebhookEvent' } } }
+      responses:
+        '200': { description: 수신(중복·stale 포함 — 항상 200, 내부 판단은 inbox) }
+        '401': { description: 서명 불일치 }
+
+  # ── 사진 동의 (P0-9) ─────────────────────────────────────────
+  /academies/{academyId}/participants/{participantId}/photo-consent:
+    get:
+      tags: [consent]
+      summary: 현재 동의 상태(grants) 조회
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - $ref: '#/components/parameters/ParticipantId'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PhotoConsentRecord' } } } }
+    put:
+      tags: [consent]
+      summary: 동의 갱신 — 목적×대상 grant 쌍 + 정책버전. If-Match 로 동시수정 방지.
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - $ref: '#/components/parameters/ParticipantId'
+        - { name: If-Match, in: header, required: true, schema: { type: string }, description: 리소스 ETag — 불일치 시 409 VERSION_CONFLICT }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PhotoConsentInput' } } }
+      responses:
+        '200': { description: 갱신됨, content: { application/json: { schema: { $ref: '#/components/schemas/PhotoConsentRecord' } } } }
+        '409': { description: VERSION_CONFLICT, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /academies/{academyId}/participants/{participantId}/photo-consent/revocations:
+    post:
+      tags: [consent]
+      summary: 동의 철회 — 이후 모든 발송 차단(canSendPhoto). 발송시점 재검증은 서버 의무.
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - $ref: '#/components/parameters/ParticipantId'
+      responses:
+        '201': { description: 철회 기록(revokedAt) }
+
+  # ── 계정 라이프사이클 (F14) ──────────────────────────────────
+  /me/academy-exits:
+    post:
+      tags: [account]
+      summary: 학원 나가기 — 멤버십 ENDED + 해당 학원 세션 컨텍스트 폐기
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [academyId], properties: { academyId: { type: string } } } } }
+      responses:
+        '201': { description: 처리됨 }
+  /me/deletion-requests:
+    post:
+      tags: [account]
+      summary: 계정 탈퇴 요청 — 자동결제 해지 선행. 보관정책은 docs/09 + retention matrix(법률 검토 후).
+      responses:
+        '201': { description: '접수(recoverableUntil 포함)', content: { application/json: { schema: { type: object, properties: { deletionRequestId: { type: string }, recoverableUntil: { type: string, format: date-time } } } } } }
+  /me/deletion-requests/{deletionRequestId}:
+    delete:
+      tags: [account]
+      summary: 탈퇴 요청 취소(recoverableUntil 이내)
+      parameters:
+        - { name: deletionRequestId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: 취소됨 }
+
+  # ── Admin Support View (읽기전용·만료·감사) ───────────────────
+  /admin/support-view-sessions:
+    post:
+      tags: [admin]
+      summary: >
+        Support View 세션 발급 — PLATFORM_ADMIN + MFA. ticket·사유 필수, 15분 만료,
+        target academy allowlist, 마스킹 기본, 모든 접근 감사 로그.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [targetAcademyId, supportTicketId, reason], properties: { targetAcademyId: { type: string }, supportTicketId: { type: string }, reason: { type: string } } } } }
+      responses:
+        '201': { description: '세션(expiresAt)', content: { application/json: { schema: { type: object, properties: { supportViewSessionId: { type: string }, expiresAt: { type: string, format: date-time } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/support-view-sessions/{sessionId}:
+    delete:
+      tags: [admin]
+      summary: Support View 조기 종료(revocation)
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: 종료됨 }
 
 components:
   securitySchemes:
@@ -106,72 +325,248 @@ components:
       in: path
       required: true
       schema: { type: string }
-      description: 테넌트 격리 축. 세션 소속과 불일치 시 403.
+      description: 테넌트 격리 축. 세션 소속과 불일치 시 403 TENANT_SCOPE.
+    ParticipantId:
+      name: participantId
+      in: path
+      required: true
+      schema: { type: string }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
       required: true
       schema: { type: string }
-      description: 결제·환불·청구확정 중복 방지(리뷰 P0-5).
+      description: >
+        멱등 의미(idempotency.ts): (actor, operation, key, bodyHash) 기준.
+        같은 key+body = 응답 재생 / 다른 body = 409 IDEMPOTENCY_KEY_REUSED /
+        처리중 = 202 / 보관기간 만료 후 = 신규.
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema: { type: string }
+      description: 상관관계 추적용. 없으면 서버 생성, 응답·Error.requestId 로 반환.
+    PageSize:
+      name: 'page[size]'
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    PageCursor:
+      name: 'page[cursor]'
+      in: query
+      schema: { type: string }
 
   responses:
     Unauthorized: { description: 미인증/세션 만료, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-    Forbidden: { description: 권한/테넌트 스코프 위반, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-    IdempotencyConflict: { description: 동일 Idempotency-Key 재요청, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-    Unprocessable: { description: 검증 실패(금액 불일치 등), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Forbidden: { description: 권한/테넌트/담당/연결 스코프 위반, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    NotFound: { description: 없음(타 테넌트 리소스도 404 로 응답 — 존재 노출 금지), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    IdempotencyConflict: { description: 같은 Idempotency-Key + 다른 body, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Unprocessable: { description: 검증 실패(금액 불일치·혼합결제 등), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    RateLimited: { description: 요청 한도 초과(OTP 등), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   schemas:
     Error:
       type: object
-      required: [code, message]
+      required: [code, message, requestId]
       properties:
-        code: { type: string, enum: [UNAUTHORIZED, FORBIDDEN, TENANT_SCOPE, NOT_FOUND, IDEMPOTENCY_CONFLICT, AMOUNT_MISMATCH, CONSENT_REQUIRED, VERIFICATION_REQUIRED] }
+        code: { type: string, enum: [UNAUTHORIZED, FORBIDDEN, TENANT_SCOPE, NOT_FOUND, IDEMPOTENCY_KEY_REUSED, IDEMPOTENCY_IN_PROGRESS, AMOUNT_MISMATCH, CONSENT_REQUIRED, VERIFICATION_REQUIRED, VERSION_CONFLICT, VALIDATION_FAILED, RATE_LIMITED] }
         message: { type: string }
-    Participant:
+        requestId: { type: string }
+        details: { type: array, items: { type: object, properties: { field: { type: string }, reason: { type: string } } } }
+
+    Session:
       type: object
+      required: [userId, memberships]
       properties:
-        id: { type: string }
-        name: { type: string }
-        ageLabel: { type: string }
+        userId: { type: string }
+        expiresAt: { type: string, format: date-time }
+        memberships:
+          type: array
+          description: 서버 도출 — 클라 입력 아님. 멀티역할 모델 A(roles[]).
+          items:
+            type: object
+            properties:
+              academyId: { type: string }
+              roles: { type: array, items: { type: string, x-domain-enum: ROLES, enum: [OWNER, MANAGER, COACH, DESK, DRIVER, GUARDIAN, PLATFORM_ADMIN] } }
+              status: { type: string, x-domain-enum: MEMBERSHIP_STATUS, enum: [INVITED, ACTIVE, SUSPENDED, ENDED] }
+
+    GuardianLinkRequest:
+      type: object
+      description: domain guardian-linking.ts LinkRequest 와 1:1. otpVerified boolean 없음.
+      required: [academyId, verificationSessionId, childName, childBirth, relationshipType, consentPolicyVersion, consentAgreed]
+      properties:
+        academyId: { type: string }
+        verificationSessionId: { type: string, description: /otp/verifications 가 발급한 서버 증적 }
+        childName: { type: string }
+        childBirth: { type: string, format: date }
+        relationshipType: { type: string, x-domain-enum: RELATIONSHIP_TYPE, enum: [MOTHER, FATHER, GRANDPARENT, LEGAL_GUARDIAN, OTHER] }
+        consentPolicyVersion: { type: string }
+        consentAgreed: { type: boolean }
+        academyInviteCode: { type: string, description: 선등록 연락처 불일치 시 대안 결합 근거 }
+    LinkResult:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, x-domain-enum: VERIFICATION_STATUS, enum: [UNVERIFIED, PENDING, VERIFIED, REJECTED] }
+        participantId: { type: string }
+        reason: { type: string }
+
     AttendanceNoticeInput:
       type: object
       required: [participantId, classSessionId, type]
       properties:
         participantId: { type: string }
         classSessionId: { type: string }
-        type: { type: string, enum: [ABSENCE, LATE, EARLY_LEAVE] }
+        type: { type: string, x-domain-enum: ATTENDANCE_NOTICE_TYPE, enum: [ABSENCE, LATE, EARLY_LEAVE] }
         reason: { type: string }
     AttendanceNotice:
-      allOf: [{ $ref: '#/components/schemas/AttendanceNoticeInput' }]
+      allOf:
+        - $ref: '#/components/schemas/AttendanceNoticeInput'
+        - type: object
+          required: [id, academyId, createdByGuardianId, createdAt]
+          properties:
+            id: { type: string }
+            academyId: { type: string }
+            createdByGuardianId: { type: string }
+            createdAt: { type: string, format: date-time }
     AttendanceRecordInput:
       type: object
       required: [participantId, classSessionId, status]
       properties:
         participantId: { type: string }
         classSessionId: { type: string }
-        status: { type: string, enum: [PRESENT, ABSENT, LATE, EARLY_LEAVE, EXCUSED] }
+        status: { type: string, x-domain-enum: ATTENDANCE_RECORD_STATUS, enum: [PRESENT, ABSENT, LATE, EARLY_LEAVE, EXCUSED] }
+    AttendanceRecord:
+      allOf:
+        - $ref: '#/components/schemas/AttendanceRecordInput'
+        - type: object
+          required: [id, academyId, confirmedByUserId, confirmedAt]
+          properties:
+            id: { type: string }
+            academyId: { type: string }
+            confirmedByUserId: { type: string }
+            confirmedAt: { type: string, format: date-time }
+
+    Invoice:
+      type: object
+      required: [id, academyId, participantId, status, total, netPaidAmount, outstandingAmount]
+      properties:
+        id: { type: string }
+        academyId: { type: string }
+        participantId: { type: string }
+        enrollmentId: { type: string }
+        billingPeriodId: { type: string }
+        status: { type: string, x-domain-enum: INVOICE_STATUS, enum: [DRAFT, ISSUED, PARTIALLY_PAID, PAID, OVERDUE, VOID, REFUNDED] }
+        total: { type: integer, description: KRW. = Σ lines }
+        netPaidAmount: { type: integer, description: billing.ts netPaidForInvoice — 유효결제−완료환불 }
+        outstandingAmount: { type: integer, description: total − netPaidAmount. 0 미만 불가(초과수납 차단) }
+        dueDate: { type: string, format: date }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+    InvoicePage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Invoice' } }
+        nextCursor: { type: string }
+
     PaymentInput:
       type: object
       required: [invoiceIds]
       properties:
-        invoiceIds: { type: array, items: { type: string } }
-    Payment:
+        invoiceIds:
+          type: array
+          minItems: 1
+          items: { type: string }
+          description: 같은 학원 소속 + 결제 가능(canPay) 자녀분만. 위반 시 403/422.
+        expectedAmount: { type: integer, description: 클라 표시 금액 — 서버 재계산과 불일치 시 409/422 AMOUNT_MISMATCH(구 결제창 방지) }
+    PaymentAllocation:
       type: object
+      required: [id, invoiceId, amount]
       properties:
         id: { type: string }
-        amount: { type: integer, description: 서버 계산(원) }
-        status: { type: string, enum: [PENDING, AUTHORIZED, CAPTURED, FAILED, CANCELLED, PARTIALLY_REFUNDED, REFUNDED] }
-    LinkAttempt:
-      type: object
-      required: [academyId, childName, childBirth, relationshipType]
-      properties:
-        academyId: { type: string }
-        childName: { type: string }
-        childBirth: { type: string, format: date }
-        relationshipType: { type: string, enum: [MOTHER, FATHER, GRANDPARENT, LEGAL_GUARDIAN, OTHER] }
-    LinkResult:
-      type: object
-      properties:
-        status: { type: string, enum: [PENDING, VERIFIED, REJECTED] }
+        invoiceId: { type: string }
         participantId: { type: string }
-        reason: { type: string }
+        amount: { type: integer }
+    Payment:
+      type: object
+      required: [id, academyId, amount, status, allocations]
+      properties:
+        id: { type: string }
+        academyId: { type: string }
+        guardianId: { type: string }
+        amount: { type: integer, description: 서버 계산. = Σ allocations }
+        status: { type: string, x-domain-enum: PAYMENT_STATUS, enum: [PENDING, AUTHORIZED, CAPTURED, FAILED, CANCELLED, PARTIALLY_REFUNDED, REFUNDED] }
+        allocations: { type: array, items: { $ref: '#/components/schemas/PaymentAllocation' } }
+        providerStatus: { type: string, description: PG 원문 상태(참고용 — 정본은 status) }
+        providerPaymentId: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    RefundRequest:
+      type: object
+      description: 환불 귀속 = PaymentAllocation 기준(합산결제 후 특정 원생만 환불).
+      required: [paymentId, allocations, reasonCode]
+      properties:
+        paymentId: { type: string }
+        allocations:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [paymentAllocationId, amount]
+            properties:
+              paymentAllocationId: { type: string }
+              amount: { type: integer, description: 누적 환불이 해당 allocation 결제액 초과 불가 }
+        reasonCode: { type: string }
+        reasonText: { type: string }
+    Refund:
+      type: object
+      required: [id, paymentId, status, requestedAmount]
+      properties:
+        id: { type: string }
+        academyId: { type: string }
+        paymentId: { type: string }
+        participantId: { type: string }
+        status: { type: string, x-domain-enum: REFUND_STATUS, enum: [REQUESTED, MUTUALLY_APPROVED, PROCESSING, COMPLETED, REJECTED] }
+        requestedAmount: { type: integer }
+        approvedAmount: { type: integer }
+        completedAmount: { type: integer }
+        guardianApprovedAt: { type: string, format: date-time }
+        academyApprovedAt: { type: string, format: date-time }
+        providerRefundId: { type: string }
+
+    PgWebhookEvent:
+      type: object
+      required: [providerEventId, eventType, occurredAt, data]
+      properties:
+        providerEventId: { type: string, description: (provider, providerEventId) unique — 중복 방지 축 }
+        eventType: { type: string, description: 'payment.captured / payment.failed / refund.succeeded 등' }
+        occurredAt: { type: string, format: date-time, description: PG 발생시각 — monotonic guard 기준 }
+        data: { type: object, description: 'PG 객체(providerPaymentId, amount 등). raw 는 inbox 에 보존' }
+
+    ConsentGrant:
+      type: object
+      required: [purpose, audience]
+      properties:
+        purpose: { type: string, x-domain-enum: CONSENT_PURPOSE, enum: [INDIVIDUAL_DELIVERY, CLASS_SHARE, INTERNAL_RECORD, ACADEMY_PROMOTION, EXTERNAL_AD, SNS_POST] }
+        audience: { type: string, x-domain-enum: CONSENT_AUDIENCE, enum: [GUARDIAN_ONLY, CLASS_MEMBERS, ACADEMY_INTERNAL, PUBLIC] }
+    PhotoConsentInput:
+      type: object
+      required: [policyId, policyVersion, grants]
+      properties:
+        policyId: { type: string }
+        policyVersion: { type: string }
+        grants: { type: array, items: { $ref: '#/components/schemas/ConsentGrant' }, description: 허용 조합만 — 목적/대상 독립 배열 금지(교차조합 차단) }
+        expiresAt: { type: string, format: date-time }
+    PhotoConsentRecord:
+      allOf:
+        - $ref: '#/components/schemas/PhotoConsentInput'
+        - type: object
+          required: [id, guardianId, participantId, consentedAt]
+          properties:
+            id: { type: string }
+            academyId: { type: string }
+            guardianId: { type: string }
+            participantId: { type: string }
+            consentedAt: { type: string, format: date-time }
+            channel: { type: string }
+            revokedAt: { type: string, format: date-time }
+            etag: { type: string, description: PUT If-Match 용 버전 }

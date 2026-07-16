@@ -28,9 +28,14 @@
 - **웹훅 중복·역순·재조회** (`webhooks.ts`) — 중복 무시·monotonic guard(역순 stale)·허용 안 되는 전이는 덮지 않고 RECONCILE(PG 재조회)
 - 테스트 **57/57**, typecheck 클린, 웹 빌드 정상
 
+### ✅ B3b 완료 — OpenAPI 0.2 전면 재작성 + drift 자동검증
+- **리뷰 §8 누락 endpoint 전부 추가**: auth(로그인 시작/callback/`/sessions/me`/refresh/logout/logout-all) · OTP 발급→검증세션 · 환불 요청 body+**양측 승인 endpoint**(동일인 금지) · **PG webhook**(서명·중복·역순·inbox) · 사진동의 GET/PUT(If-Match)+철회 · 학원 나가기·탈퇴·취소 · Admin Support View 발급/종료
+- **domain 계약과 1:1 정렬**: GuardianLinkRequest=`verificationSessionId`(boolean 제거) · Payment 응답에 allocations+providerStatus · Invoice 에 netPaid/outstanding · 멱등 의미(재생/409/202) 명문화 · `expectedAmount`(구 결제창 차단) · pagination·X-Request-Id·ETag·error envelope(requestId)
+- **drift 자동검증** (`test/openapi-drift.test.ts`) — 모든 enum 에 `x-domain-enum` 마커, domain enums.ts 와 값·순서 대조 + 필수 endpoint 존재 검사. 한쪽만 바뀌면 CI가 깨짐
+- 테스트 **63/63**, typecheck 클린
+
 ### 진행 예정 (헌법-safe)
-- **B3b**: OpenAPI 전면 재작성(Refund·webhook·auth·PaymentAllocation·error envelope·idempotency 헤더) + **domain↔OpenAPI enum drift 테스트**
-- **B4**: 로그인·세션·route guard 최소 계약 · 결제화면 setTimeout→PAID 제거(시뮬 격리)
+- **B4**: 로그인·세션·route guard 최소 계약(화면 흐름) · 결제화면 setTimeout→PAID 제거(시뮬 격리)
 - **B5**: Admin `apps/console-admin` 물리분리 skeleton · retention matrix(법률 검토 후 숫자 확정)
 - **M1~M4** (마케팅 트랙): 이벤트 4종 분리 · 지표 사전 · 공유 개인정보 계약 · AEO/GEO 표현 정정
 - **B4**: 로그인·세션·route guard 최소 계약 · 결제화면 setTimeout→PAID 제거(시뮬 격리)
@@ -44,7 +49,7 @@
 | F9 "payment-engine 40/40 재사용" | 🔴 해당 엔진·테스트가 이 스냅샷에 미포함 → **B1에서 정산 불변식+테스트를 이 repo 안에 직접 구현**(재현 가능) |
 | F12 사진 동의 | ✅ 목적×대상 grant + 정책버전·증적(B2) / ⬜ 자산(PhotoAsset)별 범위·발송시점 자산결합 |
 | F14 계정 라이프사이클 | 🟡 문서 / 🔴 API·guard (B4) |
-| F15 OpenAPI | ✅ 대표 초안 / 🔴 정합·핵심 endpoint (B3) |
+| F15 OpenAPI | ✅ 0.2 재작성 — 핵심 endpoint + drift 자동검증(B3b) / ⬜ 생성타입·lint CI(백엔드 착수와 병행) |
 
 ## 실행
 ```bash

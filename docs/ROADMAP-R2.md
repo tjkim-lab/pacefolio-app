@@ -27,7 +27,7 @@
 | A-P0-3 | 웹훅 중복+역순+재조회 규칙 | docs/06 원칙만, 역순 규칙 없음 | `webhooks.ts` monotonic guard + RECONCILE 결정 | ✅ **B3** |
 | A-P0-4 | 결제 화면 setTimeout→PAID 제거 | `parent/pay` useState+setTimeout+PAID | 시뮬레이션 격리 + 서버 재조회 흐름 계약 | B4 |
 | A-P0-5 | OTP 주체 ↔ 등록 보호자 결합 | `guardian-linking.ts` 이름+생년만, `otpVerified:boolean` 클라 | 검증세션ID·초대코드·GuardianContact 매칭 모델 | ✅ **B2** |
-| A-P0-6 | OpenAPI ↔ domain 정합 | LinkAttempt·Refund·webhook·auth 불일치/누락 | OpenAPI 재작성 + enum drift 테스트 | B3 |
+| A-P0-6 | OpenAPI ↔ domain 정합 | LinkAttempt·Refund·webhook·auth 불일치/누락 | OpenAPI 0.2 재작성 + `x-domain-enum` drift 테스트 | ✅ **B3b** |
 | A-P0-7 | idempotency replay 의미 | 무조건 409 가정 | (actor,op,key,bodyHash)→재생/409/IN_PROGRESS 모델 | ✅ **B2** |
 | A-P0-9 | 사진 동의 목적×대상 grant + policy 버전 | `consent.ts` 목적/대상 독립배열(교차조합 허용 버그) | grant[] 모델 + policyVersion·증적 | ✅ **B2** |
 | A-P0-10 | 로그인·세션·route guard 최소 계약 | `/`는 역할 허브(로그인 없음) | auth 흐름 계약 + guard 규칙 + 역할허브 격리 | B4 |
