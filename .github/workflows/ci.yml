@@ -25,6 +25,7 @@ jobs:
         run: npm run typecheck
       - name: Domain tests (정산 불변식·상태전이·권한 actor-binding·웹훅·멱등·동의·OpenAPI drift)
         run: npm test
+      - name: Web lint
+        run: npm run lint
       - name: Web build
         run: npm run build
-      # TODO(B4): web eslint — 목업 UI 기존 에러 5건(render-mutation 등) 정리 후 추가

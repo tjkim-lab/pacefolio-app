@@ -109,8 +109,8 @@ export default function CoachMe() {
           </Link>
         </Card>
 
-        <Link href="/" className="block py-3 text-center text-[13px] text-ink3">
-          ← 앱 허브로 돌아가기
+        <Link href="/demo" className="block py-3 text-center text-[13px] text-ink3">
+          ← 앱 허브(데모)로 돌아가기
         </Link>
       </AppScroll>
     </>

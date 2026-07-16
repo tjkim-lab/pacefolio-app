@@ -30,8 +30,13 @@ npm run typecheck && npm run build
 | ClassAssignment | 코치 담당의 정본(권한 기준), `coachUserId`는 캐시 명시 | `entities.ts` |
 | 테스트·CI | node:test+tsx **91개**, GitHub Actions(typecheck·test·build, contents:read, concurrency) | `.github/workflows/ci.yml` |
 
+### ✅ B4 (1차) — 인증 진입 + 결제 simulator 격리 + lint CI
+- **루트 = 로그인** (`/`): SSO 4종(카카오 앵커) → `/select`(약관 v1.0 동의 → 학원/역할 선택 목업). 역할 허브는 `/demo` 로 분리(리뷰어 권고 — 프로덕션 비활성 예정). guard 규칙 계약 = `docs/10-auth-route-guard.md`
+- **결제 simulator 격리** (R3 P1-6): `paySuccess` 제거 → `paymentSubmitted`(AUTHORIZED, 청구서 미변경) ≠ `paymentCaptured`(시뮬 webhook 확정). 결제 화면 "PG 시뮬레이션" 배지, 완료 화면 "승인 확인 중" 단계, **receipt 없이 완료 URL 직접 접근 시 성공 단정 금지**("결제 상태 다시 확인")
+- **web lint 에러 5건 전부 수정**(render-mutation·effect setState·`<a>`→Link) → **CI에 lint 추가** (0 errors)
+
 ## ⬜ 남은 것 (배치)
-- **B4 — 인증·UI 연결**: 로그인·세션·route guard 화면 흐름 · 결제 simulator 격리(`setTimeout→paySuccess` 명시 분리, 완료화면 서버 재조회 UX) · 앱별 `_data.ts`→공용 fixture 전환 · **web eslint 에러 5건**(render-mutation 등) 정리 후 CI에 lint 추가 · 사진 자산(PhotoAsset)별 동의 검증
+- **B4 잔여**: 앱별 `_data.ts`→공용 fixture 전환 · 사진 자산(PhotoAsset)별 동의 검증 · `/demo`·`/stage` 프로덕션 env guard
 - **M1 — 마케팅 계약** (B4와 병행): 이벤트 4종 분리(Domain/Analytics/Attribution/Audit) · EVENT-CATALOG·METRIC-REGISTRY 등 docs/marketing 8종 · UTM allowlist · Owner 성장판·HQ 관제 mock · 공유 개인정보 계약
 - **B5 — 인프라 골격**: Admin `apps/console-admin` 물리분리 · retention matrix(법률 검토 후 숫자) · runtime schema · domain dist build · OpenAPI lint/생성타입 CI · inbox/outbox·AuditLog 구현
 - 열린 결정: 결제 정산 방식(결제선생 모델 벤치마크) · warm↔clean 디자인 톤

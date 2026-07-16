@@ -5,6 +5,7 @@
    ⚠️ 서로 연동(실시간 동기화)은 아직 없음 — 각자 독립 mock. */
 
 import { useState } from "react";
+import Link from "next/link";
 
 interface Stage {
   key: string;
@@ -62,12 +63,12 @@ export default function StagePage() {
         >
           ↻ 전체 홈으로
         </button>
-        <a
-          href="/"
+        <Link
+          href="/demo"
           className="text-[12px] font-semibold px-3 h-8 rounded-lg bg-white/10 hover:bg-white/15 transition flex items-center"
         >
           허브
-        </a>
+        </Link>
       </header>
 
       {/* 스테이지 */}

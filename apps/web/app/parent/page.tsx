@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader, AppScroll } from "@/components/mobile/MobileShell";
 import { cn } from "@/components/ui";
@@ -271,7 +271,7 @@ function BannerCarousel() {
   const carRef = useRef<HTMLDivElement>(null);
   const [cur, setCur] = useState(0);
 
-  useEffect(() => { if (carRef.current) carRef.current.scrollLeft = 0; setCur(0); }, [st.academy]);
+  // 학원 전환 리셋은 사용처의 key={`bn-${st.academy}`} 리마운트로 처리 — effect 불필요
   if (!list.length) return null;
 
   const onScroll = () => {

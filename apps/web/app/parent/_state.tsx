@@ -12,7 +12,17 @@ import {
 
 export type SheetId = "noti" | "abs" | "contest" | "mk" | "auto" | "autoOff" | "child" | "acad" | null;
 
-export interface Receipt { amount: number; method: string; auto: boolean; proof: string; allPaid: boolean; names: string[]; pend: string[] }
+/* ⚠️ PG 시뮬레이션 (R3 P1-6): UI 성공 ≠ PG CAPTURED.
+   paymentSubmitted = 제출(AUTHORIZED, 청구서 미변경) → paymentCaptured = 승인 확정(PAID).
+   실서비스: 승인 확정은 webhook/PG 재조회로만 — 이 시뮬레이션은 실결제 전이 근거 아님. */
+export const PG_SIMULATION = true;
+export const PG_SIMULATION_CAPTURE_MS = 1200; // 가짜 webhook 지연
+
+export interface Receipt {
+  status: "AUTHORIZED" | "CAPTURED"; // AUTHORIZED = 승인 확인 중(완료 아님)
+  amount: number; method: string; auto: boolean; proof: string;
+  allPaid: boolean; names: ChildName[]; pend: ChildName[];
+}
 
 interface State {
   child: ChildName;
@@ -39,7 +49,8 @@ type Action =
   | { t: "clearUnread" }
   | { t: "toggleInv"; name: ChildName }
   | { t: "payMethod"; method: string }
-  | { t: "paySuccess"; names: ChildName[]; method: string }
+  | { t: "paymentSubmitted"; names: ChildName[]; method: string } // 제출 — AUTHORIZED
+  | { t: "paymentCaptured" }                                       // 승인 확정 — 시뮬 webhook
   | { t: "contestMethod"; method: string }
   | { t: "registerContest" }
   | { t: "autopay"; on: boolean }
@@ -107,19 +118,28 @@ function reducer(st: State, a: Action): State {
     }
     case "payMethod":
       return { ...st, payMethod: a.method };
-    case "paySuccess": {
-      const invStatus = { ...st.invStatus };
-      const invSel = { ...st.invSel };
-      a.names.forEach((n) => { invStatus[n] = "PAID"; invSel[n] = false; });
-      const allPaid = invStatus["도담"] === "PAID" && invStatus["서준"] === "PAID";
-      const pend = INV_NAMES.filter((n) => invStatus[n] !== "PAID");
+    case "paymentSubmitted": {
+      // 제출만 — 청구서 상태는 건드리지 않는다(UI 성공 ≠ CAPTURED)
       const amount = a.names.reduce((s, n) => s + INV_AMT[n], 0);
       const receipt: Receipt = {
+        status: "AUTHORIZED",
         amount, method: a.method, auto: st.pay[st.academy].autoPay,
         proof: a.method === "신용카드" ? "카드 매출전표 발급 ✓" : "간편결제 영수증 발급 ✓",
-        allPaid, names: a.names, pend,
+        allPaid: false, names: a.names, pend: [],
       };
-      return { ...patchPay(st, { paid: allPaid, payMethod: a.method }), invStatus, invSel, receipt };
+      return { ...st, receipt };
+    }
+    case "paymentCaptured": {
+      // 시뮬 webhook 이 승인 확정 — 이때만 청구서가 PAID 로
+      const r = st.receipt;
+      if (!r || r.status === "CAPTURED") return st;
+      const invStatus = { ...st.invStatus };
+      const invSel = { ...st.invSel };
+      r.names.forEach((n) => { invStatus[n] = "PAID"; invSel[n] = false; });
+      const allPaid = INV_NAMES.every((n) => invStatus[n] === "PAID");
+      const pend = INV_NAMES.filter((n) => invStatus[n] !== "PAID");
+      const receipt: Receipt = { ...r, status: "CAPTURED", allPaid, pend };
+      return { ...patchPay(st, { paid: allPaid, payMethod: r.method }), invStatus, invSel, receipt };
     }
     case "contestMethod":
       return patchPS(st, { contestPayMethod: a.method });

@@ -4,7 +4,7 @@
    공용 키트(components/ui) 위에서 목업의 밀도·인터랙션을 재현한다.
    색은 전부 토큰 클래스 — hex 하드코딩 없음. */
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { Card, Tag, Button, cn } from "@/components/ui";
 import { IconCheck, IconSpark } from "@/components/ui/icons";
 
@@ -190,10 +190,11 @@ export function useOverlays() {
   const [busy, setBusy] = useState(false);
   const [memo, setMemo] = useState("");
 
+  const toastTimer = useRef<number | undefined>(undefined);
   const toast = useCallback((msg: string) => {
     setToastMsg(msg);
-    window.clearTimeout((toast as unknown as { _t?: number })._t);
-    (toast as unknown as { _t?: number })._t = window.setTimeout(() => setToastMsg(null), 2000);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToastMsg(null), 2000);
   }, []);
 
   const confirm = useCallback((o: ConfirmOpts) => {

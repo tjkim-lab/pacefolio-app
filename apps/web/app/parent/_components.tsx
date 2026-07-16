@@ -306,14 +306,14 @@ function NotiSheet() {
     if (target.charAt(0) === "@") router.push(ROUTES[target.slice(1)] ?? "/parent");
     else router.push(ROUTES[target] ?? "/parent");
   };
-  let lastGroup = "";
   return (
     <SheetShell title="알림" sub="탭하면 관련 화면으로 이동해요">
       <div>
         {detail.noti.map((n, i) => {
           const [target, icon, title, sub, group] = n;
-          const showGroup = group && group !== lastGroup;
-          if (group) lastGroup = group;
+          // 앞선 항목들의 마지막 그룹과 비교 — 렌더 중 지역변수 변이 없이 그룹 헤더 판정
+          const prevGroup = detail.noti.slice(0, i).map((x) => x[4]).filter(Boolean).pop() ?? "";
+          const showGroup = group && group !== prevGroup;
           return (
             <div key={i}>
               {showGroup && <div className="text-[12px] font-extrabold text-ink3 pt-3">{group}</div>}

@@ -18,13 +18,18 @@ export default function PayPage() {
   const go = () => {
     if (processing || amt === 0) return;
     setProcessing(true);
-    const names = selNames();
-    setTimeout(() => { dispatch({ t: "paySuccess", names, method }); setProcessing(false); router.push("/parent/pay/done"); }, 900);
+    // PG 시뮬레이션: 제출(AUTHORIZED)만 기록 — 승인 확정(CAPTURED)은 완료 화면의
+    // 시뮬 webhook 이 처리. 실서비스: 결제준비 API → PG SDK → 서버 상태 재조회.
+    dispatch({ t: "paymentSubmitted", names: selNames(), method });
+    router.push("/parent/pay/done");
   };
 
   return (
     <>
       <PushHeader title="결제하기" sub={won(amt)} />
+      <div className="mx-4 mt-2 rounded-lg bg-amber-100 text-amber-800 text-[11.5px] font-bold px-3 py-1.5 text-center">
+        PG 시뮬레이션 — 실제 결제가 아니에요
+      </div>
       <AppScroll>
         <div className="space-y-2.5">
           <MethodChip label="카카오페이" pico="pay" picoBg="#FEE500" picoInk="#191600" selected={method === "카카오페이"} onSelect={() => dispatch({ t: "payMethod", method: "카카오페이" })} />

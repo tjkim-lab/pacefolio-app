@@ -1,94 +1,74 @@
-import Link from "next/link";
-import { academy } from "@/lib/mock/data";
-import {
-  IconUser,
-  IconUsers,
-  IconWhistle,
-  IconBuilding,
-  IconGrid,
-  IconChevron,
-} from "@/components/ui/icons";
+"use client";
 
-const apps = [
-  {
-    group: "모바일 앱",
-    items: [
-      { href: "/owner", emoji: "🏫", label: "원장 앱", desc: "수납·원생·수업을 손안에서", icon: IconUser, tone: "#12b5a5" },
-      { href: "/parent", emoji: "👨‍👩‍👧", label: "학부모 앱", desc: "아이 · 결제 · 알림", icon: IconUsers, tone: "#3b82f6" },
-      { href: "/coach", emoji: "🏃", label: "코치 앱", desc: "수업 · 커리큘럼 · 출결", icon: IconWhistle, tone: "#f97316" },
-    ],
-  },
-  {
-    group: "데스크톱 콘솔",
-    items: [
-      { href: "/pc", emoji: "🖥️", label: "원장 PC 콘솔", desc: "운영 관리의 중심", icon: IconBuilding, tone: "#8b5cf6" },
-      { href: "/admin", emoji: "⚙️", label: "관리자 콘솔", desc: "멀티테넌트 · 플랫폼 운영", icon: IconGrid, tone: "#0e9384" },
-    ],
-  },
+/* 로그인 (R3 P1-7 — 루트 = 인증의 출발점. 역할 허브는 /demo 로 분리)
+   ⚠️ 시뮬레이션: 실제 OAuth 미연동. 버튼 → /select (약관·학원/역할 선택 목업).
+   실서비스 흐름(docs/10-auth-route-guard.md):
+   로그인 → callback → 약관·동의 → 학원/역할 선택 → 자녀연결 → 보호 route */
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+const SSO = [
+  { key: "kakao", label: "카카오로 시작하기", bg: "#FEE500", ink: "#191600", anchor: true },
+  { key: "naver", label: "네이버", bg: "#03C75A", ink: "#fff" },
+  { key: "google", label: "Google", bg: "#fff", ink: "#1f1f1f", border: true },
+  { key: "apple", label: "Apple", bg: "#111", ink: "#fff" },
 ];
 
-export default function Hub() {
+export default function LoginPage() {
+  const router = useRouter();
+  const start = (provider: string) => {
+    // PG·OAuth 시뮬레이션 — 실서비스: POST /auth/{provider}/start → authorizeUrl 리다이렉트
+    router.push(`/select?provider=${provider}`);
+  };
+
   return (
-    <div className="min-h-screen flex flex-col items-center px-5 py-16">
-      <div className="w-full max-w-2xl">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-3xl">{academy.logoEmoji}</span>
-          <span className="text-sm font-semibold text-accent bg-accent-weak px-2.5 py-1 rounded-full">
-            PROTOTYPE
-          </span>
+    <div className="min-h-screen flex flex-col items-center justify-center px-6">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-10">
+          <div className="text-4xl mb-3">🏃</div>
+          <h1 className="text-[30px] font-extrabold tracking-tight text-ink">PACEFOLIO</h1>
+          <p className="text-ink3 mt-2 text-[14px] leading-relaxed">
+            한 걸음이, 한 페이지가 됩니다
+          </p>
         </div>
-        <h1 className="text-[34px] font-extrabold tracking-tight text-ink">
-          PACEFOLIO
-        </h1>
-        <p className="text-ink2 mt-1 text-[15px]">
-          유소년 스포츠·교육 아카데미 운영 플랫폼 · 데모({academy.name})
+
+        {/* 카카오 = 앵커 (헌법: 카카오·네이버·구글·애플) */}
+        <button
+          onClick={() => start("kakao")}
+          className="w-full rounded-2xl py-3.5 text-[15px] font-bold transition hover:brightness-95"
+          style={{ background: SSO[0].bg, color: SSO[0].ink }}
+        >
+          💬 {SSO[0].label}
+        </button>
+
+        <div className="grid grid-cols-3 gap-2 mt-2.5">
+          {SSO.slice(1).map((s) => (
+            <button
+              key={s.key}
+              onClick={() => start(s.key)}
+              className={`rounded-2xl py-3 text-[13.5px] font-bold transition hover:brightness-95 ${s.border ? "border border-line" : ""}`}
+              style={{ background: s.bg, color: s.ink }}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <p className="text-[11.5px] text-ink3 text-center mt-5 leading-relaxed">
+          로그인하면 <b className="text-ink2">이용약관·개인정보 처리방침</b>에 동의 단계로 이동해요.
+          <br />역할·학원 소속은 서버 세션에서 도출돼요 — 화면 선택은 UX일 뿐이에요.
         </p>
 
-        {apps.map((sec) => (
-          <section key={sec.group} className="mt-9">
-            <h2 className="text-[13px] font-bold text-ink3 mb-3 px-1">
-              {sec.group}
-            </h2>
-            <div className="space-y-2.5">
-              {sec.items.map((a) => {
-                const Icon = a.icon;
-                return (
-                  <Link
-                    key={a.href}
-                    href={a.href}
-                    className="group flex items-center gap-4 rounded-2xl bg-surface border border-line p-4 hover:border-accent hover:shadow-sm transition"
-                  >
-                    <div
-                      className="flex items-center justify-center w-12 h-12 rounded-2xl text-white shrink-0"
-                      style={{ background: a.tone }}
-                    >
-                      <Icon size={24} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[16px] font-bold text-ink">
-                          {a.label}
-                        </span>
-                        <span className="text-lg">{a.emoji}</span>
-                      </div>
-                      <div className="text-[13px] text-ink3 mt-0.5">{a.desc}</div>
-                    </div>
-                    <IconChevron
-                      size={20}
-                      className="text-ink3 group-hover:text-accent transition"
-                    />
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
-        ))}
-
-        <p className="text-[12px] text-ink3 mt-12 text-center leading-relaxed">
-          같은 디자인 시스템 · 같은 데이터로 5개 앱이 함께 구동됩니다.
-          <br />
-          DB 없음(mock) · 헌법 준수: 목업 확정 전 DB 착공 금지
-        </p>
+        <div className="mt-12 pt-5 border-t border-line text-center">
+          <span className="text-[11px] font-semibold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">
+            프로토타입 — OAuth·세션 시뮬레이션
+          </span>
+          <div className="mt-3 flex items-center justify-center gap-4 text-[12.5px] font-semibold">
+            <Link href="/demo" className="text-accent hover:underline">역할 허브(데모) →</Link>
+            <Link href="/stage" className="text-ink3 hover:underline">라이브 스테이지 →</Link>
+          </div>
+        </div>
       </div>
     </div>
   );
