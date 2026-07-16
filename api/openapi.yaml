@@ -525,7 +525,7 @@ components:
         academyId: { type: string }
         paymentId: { type: string }
         participantId: { type: string }
-        status: { type: string, x-domain-enum: REFUND_STATUS, enum: [REQUESTED, MUTUALLY_APPROVED, PROCESSING, COMPLETED, REJECTED] }
+        status: { type: string, x-domain-enum: REFUND_STATUS, enum: [REQUESTED, MUTUALLY_APPROVED, PROCESSING, COMPLETED, FAILED, UNKNOWN, REJECTED] }
         requestedAmount: { type: integer }
         approvedAmount: { type: integer }
         completedAmount: { type: integer }

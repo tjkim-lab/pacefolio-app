@@ -46,9 +46,10 @@ export const PAYMENT_STATUS = [
 ] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUS)[number];
 
-/* --- 환불 상태머신 (학부모+원장 상호 승인, 헌법) --- */
+/* --- 환불 상태머신 (학부모+원장 상호 승인, 헌법) ---
+   R3: FAILED(PG 확정 실패, 재시도 가능) ≠ UNKNOWN(타임아웃 등 결과 미확정 — PG 재조회로 수렴) */
 export const REFUND_STATUS = [
-  "REQUESTED", "MUTUALLY_APPROVED", "PROCESSING", "COMPLETED", "REJECTED",
+  "REQUESTED", "MUTUALLY_APPROVED", "PROCESSING", "COMPLETED", "FAILED", "UNKNOWN", "REJECTED",
 ] as const;
 export type RefundStatus = (typeof REFUND_STATUS)[number];
 

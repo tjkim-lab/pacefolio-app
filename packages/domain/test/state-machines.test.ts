@@ -46,6 +46,16 @@ test("Refund: 정상 경로 REQUESTED→MUTUALLY_APPROVED→PROCESSING→COMPLET
   assert.ok(canTransitionRefund("PROCESSING", "COMPLETED").ok);
 });
 
+test("R3: Refund FAILED(재시도 가능) ≠ UNKNOWN(미확정 — 재조회로 수렴)", () => {
+  assert.ok(canTransitionRefund("PROCESSING", "FAILED").ok);
+  assert.ok(canTransitionRefund("PROCESSING", "UNKNOWN").ok);
+  assert.ok(canTransitionRefund("FAILED", "PROCESSING").ok);      // 재시도
+  assert.ok(canTransitionRefund("UNKNOWN", "COMPLETED").ok);      // 재조회 결과 성공
+  assert.ok(canTransitionRefund("UNKNOWN", "FAILED").ok);         // 재조회 결과 실패
+  assert.equal(canTransitionRefund("FAILED", "COMPLETED").ok, false); // 재시도 없이 완료 금지
+  assert.equal(canTransitionRefund("COMPLETED", "FAILED").ok, false); // 종결 회귀 금지
+});
+
 function baseRefund(over: Partial<Refund>): Refund {
   return {
     id: asId("ref_1"), academyId: asId("aca_1"), paymentId: asId("pay_1"),

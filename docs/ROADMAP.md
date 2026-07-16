@@ -1,5 +1,7 @@
 # PACEFOLIO 로드맵 — 백엔드 착수 전 기반 고정
 
+> 📜 **Historical** (F1~F15 스프린트, 완료). 현행 계획은 [ROADMAP-R2.md](./ROADMAP-R2.md).
+
 두 외부 리뷰(2026-07-16)와 아키텍처 결정을 하나로 합친 마스터 계획.
 - [REVIEW-2026-07-16.md](./REVIEW-2026-07-16.md) — 코드 구조·데이터·권한·결제 리뷰
 - [REVIEW-2026-07-16-account.md](./REVIEW-2026-07-16-account.md) — 계정·프로필·설정 리뷰

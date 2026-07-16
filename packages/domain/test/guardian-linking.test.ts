@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import { asId } from "../ids";
 import type { Participant } from "../entities";
 import {
-  evaluateLink, normalizePhone,
+  evaluateLink, normalizePhone, isInviteUsable,
   type LinkRequest, type LinkContext, type GuardianVerificationSession,
-  type RegisteredGuardianContact,
+  type RegisteredGuardianContact, type GuardianInvite,
 } from "../guardian-linking";
 
 const ACA = asId<Participant["academyId"]>("aca_1");
@@ -57,13 +57,40 @@ test("등록 원생과 이름/생년 불일치 → REJECTED", () => {
   assert.equal(r.status, "REJECTED");
 });
 
-test("연락처 미등록이라도 유효 초대코드면 VERIFIED", () => {
-  const attackerSession: GuardianVerificationSession = { ...session, verifiedPhone: "010-9999-0000" };
+/* ── 초대코드: 학원·원생 귀속 (R3 P0-5) ── */
+const invite = (over: Partial<GuardianInvite>): GuardianInvite => ({
+  codeHash: "h_INV-OK", academyId: ACA, participantId: child.id,
+  expiresAt: "2026-07-17T00:00:00Z", maxUses: 1, usedCount: 0, ...over,
+});
+const otherSession: GuardianVerificationSession = { ...session, verifiedPhone: "010-9999-0000" };
+
+test("연락처 미등록이라도 이 원생에 귀속된 유효 초대코드면 VERIFIED", () => {
   const r = evaluateLink(
     { ...baseReq, academyInviteCode: "INV-OK" },
-    baseCtx({ session: attackerSession, registeredContacts: [], validInviteCodes: ["INV-OK"] }),
+    baseCtx({ session: otherSession, registeredContacts: [], invite: invite({}) }),
   );
   assert.equal(r.status, "VERIFIED");
+});
+
+test("R3: 다른 원생의 초대코드 → 자동 VERIFIED 금지(PENDING)", () => {
+  const r = evaluateLink(
+    { ...baseReq, academyInviteCode: "INV-OK" },
+    baseCtx({ session: otherSession, registeredContacts: [], invite: invite({ participantId: asId<Participant["id"]>("p_someone_else") }) }),
+  );
+  assert.equal(r.status, "PENDING");
+});
+
+test("R3: 만료·철회·사용소진·지정전화 불일치 초대코드 전부 무효", () => {
+  const now = "2026-07-16T00:05:00Z";
+  assert.equal(isInviteUsable(invite({ expiresAt: "2026-07-15T00:00:00Z" }), ACA, child.id, "010-9999-0000", now), false); // 만료
+  assert.equal(isInviteUsable(invite({ revokedAt: "2026-07-15T00:00:00Z" }), ACA, child.id, "010-9999-0000", now), false); // 철회
+  assert.equal(isInviteUsable(invite({ usedCount: 1 }), ACA, child.id, "010-9999-0000", now), false); // 소진
+  assert.equal(isInviteUsable(invite({ intendedPhone: "010-1111-2222" }), ACA, child.id, "010-9999-0000", now), false); // 지정전화 불일치
+  assert.ok(isInviteUsable(invite({ intendedPhone: "010-9999-0000" }), ACA, child.id, "010 9999 0000", now)); // 정규화 일치
+});
+
+test("R3: 타 학원 초대코드 무효", () => {
+  assert.equal(isInviteUsable(invite({ academyId: asId<Participant["academyId"]>("aca_other") }), ACA, child.id, "010-9999-0000", "2026-07-16T00:05:00Z"), false);
 });
 
 test("전화번호 정규화(+82 / 하이픈)", () => {

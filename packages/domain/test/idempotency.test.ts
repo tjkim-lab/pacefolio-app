@@ -11,8 +11,8 @@ const rec = (over: Partial<IdempotencyRecord>): IdempotencyRecord => ({
   ...over,
 });
 const req = (over: Partial<IncomingRequest>): IncomingRequest => ({
-  actorId: asId("u_1"), operation: "payment.prepare", idempotencyKey: "k1",
-  requestHash: "h1", nowISO: "2026-07-16T01:00:00Z", ...over,
+  actorId: asId("u_1"), academyId: asId("aca_1"), operation: "payment.prepare",
+  idempotencyKey: "k1", requestHash: "h1", nowISO: "2026-07-16T01:00:00Z", ...over,
 });
 
 test("레코드 없음 → PROCEED", () => {
@@ -35,4 +35,13 @@ test("처리 중 → IN_PROGRESS", () => {
 test("보관기간 만료 후 재사용 → PROCEED(신규 취급)", () => {
   const d = resolveIdempotency(rec({ expiresAt: "2026-07-16T00:30:00Z" }), req({ nowISO: "2026-07-16T02:00:00Z" }));
   assert.equal(d.action, "PROCEED");
+});
+
+test("R3: 같은 사용자가 다른 학원에서 같은 key 사용 → scope 충돌(별개 처리 신호)", () => {
+  const d = resolveIdempotency(rec({}), req({ academyId: asId<IncomingRequest["academyId"]>("aca_2") }));
+  assert.equal(d.action, "CONFLICT");
+});
+
+test("R3: FAILED 응답도 같은 key+body 면 재생(재실행이 이중처리 위험)", () => {
+  assert.equal(resolveIdempotency(rec({ status: "FAILED" }), req({})).action, "REPLAY");
 });

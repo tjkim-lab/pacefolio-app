@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -16,7 +23,8 @@ jobs:
       - run: npm ci
       - name: Domain typecheck
         run: npm run typecheck
-      - name: Domain tests (결제·환불 불변식 + 상태전이)
+      - name: Domain tests (정산 불변식·상태전이·권한 actor-binding·웹훅·멱등·동의·OpenAPI drift)
         run: npm test
       - name: Web build
         run: npm run build
+      # TODO(B4): web eslint — 목업 UI 기존 에러 5건(render-mutation 등) 정리 후 추가

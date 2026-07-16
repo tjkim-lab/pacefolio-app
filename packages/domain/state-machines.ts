@@ -67,9 +67,11 @@ export function canTransitionInvoice(from: InvoiceStatus, to: InvoiceStatus): Tr
 const REFUND_ALLOWED: Record<RefundStatus, readonly RefundStatus[]> = {
   REQUESTED: ["MUTUALLY_APPROVED", "REJECTED"],
   MUTUALLY_APPROVED: ["PROCESSING", "REJECTED"],
-  PROCESSING: ["COMPLETED"],  // PROCESSING→REJECTED 금지(진행 후 거절 불가)
-  COMPLETED: [],              // 종결 — COMPLETED→PROCESSING 금지
-  REJECTED: [],               // 종결 — REJECTED→PROCESSING 금지
+  PROCESSING: ["COMPLETED", "FAILED", "UNKNOWN"], // PROCESSING→REJECTED 금지(진행 후 거절 불가)
+  FAILED: ["PROCESSING"],       // PG 확정 실패 — 재시도 가능
+  UNKNOWN: ["PROCESSING", "COMPLETED", "FAILED"], // 타임아웃 등 미확정 — PG 재조회로 수렴
+  COMPLETED: [],                // 종결 — COMPLETED→PROCESSING 금지
+  REJECTED: [],                 // 종결 — REJECTED→PROCESSING 금지
 };
 export function canTransitionRefund(from: RefundStatus, to: RefundStatus): TransitionResult {
   if (from === to) return deny(`동일 상태 전이 무시: ${from}`);

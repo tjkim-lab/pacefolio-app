@@ -30,6 +30,37 @@ export interface RegisteredGuardianContact {
   relationshipType?: RelationshipType;
 }
 
+/** 초대코드 정식 모델(R3 P0-5) — 문자열 배열 금지, 학원·원생에 귀속.
+   서버는 코드 원문 대신 hash 로 저장·조회. 여기엔 해석된 invite 가 온다. */
+export interface GuardianInvite {
+  codeHash: string;
+  academyId: AcademyId;
+  participantId: ParticipantId;   // 이 원생 전용
+  intendedPhone?: string;         // 지정 시 OTP 전화와 일치해야 함
+  expiresAt: string;              // ISO
+  maxUses: number;
+  usedCount: number;
+  revokedAt?: string | null;
+}
+
+/** invite 가 (요청·후보 원생·OTP 전화) 조합에 유효한가. */
+export function isInviteUsable(
+  invite: GuardianInvite,
+  academyId: AcademyId,
+  candidateId: ParticipantId,
+  otpPhone: string,
+  nowISO: string,
+): boolean {
+  if (invite.academyId !== academyId) return false;          // 타 학원 코드
+  if (invite.participantId !== candidateId) return false;    // 타 원생 코드
+  if (invite.revokedAt) return false;                        // 철회
+  if (invite.expiresAt <= nowISO) return false;              // 만료
+  if (invite.usedCount >= invite.maxUses) return false;      // 사용 소진
+  if (invite.intendedPhone &&
+      normalizePhone(invite.intendedPhone) !== normalizePhone(otpPhone)) return false;
+  return true;
+}
+
 export interface LinkRequest {
   academyId: AcademyId;
   verificationSessionId: GuardianVerificationId; // 서버 OTP 증적(boolean 아님)
@@ -51,7 +82,7 @@ export interface LinkContext {
   session: GuardianVerificationSession | null;  // 서버 조회(없거나 만료면 무효)
   participants: readonly Participant[];         // academyId 격리 조회된 원생
   registeredContacts: readonly RegisteredGuardianContact[]; // 선등록 보호자 연락처
-  validInviteCodes?: readonly string[];         // 서버가 유효로 판단한 초대코드
+  invite?: GuardianInvite | null;               // 서버가 codeHash 로 해석한 invite(R3 P0-5)
   nowISO: string;
 }
 
@@ -88,8 +119,9 @@ export function evaluateLink(req: LinkRequest, ctx: LinkContext): LinkResult {
   if (contactMatch) {
     return { status: "VERIFIED", participantId: candidate.id };
   }
-  // 4-b) 대안 — 유효 초대코드
-  if (req.academyInviteCode && (ctx.validInviteCodes ?? []).includes(req.academyInviteCode)) {
+  // 4-b) 대안 — 학원·원생에 귀속된 초대코드(만료·철회·사용횟수·지정전화 검증)
+  if (req.academyInviteCode && ctx.invite &&
+      isInviteUsable(ctx.invite, req.academyId, candidate.id, s.verifiedPhone, ctx.nowISO)) {
     return { status: "VERIFIED", participantId: candidate.id };
   }
   // 5) 전화 주체가 등록 보호자와 결합되지 않음 → 자동 VERIFIED 금지(수동 심사 대기)
