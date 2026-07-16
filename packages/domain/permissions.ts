@@ -69,8 +69,21 @@ export function can(role: Role, cap: Capability): boolean {
   return MATRIX[role].includes(cap);
 }
 
+/** 멀티역할(모델 A): 보유 역할 중 하나라도 능력을 가지면 통과.
+   예: roles ["OWNER","COACH"] → RECORD_ATTENDANCE(코치) + MANAGE_BILLING(원장) 둘 다 가능. */
+export function canAny(roles: readonly Role[], cap: Capability): boolean {
+  return roles.some((r) => MATRIX[r].includes(cap));
+}
+
 export function capabilitiesFor(role: Role): readonly Capability[] {
   return MATRIX[role];
+}
+
+/** 보유 역할들의 능력 합집합. */
+export function capabilitiesForRoles(roles: readonly Role[]): Capability[] {
+  const set = new Set<Capability>();
+  for (const r of roles) for (const c of MATRIX[r]) set.add(c);
+  return [...set];
 }
 
 /** (2-a) 테넌트 격리: 행위자가 대상 학원에 소속됐는가.

@@ -27,11 +27,14 @@ export interface User {
   phone: string;   // 인증된 연락처
   email?: string;
 }
+/* 멀티역할 모델 A (리뷰 6.3, 2026-07-16 유저 확정):
+   사용자×학원 = membership 1건, 여러 역할은 roles 배열.
+   예: 원장이 직접 수업 → roles: ["OWNER","COACH"]. 순서의존성 없음. */
 export interface AcademyMembership {
   id: ID.AcademyMembershipId;
   userId: ID.UserId;
   academyId: ID.AcademyId;
-  role: Role;
+  roles: Role[];
   status: MembershipStatus;
   joinedAt: string;      // YYYY-MM-DD
   endedAt?: string;

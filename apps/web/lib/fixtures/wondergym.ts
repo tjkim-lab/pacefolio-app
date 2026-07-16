@@ -48,9 +48,9 @@ export const users: E.User[] = [
 ];
 
 export const memberships: E.AcademyMembership[] = [
-  { id: asId<ID.AcademyMembershipId>("m_owner"), userId: U_OWNER, academyId: ACA, role: "OWNER", status: "ACTIVE", joinedAt: "2024-03-01" },
-  { id: asId<ID.AcademyMembershipId>("m_coach"), userId: U_COACH, academyId: ACA, role: "COACH", status: "ACTIVE", joinedAt: "2024-09-01" },
-  { id: asId<ID.AcademyMembershipId>("m_guardian"), userId: U_GUARDIAN, academyId: ACA, role: "GUARDIAN", status: "ACTIVE", joinedAt: "2025-03-02" },
+  { id: asId<ID.AcademyMembershipId>("m_owner"), userId: U_OWNER, academyId: ACA, roles: ["OWNER"], status: "ACTIVE", joinedAt: "2024-03-01" },
+  { id: asId<ID.AcademyMembershipId>("m_coach"), userId: U_COACH, academyId: ACA, roles: ["COACH"], status: "ACTIVE", joinedAt: "2024-09-01" },
+  { id: asId<ID.AcademyMembershipId>("m_guardian"), userId: U_GUARDIAN, academyId: ACA, roles: ["GUARDIAN"], status: "ACTIVE", joinedAt: "2025-03-02" },
 ];
 
 /* ---- 사람 · 관계 (박서연 → 이하준·이하은 형제) ---- */

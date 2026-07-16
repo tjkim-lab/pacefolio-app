@@ -1,7 +1,7 @@
 /* =========================================================
-   PACEFOLIO 공유 도메인 — 학원 멤버십 해석 (F7)
-   한 User가 여러 학원·여러 역할 가능(코치가 두 학원 근무 등).
-   F6 테넌트 격리(inTenantScope)에 "이 사용자의 학원 집합"을 공급.
+   PACEFOLIO 공유 도메인 — 학원 멤버십 해석 (F7, 리뷰 R2 6.3)
+   멀티역할 모델 A: 사용자×학원 = 1 membership, roles: Role[].
+   한 User가 여러 학원 소속 가능 + 한 학원에서 여러 역할 가능.
    순수 함수 — 데이터를 인자로 받는다(fixture 비의존).
    ========================================================= */
 import type { AcademyMembership } from "./entities";
@@ -27,16 +27,27 @@ export function academyIdsForUser(
     .map((m) => m.academyId);
 }
 
-/** 특정 학원에서의 역할(ACTIVE). 소속 아니면 null → 접근 차단 신호. */
-export function roleInAcademy(
+/** 특정 학원에서의 역할 집합(ACTIVE). 소속 아니면 [] → 접근 차단 신호.
+   모델 A: 한 membership 의 roles 를 그대로 반환(순서의존 없음). */
+export function rolesInAcademy(
   all: readonly AcademyMembership[],
   userId: UserId,
   academyId: AcademyId,
-): Role | null {
+): Role[] {
   const m = all.find(
     (x) => x.userId === userId && x.academyId === academyId && x.status === "ACTIVE",
   );
-  return m ? m.role : null;
+  return m ? [...m.roles] : [];
+}
+
+/** 특정 학원에서 해당 역할을 가지는가. */
+export function hasRoleInAcademy(
+  all: readonly AcademyMembership[],
+  userId: UserId,
+  academyId: AcademyId,
+  role: Role,
+): boolean {
+  return rolesInAcademy(all, userId, academyId).includes(role);
 }
 
 /** 여러 학원 소속 여부 — "학원 전환" UI 필요 판단(리뷰#2 P1-1) */
