@@ -6,7 +6,7 @@
 import type * as ID from "./ids";
 import type {
   Role, MembershipStatus, Division, AttendanceNoticeType, AttendanceRecordStatus,
-  InvoiceStatus, PaymentStatus, WorkflowStage, ActionResult, RelationshipType,
+  InvoiceStatus, PaymentStatus, RefundStatus, WorkflowStage, ActionResult, RelationshipType,
   VerificationStatus, BillingCycleMonths,
 } from "./enums";
 
@@ -161,6 +161,41 @@ export interface PaymentAllocation { // 결제 → 원생별 배분
   id: ID.PaymentAllocationId;
   paymentId: ID.PaymentId;
   invoiceId: ID.InvoiceId;
+  amount: number;
+}
+
+/* 환불 (리뷰 R2 P0-2). 합산결제 후 특정 원생만 환불 가능 → 귀속은 PaymentAllocation 기준.
+   헌법: 학부모+원장 상호 승인 필수 → 양측 승인 필드 분리(동일인 양측 승인 금지는 state-machine에서). */
+export interface Refund {
+  id: ID.RefundId;
+  academyId: ID.AcademyId;
+  paymentId: ID.PaymentId;
+  participantId: ID.ParticipantId;
+  status: RefundStatus;
+  reasonCode: string;
+  reasonText?: string;
+  requestedAmount: number;
+  approvedAmount?: number;
+  completedAmount?: number;
+  requestedByUserId: ID.UserId;
+  requestedAt: string;
+  guardianApprovedByUserId?: ID.UserId;   // 상호 승인 — 보호자 측
+  guardianApprovedAt?: string;
+  academyApprovedByUserId?: ID.UserId;     // 상호 승인 — 원장 측
+  academyApprovedAt?: string;
+  idempotencyKey: string;
+  providerRefundId?: string;               // PG 환불 ID
+  processingStartedAt?: string;
+  completedAt?: string;
+  failedAt?: string;
+  failureCode?: string;
+}
+export interface RefundAllocation { // 환불 → 특정 PaymentAllocation 에 귀속(원생별 부분환불)
+  id: ID.RefundAllocationId;
+  refundId: ID.RefundId;
+  paymentAllocationId: ID.PaymentAllocationId;
+  invoiceId: ID.InvoiceId;
+  participantId: ID.ParticipantId;
   amount: number;
 }
 

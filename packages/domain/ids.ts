@@ -45,6 +45,8 @@ export type InvoiceLineId = Brand<string, "InvoiceLineId">;    // 수강료·차
 export type PaymentId = Brand<string, "PaymentId">;           // 보호자 합산 결제 1건
 export type PaymentAllocationId = Brand<string, "PaymentAllocationId">; // 결제→원생별 배분
 export type RefundId = Brand<string, "RefundId">;
+export type RefundAllocationId = Brand<string, "RefundAllocationId">; // 환불→PaymentAllocation 기준 귀속
+export type IdempotencyRecordId = Brand<string, "IdempotencyRecordId">; // 멱등 재시도 레코드
 
 /* --- 동의 · 개인정보 (리뷰 P0-7, 4-1) --- */
 export type ConsentPolicyId = Brand<string, "ConsentPolicyId">;

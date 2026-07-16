@@ -1,63 +1,46 @@
-# PACEFOLIO — 진행 현황 (2026-07-16)
+# PACEFOLIO — 진행 현황 (2026-07-16, R2 반영중)
 
-> 유소년 스포츠·교육 아카데미 운영 플랫폼. 원더짐 = 고객 0번(내부 검증 → 시장 확장), 멀티테넌트 day 1.
-> **헌법: 목업 확정 전 DB 착공 금지.** 현재 = 백엔드 착공 前 기반 고정 단계.
+> 유소년 스포츠·교육 아카데미 운영 플랫폼. 원더짐 = 고객 0번, 멀티테넌트 day 1.
+> **헌법: 목업 확정 전 DB 착공 금지.** 현재 = 백엔드 착공 前 **계약 닫기 스프린트**.
 
 ## 한 줄
-정적 목업 → **실제 구동되는 프론트(Next.js)** 로 전환 + 백엔드 착공 前 **공유 도메인 코어(F1~F15)** 고정 + **모노레포 승격**. DB는 아직 안 팜.
+2차 리뷰 결론(= 헌법과 동일): **"화면 그만 그리고, 이미 정한 규칙을 타입·상태전이·테스트로 끝까지 닫아라."** → 그 스프린트 진행 중. DB 아직 안 팜.
 
----
+## 2차 리뷰 대응 (상세: `docs/ROADMAP-R2.md` · `docs/REVIEW-2026-07-16-R2.md`)
+리뷰어 판정: 백엔드 본 착수 **보류**, 백엔드 준비도 4.5→6.2. P0를 실행 가능한 계약+테스트로 닫으면 8점대.
 
-## 이번 라운드에 무엇이 바뀌었나 (← 지난 리뷰 대비)
+### ✅ B1 완료 — 결제·환불 정합 + 테스트/CI 골격 (리뷰 최대 위험)
+- **Refund·RefundAllocation 엔티티** 신설 (`packages/domain/entities.ts`) — allocation 기준 귀속, 상호승인 필드
+- **정산 불변식** (`packages/domain/billing.ts`) — 유효 납부액 = CAPTURED/PARTIALLY_REFUNDED 결제 − COMPLETED 환불. 초과수납·과다환불·합계불일치 탐지
+- **실행 가능한 상태머신** (`packages/domain/state-machines.ts`) — Invoice/Payment/Refund 전이 guard + 상호승인(동일인 양측 금지). 부정 전이를 테스트로 고정
+- **테스트 러너 + CI** — `npm test`(node:test+tsx) **18/18 통과**, `npm run typecheck` 클린, GitHub Actions `.github/workflows/ci.yml`(typecheck·test·build)
 
-지난 외부 코드리뷰 2건(커밋 `539b818` 기준)의 결론은 **"화면 더 그리지 말고, 데이터·상태·권한·결제의 기준점부터 고정하라"** 였다. 그에 답해 착공 前 기반 **F1~F15**를 만들고 구조를 모노레포로 승격했다.
+### 진행 예정 (헌법-safe, 배치별)
+- **B2**: OTP 주체↔등록보호자 결합 · 사진동의 목적×대상 grant+정책버전 · idempotency replay · 웹훅 역순 규칙 · 멀티역할 정책 확정(★유저)
+- **B3**: OpenAPI 전면 재작성 + domain drift 테스트 · 권한 정책함수+부정테스트 12종 · ClassAssignment 정본화
+- **B4**: 로그인·세션·route guard 최소 계약 · 결제화면 setTimeout→PAID 제거(시뮬 격리)
+- **B5**: Admin `apps/console-admin` 물리분리 skeleton · retention matrix(법률 검토 후 숫자 확정)
+- **M1~M4** (마케팅 트랙): 이벤트 4종 분리 · 지표 사전 · 공유 개인정보 계약 · AEO/GEO 표현 정정
 
-### 구조 변화
-| | 이전 (리뷰 시점 `539b818`) | 지금 |
-|---|---|---|
-| 구조 | 플랫 단일 패키지 | **모노레포** (`apps/web` + `packages/domain`) |
-| 공유 도메인 코어 | 없음 (앱별 `_data.ts` 제각각) | `@pacefolio/domain` 9모듈 |
-| 설계 문서 | 없음 | `docs/02~09` + OpenAPI 초안 |
+## 이전 F1~F15 상태 정정 (리뷰어 지적 반영 — 증거 기준)
+| | 정정된 상태 |
+|---|---|
+| F6 권한 "검증 7/7" | 🟡 규칙·매트릭스 정의 / ⬜ 서버 enforcement / 🟡 부정테스트(B3에서 12종) |
+| F9 "payment-engine 40/40 재사용" | 🔴 해당 엔진·테스트가 이 스냅샷에 미포함 → **B1에서 정산 불변식+테스트를 이 repo 안에 직접 구현**(재현 가능) |
+| F12 사진 동의 | 🟡 순수 검증함수 / ⬜ 정책버전·grant·자산귀속 (B2) |
+| F14 계정 라이프사이클 | 🟡 문서 / 🔴 API·guard (B4) |
+| F15 OpenAPI | ✅ 대표 초안 / 🔴 정합·핵심 endpoint (B3) |
 
-### F1~F15 — 착공 前 기반 (완료)
-| # | 항목 | 산출물 | 상태 |
-|---|------|--------|------|
-| F1·F2 | branded ID · 핵심 enum/상태값 | `packages/domain/ids.ts`·`enums.ts` | ✅ |
-| F3·F4 | 엔티티 모델 · 상태머신 문서 | `docs/02`·`docs/03` | ✅ |
-| F5 | 공용 fixture(단일 데이터원천) | `apps/web/lib/fixtures/` | 🟡 앱별 `_data` 교체 잔여 |
-| F6 | 권한 매트릭스 · 멀티테넌트 격리 | `permissions.ts` + `docs/04` (검증 7/7) | ✅ |
-| F7·F8 | 학원 멤버십 · 보호자-자녀 OTP 연결 | `membership.ts`·`guardian-linking.ts` + `docs/05` | ✅ |
-| F9 | 청구·결제·환불 정합 | `docs/06` (기존 payment-engine 40/40 재사용) | ✅ |
-| F10 | 수납기간 표기 통일 (YYYY-MM-DD) | `BillingPeriod` 모델 | 🟡 UI 문구 정리 잔여 |
-| F11~F13 | 알림·이벤트·동의 카탈로그 | `notifications/events/consent.ts` + `docs/07·08` | ✅ |
-| F14 | 계정 라이프사이클(탈퇴 보관정책) | `docs/09` | ✅ |
-| F15 | OpenAPI 초안 + 오류코드 | `api/openapi.yaml` | ✅ |
-
----
-
-## 리뷰어에게 받고 싶은 피드백
-1. **도메인 모델** — 엔티티 계층·상태머신·권한표가 실서비스 계약으로 충분한가 (`docs/02·03·04`, `packages/domain/`)
-2. **결제/환불 정합** — 회차 일할·합산결제 원생별 배분·멱등/webhook 규칙 (`docs/06`)
-3. **배포 아키텍처 B** — 공유 코어 + 관리자(admin) 물리 분리 방향 동의 여부 (`docs/ROADMAP.md`)
-4. **개인정보·동의·계정** — 사진 동의 버전/철회, 탈퇴 보관정책 수준 (`docs/08·09`)
-
-## 실행 방법
+## 실행
 ```bash
-npm install          # 루트에서 (npm workspaces)
-npm run dev          # → http://localhost:3000
-npm run build        # 프로덕션 빌드
+npm install
+npm test         # 도메인 불변식·상태전이 18/18
+npm run build    # → http://localhost:3000 (npm run dev)
 ```
-주요 화면: `/parent` `/coach` `/owner` `/pc` `/admin`, 그리고 4개 앱을 한 데이터로 잇는 라이브 데모 `/stage` · `/stage/live`.
-
-## 아직 안 된 것 (정직하게)
-- 🟡 앱별 `_data.ts` → 공유 fixture 완전 교체 (F5 잔여)
-- 🟡 UI "분기" 문구 정리 (F10 잔여, 디자인 소관)
-- ⬜ 모노레포 stage 2: 관리자 물리 분리(`apps/console-admin`)
-- ⬜ 코치 "편집권한 시연 토글" 제거 (실서비스 노출 금지)
-- ⬜ 디자인 톤 warm↔clean 최종 확정 (별도 디자인 트랙)
+주요 화면: `/parent` `/coach` `/owner` `/pc` `/admin` · 라이브 데모 `/stage/live`
 
 ## 스택
-Next.js 16.2.10 · React 19.2.4 · TypeScript · Tailwind v4 · npm workspaces
+Next.js 16.2.10 · React 19.2.4 · TypeScript · Tailwind v4 · npm workspaces · node:test + tsx
 
 ---
-_이 문서는 검토용 스냅샷입니다. 세부 결정·이력은 `docs/` 및 각 모듈 주석 참고._
+_검토용 스냅샷. 완료 표기는 저장소 증거(테스트·타입) 기준으로만 ✅ 표기._
