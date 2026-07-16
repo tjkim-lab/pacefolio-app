@@ -49,17 +49,25 @@
 전달 — `isInviteUsable` 이 조회된 invite 의 `codeHash` 와 직접 대조한다.
 "임의 코드 + 관계없는 유효 invite → VERIFIED" 경로 차단.
 
+**사용 횟수 정본 = `GuardianInviteRedemption` COUNT** (R5 §3.4 확정):
+`actualUses = COUNT(GuardianInviteRedemption WHERE inviteId)`.
+`GuardianInvite.usedCount` 는 조회용 캐시/집계 컬럼일 뿐 — 권한 판단에
+단독 사용 금지(stale value 위험).
+
 **redemption 트랜잭션** — 하나의 DB 트랜잭션(§6.2, `guardian-linking.ts` 주석과 동일):
 ```
 1. Invite row lock(또는 optimistic version)
 2. revokedAt 확인            3. expiresAt 확인
-4. usedCount < maxUses       5. redemption 중복 확인
+4. actualUses = COUNT(Redemption) < maxUses 확인
+5. redemption 중복 확인
 6. GuardianLink 생성         7. GuardianVerification 기록
-8. GuardianInviteRedemption 생성(가변 usedCount 단독 증가 금지)
+8. GuardianInviteRedemption 생성(정본) + usedCount 캐시 갱신
 9. AuditLog                 10. DomainEvent/Outbox
 ```
 DB 제약: `UNIQUE(inviteId, guardianId, participantId)`.
 단일 사용 초대는 invite 단위 조건부 unique 추가.
+동시성 완료 기준(R5 Phase 4): single-use invite 동시 20요청 → 정확히 1개 성공 /
+maxUses=3 에 20요청 → 정확히 3개 성공 / 동일 OTP 세션 20요청 → 1개 성공.
 
 ## D. OTP 검증 세션 (§7)
 

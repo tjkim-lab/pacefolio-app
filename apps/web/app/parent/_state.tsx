@@ -18,9 +18,13 @@ export type SheetId = "noti" | "abs" | "contest" | "mk" | "auto" | "autoOff" | "
    R4 §15: 프로덕션 빌드에서 강제 false(상수 활성 금지) — dev 이거나
    검토 프리뷰 플래그(빌드 시점 env)일 때만 시뮬레이터 동작. 실결제 화면은
    서버 payment ID polling + webhook 결과만 신뢰하는 경로로 대체 예정. */
-export const PG_SIMULATION =
-  process.env.NODE_ENV !== "production" ||
-  process.env.NEXT_PUBLIC_PACEFOLIO_PG_SIMULATION === "1";
+export function pgSimulationEnabled(
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+  previewFlag: string | undefined = process.env.NEXT_PUBLIC_PACEFOLIO_PG_SIMULATION,
+): boolean {
+  return nodeEnv !== "production" || previewFlag === "1";
+}
+export const PG_SIMULATION = pgSimulationEnabled();
 export const PG_SIMULATION_CAPTURE_MS = 1200; // 가짜 webhook 지연
 
 export interface Receipt {
@@ -64,7 +68,8 @@ type Action =
 
 const INV_NAMES: ChildName[] = ["도담", "서준"];
 
-function init(): State {
+// export = 시뮬레이터 게이트 차단 테스트용
+export function init(): State {
   return {
     child: "도담", academy: "원더짐 아카데미",
     ps: initialPS(), pay: initialPay(),
@@ -83,7 +88,8 @@ function patchPay(st: State, patch: Partial<PayState>): State {
 }
 const isPaidIn = (st: State, n: ChildName) => st.invStatus[n] === "PAID";
 
-function reducer(st: State, a: Action): State {
+// export = 시뮬레이터 게이트 차단 테스트용(test/pg-simulation.test.ts)
+export function reducer(st: State, a: Action): State {
   const key = pkeyOf(st.child, st.academy);
   const cur = st.ps[key];
   switch (a.t) {
@@ -124,6 +130,9 @@ function reducer(st: State, a: Action): State {
     case "payMethod":
       return { ...st, payMethod: a.method };
     case "paymentSubmitted": {
+      // R5 P0: mock 결제 전이는 시뮬레이터 게이트 안에서만 — 프로덕션에서
+      // 이 action 이 dispatch 되어도 상태 불변(어떤 화면 경로로도 mock 결제 불가)
+      if (!pgSimulationEnabled()) return st;
       // 제출만 — 청구서 상태는 건드리지 않는다(UI 성공 ≠ CAPTURED)
       const amount = a.names.reduce((s, n) => s + INV_AMT[n], 0);
       const receipt: Receipt = {
@@ -135,6 +144,8 @@ function reducer(st: State, a: Action): State {
       return { ...st, receipt };
     }
     case "paymentCaptured": {
+      // R5 P0: mock CAPTURED 전이도 게이트 — 실서비스는 webhook/재조회만 정본
+      if (!pgSimulationEnabled()) return st;
       // 시뮬 webhook 이 승인 확정 — 이때만 청구서가 PAID 로
       const r = st.receipt;
       if (!r || r.status === "CAPTURED") return st;

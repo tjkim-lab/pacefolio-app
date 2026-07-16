@@ -77,7 +77,12 @@ test("Support View: 만료시각 파싱 불가 세션은 사용 불가(fail-clos
     memberships: [], verifiedLinks: [], assignments: [],
     supportViewSession: {
       id: asId("svs_1"), adminUserId: asId("u_admin"), targetAcademyId: asId("aca_1"),
-      supportTicketId: asId("st_1"), reasonCode: "CS", expiresAt: "not-a-date",
+      supportTicketId: asId("st_1"), allowedResources: ["BILLING_SUMMARY"],
+      reasonCode: "CS", expiresAt: "not-a-date",
+    },
+    supportTicket: {
+      id: asId("st_1"), targetAcademyId: asId("aca_1"),
+      assigneeAdminUserId: asId("u_admin"), status: "IN_PROGRESS",
     },
     mfaVerifiedAt: "2026-07-16T00:00:00Z",
     nowISO: "2026-07-16T00:05:00Z",

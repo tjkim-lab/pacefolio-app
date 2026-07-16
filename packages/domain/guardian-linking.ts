@@ -50,6 +50,8 @@ export interface GuardianInvite {
   intendedPhone?: string;         // 지정 시 OTP 전화와 일치해야 함
   expiresAt: string;              // ISO
   maxUses: number;
+  /** ⚠️ 조회용 캐시 — 정본은 GuardianInviteRedemption COUNT (R5 §3.4).
+     서버는 redemption 트랜잭션 안에서 COUNT 로 재검증한다. */
   usedCount: number;
   revokedAt?: string | null;
 }
@@ -77,16 +79,22 @@ export function isInviteUsable(
   return true;
 }
 
-/* ── 원자적 redemption 계약 (R4 P0-5) ──
+/* ── 원자적 redemption 계약 (R4 P0-5 · R5 정본 확정) ──
+   ⚖️ 사용 횟수의 정본 = GuardianInviteRedemption 행 COUNT (R5 §3.4 확정).
+      GuardianInvite.usedCount 는 정본이 아니라 조회용 캐시/집계 컬럼 —
+      권한 판단에 usedCount 단독 사용 금지(stale value 위험).
    초대코드 소비는 DB 에서 하나의 트랜잭션이어야 한다:
      1. Invite row lock(또는 optimistic version 확인)
      2. revokedAt 확인          3. expiresAt 확인
-     4. usedCount < maxUses     5. redemption 중복 확인
+     4. actualUses = COUNT(Redemption) < maxUses 확인
+     5. redemption 중복 확인
      6. GuardianLink 생성       7. GuardianVerification 기록
-     8. Redemption 생성(가변 usedCount 단독 증가보다 안전)
+     8. Redemption 생성(정본) + usedCount 캐시 갱신
      9. AuditLog               10. DomainEvent/Outbox
    DB 제약: UNIQUE(inviteId, guardianId, participantId).
-   단일 사용 초대는 invite 단위 조건부 unique 추가. */
+   단일 사용 초대는 invite 단위 조건부 unique 추가.
+   동시성 완료 기준(R5 Phase 4): 동일 single-use invite 동시 20요청 → 정확히
+   1개 성공 / maxUses=3 에 20요청 → 정확히 3개 성공. */
 export interface GuardianInviteRedemption {
   id: GuardianInviteRedemptionId;
   inviteCodeHash: string;               // 소비된 invite (hash 로 식별)

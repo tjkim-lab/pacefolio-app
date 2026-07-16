@@ -12,7 +12,8 @@ import {
   canGuardianViewSchedule, canGuardianViewAttendance, canGuardianViewHealthInfo,
   canGuardianReceivePhoto, canGuardianPayInvoices,
   canCoachRecordAttendance, canCoachViewHealthInfo, canAdminUseSupportSession,
-  type AuthorizationContext, type SupportViewSession,
+  type AuthorizationContext, type SupportViewSession, type SupportTicketRef,
+  canSupportViewResource,
 } from "../authorization";
 
 const ACA = asId<AcademyMembership["academyId"]>("aca_1");
@@ -144,18 +145,26 @@ test("코치 결제금액 조회 불가 / 원장 플랫폼 관리 불가", () =>
   assert.equal(canAny(["OWNER"], "MANAGE_PLATFORM"), false);
 });
 
-/* ── Support View (R3 P0-3) ── */
+/* ── Support View (R3 P0-3 · R4 §10) ── */
 function svSession(over: Partial<SupportViewSession>): SupportViewSession {
   return {
     id: asId("svs_1"), adminUserId: U_ADMIN, targetAcademyId: ACA,
     supportTicketId: asId("tik_1"), reasonCode: "CS_BILLING",
+    allowedResources: ["BILLING_SUMMARY", "PAYMENT_STATUS"],
     expiresAt: "2026-07-16T12:15:00Z", ...over,
+  };
+}
+function svTicket(over: Partial<SupportTicketRef>): SupportTicketRef {
+  return {
+    id: asId("tik_1"), targetAcademyId: ACA, assigneeAdminUserId: U_ADMIN,
+    status: "IN_PROGRESS", ...over,
   };
 }
 const adminCtx = (over: Partial<AuthorizationContext>): AuthorizationContext => ({
   actorUserId: U_ADMIN, actorPlatformRoles: ["PLATFORM_ADMIN"],
   memberships: [], verifiedLinks: [], assignments: [],
-  supportViewSession: svSession({}), mfaVerifiedAt: "2026-07-16T11:50:00Z",
+  supportViewSession: svSession({}), supportTicket: svTicket({}),
+  mfaVerifiedAt: "2026-07-16T11:50:00Z",
   nowISO: NOW, ...over,
 });
 test("Support View 정상: 관리자+MFA+본인세션+티켓 → 허용", () => {
@@ -180,4 +189,25 @@ test("R3: 철회된 세션 차단", () => {
 test("세션 만료·타학원 차단", () => {
   assert.equal(canAdminUseSupportSession(adminCtx({ nowISO: "2026-07-16T12:30:00Z", mfaVerifiedAt: "2026-07-16T12:20:00Z" }), ACA), false); // 만료
   assert.equal(canAdminUseSupportSession(adminCtx({}), ACB), false); // 타학원
+});
+
+/* ── R4 §10: 티켓 실검증 + 리소스 allowlist ── */
+test("R4: 티켓 미조회·CLOSED·다른 티켓·타담당·타학원 티켓 전부 차단", () => {
+  assert.equal(canAdminUseSupportSession(adminCtx({ supportTicket: null }), ACA), false);
+  assert.equal(canAdminUseSupportSession(adminCtx({ supportTicket: svTicket({ status: "CLOSED" }) }), ACA), false);
+  assert.equal(canAdminUseSupportSession(adminCtx({ supportTicket: svTicket({ status: "OPEN" }) }), ACA), false); // 승인 전
+  assert.equal(canAdminUseSupportSession(adminCtx({ supportTicket: svTicket({ id: asId<SupportTicketRef["id"]>("tik_other") }) }), ACA), false); // 세션과 다른 티켓
+  assert.equal(canAdminUseSupportSession(adminCtx({ supportTicket: svTicket({ assigneeAdminUserId: asId<AcademyMembership["userId"]>("u_other_admin") }) }), ACA), false);
+  assert.equal(canAdminUseSupportSession(adminCtx({ supportTicket: svTicket({ targetAcademyId: ACB }) }), ACA), false);
+  assert.equal(canAdminUseSupportSession(adminCtx({ supportTicket: svTicket({ revokedAt: "2026-07-16T11:59:00Z" }) }), ACA), false);
+});
+
+test("R4: 리소스 allowlist — 세션 유효해도 목록 밖 리소스는 차단", () => {
+  const ctx = adminCtx({}); // allowedResources = BILLING_SUMMARY, PAYMENT_STATUS
+  assert.ok(canSupportViewResource(ctx, ACA, "BILLING_SUMMARY"));
+  assert.ok(canSupportViewResource(ctx, ACA, "PAYMENT_STATUS"));
+  assert.equal(canSupportViewResource(ctx, ACA, "USER_PROFILE_MASKED"), false); // 목록 밖
+  assert.equal(canSupportViewResource(ctx, ACA, "AUDIT_TIMELINE"), false);
+  // 세션이 무효면 목록 안 리소스도 불가
+  assert.equal(canSupportViewResource(adminCtx({ supportTicket: null }), ACA, "BILLING_SUMMARY"), false);
 });

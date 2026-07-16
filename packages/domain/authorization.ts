@@ -22,12 +22,37 @@ import { canAny } from "./permissions";
 import { academyIdsForUser, rolesInAcademy } from "./membership";
 import { withinActiveWindow, credentialExpired, ageMsOrNull } from "./time";
 
-/** Support View 세션 (R3 P0-3 — 최소 필드 확장) */
+/* ── Support View 리소스 allowlist (R4 §10) ──
+   세션이 있어도 학원 데이터 전체 접근 불가 — 읽기 전용 요약 리소스만.
+   기본 금지(리소스로 정의하지 않음): 결제 실행 · 환불 승인 · 동의 수정 ·
+   원생 정보 수정 · 계정 삭제 · 원문 건강정보 · 전체 전화번호 · 사진 원본 ·
+   대량 export. 쓰기 작업은 Support View 로 절대 불가. */
+export const SUPPORT_VIEW_RESOURCES = [
+  "BILLING_SUMMARY",      // 수납 요약(개별 금액 아님)
+  "ATTENDANCE_SUMMARY",   // 출결 요약
+  "USER_PROFILE_MASKED",  // 마스킹된 프로필
+  "PAYMENT_STATUS",       // 결제 상태(실행 불가)
+  "AUDIT_TIMELINE",       // 감사 타임라인
+] as const;
+export type SupportViewResource = (typeof SUPPORT_VIEW_RESOURCES)[number];
+
+/** 세션 발급의 근거 티켓 — 발급·사용 시 서버가 함께 검증(R4 §10). */
+export interface SupportTicketRef {
+  id: SupportTicketId;
+  targetAcademyId: AcademyId;
+  assigneeAdminUserId: UserId;
+  status: "OPEN" | "APPROVED" | "IN_PROGRESS" | "CLOSED";
+  revokedAt?: string | null;
+  closedAt?: string | null;
+}
+
+/** Support View 세션 (R3 P0-3 — 최소 필드 확장 · R4 §10 allowlist) */
 export interface SupportViewSession {
   id: SupportViewSessionId;
   adminUserId: UserId;          // 세션 발급받은 관리자 — actor 와 일치해야 함
   targetAcademyId: AcademyId;
   supportTicketId: SupportTicketId; // 승인된 티켓 없이 발급 불가
+  allowedResources: readonly SupportViewResource[]; // 발급 시 티켓 범위로 고정
   reasonCode: string;
   expiresAt: string;            // ISO
   revokedAt?: string | null;
@@ -45,6 +70,7 @@ export interface AuthorizationContext {
   verifiedLinks: readonly GuardianParticipantLink[];  // 보호자-자녀 링크(전체가 와도 안전해야 함)
   assignments: readonly ClassAssignment[];            // 코치 배정(전체가 와도 안전해야 함)
   supportViewSession?: SupportViewSession | null;
+  supportTicket?: SupportTicketRef | null;            // 세션의 근거 티켓(서버 조회) — R4 §10
   mfaVerifiedAt?: string | null;                      // 마지막 MFA 성공 시각(ISO)
   nowISO: string;
 }
@@ -198,5 +224,24 @@ export function canAdminUseSupportSession(ctx: AuthorizationContext, targetAcade
   if (!s.supportTicketId) return false;
   if (s.revokedAt) return false;
   if (credentialExpired(s.expiresAt, ctx.nowISO)) return false; // epoch 비교·fail-closed
+  // (4) R4 §10: 근거 티켓 실검증 — ID 존재만으로 부족
+  const t = ctx.supportTicket;
+  if (!t) return false;                                  // 티켓 미조회 = 거부(fail-closed)
+  if (t.id !== s.supportTicketId) return false;          // 다른 티켓 바꿔치기 차단
+  if (t.status !== "APPROVED" && t.status !== "IN_PROGRESS") return false;
+  if (t.targetAcademyId !== s.targetAcademyId) return false;
+  if (t.assigneeAdminUserId !== s.adminUserId) return false; // 담당자 결합
+  if (t.revokedAt || t.closedAt) return false;
   return true;
+}
+
+/** R4 §10: 리소스별 접근 — 세션이 유효해도 allowlist 에 있는 리소스만.
+   서버는 이 함수로 리소스 단위 판단 + 조회 사실을 AuditLog 에 기록한다. */
+export function canSupportViewResource(
+  ctx: AuthorizationContext,
+  targetAcademyId: AcademyId,
+  resource: SupportViewResource,
+): boolean {
+  if (!canAdminUseSupportSession(ctx, targetAcademyId)) return false;
+  return ctx.supportViewSession!.allowedResources.includes(resource);
 }

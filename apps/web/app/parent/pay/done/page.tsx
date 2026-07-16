@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { AppScroll } from "@/components/mobile/MobileShell";
 import { Button } from "@/components/ui";
 import { Ic } from "../../_icons";
-import { useParent, PG_SIMULATION_CAPTURE_MS } from "../../_state";
+import { useParent, PG_SIMULATION, PG_SIMULATION_CAPTURE_MS } from "../../_state";
 import { PushHeader } from "../../_components";
 import { won } from "../../_data";
 
@@ -18,8 +18,10 @@ export default function PayDonePage() {
   const router = useRouter();
   const r = st.receipt;
 
-  // PG 시뮬레이션 webhook — 실서비스에서는 서버 webhook/재조회가 CAPTURED 를 확정
+  // PG 시뮬레이션 webhook — 실서비스에서는 서버 webhook/재조회가 CAPTURED 를 확정.
+  // R5 P0: 게이트 밖(프로덕션)에서는 타이머 자체를 걸지 않는다(reducer 도 무시함).
   useEffect(() => {
+    if (!PG_SIMULATION) return;
     if (r?.status !== "AUTHORIZED") return;
     const t = setTimeout(() => dispatch({ t: "paymentCaptured" }), PG_SIMULATION_CAPTURE_MS);
     return () => clearTimeout(t);
@@ -72,7 +74,9 @@ export default function PayDonePage() {
   const rows: [string, string][] = [
     ["결제 금액", won(r.amount)],
     ["결제 수단", r.method],
-    ["자동결제", r.auto ? "등록 ✓ (다음 수납기간부터)" : "미등록"],
+    // R4 §15 P1-1: 1회 결제 CAPTURED ≠ 자동결제 수단 등록 성공(별도 결과).
+    // 등록 확정은 AUTOPAY_REGISTERED 이벤트 수신 후에만 — 시뮬은 "확인 중"까지.
+    ["자동결제", r.auto ? "신청됨 · 등록 확인 중" : "미신청"],
     ["결제 증빙", r.proof],
   ];
 
@@ -92,7 +96,10 @@ export default function PayDonePage() {
             ))}
           </div>
           <Button full variant="primary" className="mt-4"
-            onClick={() => { router.push("/parent"); toast("9~11월 수강료 결제 완료 — 등록이 확정됐어요 🎉"); }}>
+            /* R4 §15 P1-2: 결제 완료 ≠ 수강 등록 확정 — Enrollment 활성화
+               정책(PENDING_PAYMENT→ACTIVE 전이·이벤트)이 정의되기 전까지
+               문구를 결제 사실로 제한 */
+            onClick={() => { router.push("/parent"); toast("9~11월 수강료 결제가 완료됐어요 🎉"); }}>
             홈으로
           </Button>
         </div>
