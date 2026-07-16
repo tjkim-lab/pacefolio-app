@@ -22,8 +22,17 @@
 - **멱등 replay 의미** (`idempotency.ts`) — 무조건 409 → (actor·op·key·bodyHash) 기준 REPLAY/409/IN_PROGRESS/만료
 - 테스트 **39/39** (18→39), typecheck 클린, 웹 빌드 정상
 
-### 진행 예정 (헌법-safe, 배치별)
-- **B3**: OpenAPI 전면 재작성 + domain drift 테스트 · 권한 정책함수+부정테스트 12종 · ClassAssignment 정본화 · 웹훅 중복·역순·재조회 규칙
+### ✅ B3 (일부) 완료 — 권한 enforcement + 웹훅 규칙
+- **리소스 권한 정책함수** (`authorization.ts`) — 보호자(연결·canPay·canRequestRefund)·코치(담당배정 스코프)·Support View 만료. **부정 테스트 12종** 자동화(타학원·미연결 자녀·ENDED 코치·담당 아닌 반 건강정보·코치 결제금액·원장 플랫폼·혼합결제 등)
+- **ClassAssignment 정본화** (6.2) — 코치 담당=권한 기준, `ClassRoom.coachUserId`는 캐시로 명시
+- **웹훅 중복·역순·재조회** (`webhooks.ts`) — 중복 무시·monotonic guard(역순 stale)·허용 안 되는 전이는 덮지 않고 RECONCILE(PG 재조회)
+- 테스트 **57/57**, typecheck 클린, 웹 빌드 정상
+
+### 진행 예정 (헌법-safe)
+- **B3b**: OpenAPI 전면 재작성(Refund·webhook·auth·PaymentAllocation·error envelope·idempotency 헤더) + **domain↔OpenAPI enum drift 테스트**
+- **B4**: 로그인·세션·route guard 최소 계약 · 결제화면 setTimeout→PAID 제거(시뮬 격리)
+- **B5**: Admin `apps/console-admin` 물리분리 skeleton · retention matrix(법률 검토 후 숫자 확정)
+- **M1~M4** (마케팅 트랙): 이벤트 4종 분리 · 지표 사전 · 공유 개인정보 계약 · AEO/GEO 표현 정정
 - **B4**: 로그인·세션·route guard 최소 계약 · 결제화면 setTimeout→PAID 제거(시뮬 격리)
 - **B5**: Admin `apps/console-admin` 물리분리 skeleton · retention matrix(법률 검토 후 숫자 확정)
 - **M1~M4** (마케팅 트랙): 이벤트 4종 분리 · 지표 사전 · 공유 개인정보 계약 · AEO/GEO 표현 정정
@@ -31,7 +40,7 @@
 ## 이전 F1~F15 상태 정정 (리뷰어 지적 반영 — 증거 기준)
 | | 정정된 상태 |
 |---|---|
-| F6 권한 "검증 7/7" | 🟡 규칙·매트릭스 정의 / ⬜ 서버 enforcement / 🟡 부정테스트(B3에서 12종) |
+| F6 권한 "검증 7/7" | ✅ 매트릭스 + 리소스 정책함수(`authorization.ts`) + 부정테스트 12종 / ⬜ 실서버 endpoint enforcement(백엔드 착수 시) |
 | F9 "payment-engine 40/40 재사용" | 🔴 해당 엔진·테스트가 이 스냅샷에 미포함 → **B1에서 정산 불변식+테스트를 이 repo 안에 직접 구현**(재현 가능) |
 | F12 사진 동의 | ✅ 목적×대상 grant + 정책버전·증적(B2) / ⬜ 자산(PhotoAsset)별 범위·발송시점 자산결합 |
 | F14 계정 라이프사이클 | 🟡 문서 / 🔴 API·guard (B4) |

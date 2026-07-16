@@ -84,7 +84,7 @@ export interface ClassRoom {
   daysLabel: string;     // "화·금"
   perWeek: number;       // 주N회 (필수)
   time: string;
-  coachUserId: ID.UserId;
+  coachUserId: ID.UserId;  // ⚠️ 조회용 primary coach 캐시 — 권한 기준 아님(ClassAssignment 가 정본)
   capacity: number;
   enrolled: number;
 }
@@ -94,6 +94,20 @@ export interface ClassSession {
   academyId: ID.AcademyId;
   date: string;          // YYYY-MM-DD
   status: "SCHEDULED" | "HOLIDAY" | "CANCELLED";
+}
+
+/* 코치 담당 배정 = 권한 판단의 정본(리뷰 R2 6.2).
+   ⚠️ ClassRoom.coachUserId 는 조회용 primary 캐시일 뿐, 권한 기준 아님.
+   기간·주담당/보조/대체를 표현. 담당 스코프(건강정보·실출결)는 이 배정으로 판단. */
+export interface ClassAssignment {
+  id: ID.ClassAssignmentId;
+  academyId: ID.AcademyId;
+  classId: ID.ClassId;
+  coachUserId: ID.UserId;
+  role: "PRIMARY" | "ASSISTANT" | "SUBSTITUTE";
+  status: "ACTIVE" | "ENDED";
+  startedAt: string;
+  endedAt?: string;
 }
 export interface Enrollment {
   id: ID.EnrollmentId;

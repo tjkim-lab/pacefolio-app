@@ -24,16 +24,16 @@
 | A-P0-1 | 유효 납부액·환불 잔액 불변식 | fixture selector가 단순 합산, Payment 상태·환불 미반영 | `billing.ts` 정산 계산 + `checkConsistency` 강화 | **B1 (진행중)** |
 | A-P0-2 | Refund·RefundAllocation 엔티티 | `entities.ts`에 Refund 인터페이스 없음(문서만) | allocation 기준 Refund/RefundLine 추가 | **B1 (진행중)** |
 | A-P0-8 | 실행 가능한 상태전이 함수·guard | enum 이름만 있고 transition 함수 0 | `state-machines.ts` + 부정전이 테스트 | **B1 (진행중)** |
-| A-P0-3 | 웹훅 중복+역순+재조회 규칙 | docs/06 원칙만, 역순 규칙 없음 | inbox/outbox 계약 + monotonic guard 문서·타입 | B2 |
+| A-P0-3 | 웹훅 중복+역순+재조회 규칙 | docs/06 원칙만, 역순 규칙 없음 | `webhooks.ts` monotonic guard + RECONCILE 결정 | ✅ **B3** |
 | A-P0-4 | 결제 화면 setTimeout→PAID 제거 | `parent/pay` useState+setTimeout+PAID | 시뮬레이션 격리 + 서버 재조회 흐름 계약 | B4 |
 | A-P0-5 | OTP 주체 ↔ 등록 보호자 결합 | `guardian-linking.ts` 이름+생년만, `otpVerified:boolean` 클라 | 검증세션ID·초대코드·GuardianContact 매칭 모델 | ✅ **B2** |
 | A-P0-6 | OpenAPI ↔ domain 정합 | LinkAttempt·Refund·webhook·auth 불일치/누락 | OpenAPI 재작성 + enum drift 테스트 | B3 |
 | A-P0-7 | idempotency replay 의미 | 무조건 409 가정 | (actor,op,key,bodyHash)→재생/409/IN_PROGRESS 모델 | ✅ **B2** |
 | A-P0-9 | 사진 동의 목적×대상 grant + policy 버전 | `consent.ts` 목적/대상 독립배열(교차조합 허용 버그) | grant[] 모델 + policyVersion·증적 | ✅ **B2** |
 | A-P0-10 | 로그인·세션·route guard 최소 계약 | `/`는 역할 허브(로그인 없음) | auth 흐름 계약 + guard 규칙 + 역할허브 격리 | B4 |
-| A-P1 | 권한 정책함수·부정테스트 | can()/inTenantScope()만, resource authz 없음 | canGuardianAccess* 등 + 12종 부정테스트 | B3 |
+| A-P1 | 권한 정책함수·부정테스트 | can()/inTenantScope()만, resource authz 없음 | `authorization.ts` + 12종 부정테스트 | ✅ **B3** |
 | A-P1 | 멀티역할 정책(6.3) | membership.role 단수 vs id주석 "×역할"(모순) | ✅ **모델 A 확정**(roles[]) — 2026-07-16 유저 | ✅ **B2** |
-| A-P1 | Class coach 기준(6.2) | `ClassRoom.coachUserId` vs ClassAssignment | ClassAssignment 정본화 + coach cache 명시 | B3 |
+| A-P1 | Class coach 기준(6.2) | `ClassRoom.coachUserId` vs ClassAssignment | ClassAssignment 정본화 + coach cache 명시 | ✅ **B3** |
 | A-P1 | Admin 물리 분리 skeleton | `/admin` 같은 앱 | `apps/console-admin` + 별세션/MFA 경계 | B5 |
 | A-∞ | 테스트 러너 + CI | 없음(🔴) | node test + GitHub Actions(build/type/lint/test) | **B1 (진행중)** |
 
