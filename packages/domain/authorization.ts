@@ -11,6 +11,7 @@
    ========================================================= */
 import type {
   AcademyMembership, GuardianParticipantLink, ClassAssignment, Invoice,
+  Payment, PaymentAllocation, Refund,
 } from "./entities";
 import type {
   AcademyId, ParticipantId, ClassId, UserId, GuardianId, SupportTicketId,
@@ -19,6 +20,7 @@ import type {
 import type { Role } from "./enums";
 import { canAny } from "./permissions";
 import { academyIdsForUser, rolesInAcademy } from "./membership";
+import { withinActiveWindow, credentialExpired, ageMsOrNull } from "./time";
 
 /** Support View 세션 (R3 P0-3 — 최소 필드 확장) */
 export interface SupportViewSession {
@@ -87,9 +89,51 @@ export function canGuardianPayInvoice(ctx: AuthorizationContext, invoice: Invoic
   const l = linkFor(ctx, invoice.participantId);
   return !!l && l.canPay && invoice.academyId === l.academyId;
 }
+/** ⚠️ 링크 flag 확인만 — 필요조건이지 충분조건 아님.
+   실제 환불 요청 판단은 canGuardianRequestRefundForPayment(결제자 소유권 결합)를 쓴다. */
 export function canGuardianRequestRefund(ctx: AuthorizationContext, participantId: ParticipantId): boolean {
   const l = linkFor(ctx, participantId);
   return !!l && l.canRequestRefund;
+}
+
+/* ── 환불 요청 = 실제 결제자 소유권 결합 (R4 P0-3) ──
+   "같은 자녀에 VERIFIED 연결"만으로는 부족 — 어머니가 결제한 건을
+   아버지가 환불 요청하는 것을 암묵 허용하면 안 된다.
+   기본 정책: Payment.guardianId === actorGuardianId (실제 결제자만).
+   위임이 필요하면 별도 PaymentAuthority 모델로 명시(암묵 허용 금지). */
+export function canGuardianRequestRefundForPayment(
+  ctx: AuthorizationContext,
+  payment: Payment,
+  allocations: readonly PaymentAllocation[],   // 이 Payment 의 배분(환불 대상)
+  invoices: readonly Invoice[],                // 배분이 가리키는 Invoice 들
+  existingRefunds: readonly Refund[],          // 이 Payment 의 기존 환불들(중복 차단)
+): boolean {
+  // (1) 실제 결제자 본인
+  if (!ctx.actorGuardianId) return false;
+  if (payment.guardianId !== ctx.actorGuardianId) return false;
+  // (2) 결제 상태: 환불 가능한 상태만 (PENDING/AUTHORIZED/FAILED/CANCELLED/REFUNDED 불가)
+  if (payment.status !== "CAPTURED" && payment.status !== "PARTIALLY_REFUNDED") return false;
+  // (3) 배분 대상 Invoice 전부: 같은 결제·같은 학원·연결 자녀·환불 flag
+  if (allocations.length === 0) return false;
+  const invoiceById = new Map(invoices.map((inv) => [inv.id, inv]));
+  for (const a of allocations) {
+    if (a.paymentId !== payment.id) return false;          // 남의 결제 배분 혼입
+    const inv = invoiceById.get(a.invoiceId);
+    if (!inv) return false;                                 // 실존하지 않는 청구
+    if (inv.academyId !== payment.academyId) return false;  // 테넌트 불일치
+    const l = linkFor(ctx, inv.participantId);
+    if (!l || !l.canRequestRefund) return false;            // 연결 자녀 + flag
+    if (l.academyId !== payment.academyId) return false;
+  }
+  // (4) 같은 Payment 에 진행 중 환불 있으면 중복 요청 차단
+  const inFlight = existingRefunds.some(
+    (r) =>
+      r.paymentId === payment.id &&
+      (r.status === "REQUESTED" || r.status === "MUTUALLY_APPROVED" ||
+       r.status === "PROCESSING" || r.status === "UNKNOWN"),
+  );
+  if (inFlight) return false;
+  return true;
 }
 
 /** 합산결제 대상이 모두 같은 학원 & 모두 결제 가능 자녀인지(혼합결제 차단). */
@@ -112,8 +156,8 @@ function activeAssignmentFor(
       a.academyId === academyId &&          // ← 같은 classId 라도 타 학원 배정 무효
       a.classId === classId &&
       a.status === "ACTIVE" &&
-      a.startedAt <= ctx.nowISO &&          // 시작 전 배정 무효
-      (!a.endedAt || ctx.nowISO < a.endedAt), // 종료(대체 기간 만료 포함) 후 무효
+      // 기간 [startedAt, endedAt) — epoch 비교·파싱 실패 시 비활성(R4 P0-9 fail-closed)
+      withinActiveWindow(a.startedAt, a.endedAt, ctx.nowISO),
   );
 }
 
@@ -134,9 +178,9 @@ export function canCoachViewHealthInfo(ctx: AuthorizationContext, academyId: Aca
 
 /* ── Support View: 관리자 신원·능력·세션 소유·MFA 결합 (R3 P0-3) ── */
 function mfaFresh(ctx: AuthorizationContext): boolean {
-  if (!ctx.mfaVerifiedAt) return false;
-  const ageMs = Date.parse(ctx.nowISO) - Date.parse(ctx.mfaVerifiedAt);
-  return ageMs >= 0 && ageMs <= MFA_FRESHNESS_MINUTES * 60_000;
+  // 파싱 실패·미래 시각 = null → 거부 (R4 P0-9 fail-closed)
+  const age = ageMsOrNull(ctx.mfaVerifiedAt, ctx.nowISO);
+  return age !== null && age <= MFA_FRESHNESS_MINUTES * 60_000;
 }
 
 export function canAdminUseSupportSession(ctx: AuthorizationContext, targetAcademyId: AcademyId): boolean {
@@ -153,6 +197,6 @@ export function canAdminUseSupportSession(ctx: AuthorizationContext, targetAcade
   if (s.targetAcademyId !== targetAcademyId) return false;
   if (!s.supportTicketId) return false;
   if (s.revokedAt) return false;
-  if (s.expiresAt <= ctx.nowISO) return false;
+  if (credentialExpired(s.expiresAt, ctx.nowISO)) return false; // epoch 비교·fail-closed
   return true;
 }

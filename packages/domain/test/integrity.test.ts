@@ -33,7 +33,8 @@ function refund(over: Partial<Refund>): Refund {
   return {
     id: asId("ref_1"), academyId: asId("aca_1"), paymentId: asId("pay_1"),
     participantId: asId("p_1"), status: "COMPLETED", reasonCode: "PARENT_REQUEST",
-    requestedAmount: 100000, completedAmount: 100000,
+    // R4 P0-1: 부분승인 미지원 — requested = approved = completed
+    requestedAmount: 100000, approvedAmount: 100000, completedAmount: 100000,
     requestedByUserId: asId("u_1"), requestedAt: "2026-07-25T00:00:00Z",
     idempotencyKey: "rk_1", ...over,
   };

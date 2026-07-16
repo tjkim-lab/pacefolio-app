@@ -25,6 +25,7 @@ export type ParticipantId = Brand<string, "ParticipantId">; // 원생(아이, �
 export type GuardianId = Brand<string, "GuardianId">;       // 보호자(= User의 한 역할)
 export type GuardianParticipantLinkId = Brand<string, "GuardianParticipantLinkId">; // 보호자↔자녀 N:M
 export type GuardianVerificationId = Brand<string, "GuardianVerificationId">;       // OTP·관계 검증
+export type GuardianInviteRedemptionId = Brand<string, "GuardianInviteRedemptionId">; // 초대코드 소비 기록(R4 P0-5)
 
 /* --- 수업 · 등록 --- */
 export type ProgramId = Brand<string, "ProgramId">;

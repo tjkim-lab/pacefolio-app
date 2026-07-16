@@ -19,6 +19,7 @@
    ========================================================= */
 import type { PaymentStatus } from "./enums";
 import { canTransitionPayment } from "./state-machines";
+import { toEpochMs } from "./time"; // 시간 정규화 = 공용 time 모듈로 중앙화(R4 P0-9)
 
 export interface WebhookEvent {
   provider: string;
@@ -39,12 +40,6 @@ export type WebhookDecision =
   | { action: "IGNORE_STALE"; reason: string }      // 발생시각 역행 — 되돌리지 않음
   | { action: "RECONCILE"; reason: string }         // 허용 안 되는 전이 — PG 재조회로 수렴
   | { action: "REJECT_INVALID"; reason: string };   // 파싱 불가 등 — inbox 보존 후 수동/재처리
-
-/** ISO(offset 포함 가능) → epoch ms. 파싱 불가 시 null. */
-export function toEpochMs(iso: string): number | null {
-  const t = Date.parse(iso);
-  return Number.isNaN(t) ? null : t;
-}
 
 export function decidePaymentWebhook(
   current: PaymentSnapshot,

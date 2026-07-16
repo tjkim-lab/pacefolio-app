@@ -1,9 +1,56 @@
 /* =========================================================
-   PACEFOLIO 원장 PC 콘솔 — 풍부한 mock (프로토타입 전용)
-   출처: pacefolio-owner-pc.html 목업의 데이터 충실 이식.
-   ⚠️ 공용 lib/mock/data.ts 는 건드리지 않는다. 콘솔 전용 데이터.
+   PACEFOLIO — 원장 PC 콘솔 어댑터 (DB 없음, 프로토타입)
+   ---------------------------------------------------------
+   B4 전환: 겹치는 엔티티(원생·반·프로그램·코치·청구 금액)는 공용
+   fixture(lib/fixtures)에서 파생 — 이름·정원·금액이 코치/학부모 앱과 일치.
+   콘솔 화면 전용 장식(필터·시간표·공지·Q&A·설정·KPI·마법사 카피)은 여기 로컬.
    비-"use client" 모듈 — 서버/클라이언트 양쪽에서 import 가능.
    ========================================================= */
+import * as fx from "@/lib/fixtures";
+
+export const fmt = (n: number) => n.toLocaleString("ko-KR");
+/* 청구서 표기용 금액 — 음수는 화면 표기 규칙(−) 따름 */
+const money = (n: number) => (n < 0 ? `−${fmt(-n)}` : fmt(n));
+
+/* ---- fixture 조회 도우미 (정본 → 콘솔 관점) ---- */
+type Cls = (typeof fx.classes)[number];
+const userById = new Map(fx.users.map((u) => [u.id as string, u]));
+const classById = new Map(fx.classes.map((c) => [c.id as string, c]));
+const programById = new Map(fx.programs.map((p) => [p.id as string, p]));
+const coachNm = (c: Cls) => userById.get(c.coachUserId as string)?.name ?? "";
+const DIV_KO: Record<string, string> = { BRAIN: "브레인", ACTIVE: "액티브" };
+
+function primaryClassOf(pid: string): Cls | undefined {
+  const en = fx.enrollments.find((e) => (e.participantId as string) === pid);
+  return en ? classById.get(en.classId as string) : undefined;
+}
+function invoiceOf(pid: string) {
+  return fx.invoices.find((i) => (i.participantId as string) === pid);
+}
+function lineAmt(lineId: string): number {
+  return fx.invoiceLines.find((l) => (l.id as string) === lineId)?.amount ?? 0;
+}
+/* 보호자 연락처 = fixture 정본 전화번호 마스킹 + 관계 호칭 */
+function parentLabel(pid: string): string {
+  const link = fx.guardianLinks.find((l) => (l.participantId as string) === pid);
+  const g = link && fx.guardians.find((x) => x.id === link.guardianId);
+  const u = g && userById.get(g.userId as string);
+  if (!link || !u?.phone) return "";
+  const rel = link.relationshipType === "FATHER" ? "아버님" : "어머님";
+  return `010-****-${u.phone.slice(-4)} (${rel})`;
+}
+/* 형제 = 같은 보호자를 공유하는 다른 원생 (도담·서준이 코치/학부모 앱과 일치) */
+function siblingName(pid: string): string | undefined {
+  const link = fx.guardianLinks.find((l) => (l.participantId as string) === pid);
+  const sibLink =
+    link &&
+    fx.guardianLinks.find(
+      (l) => l.guardianId === link.guardianId && (l.participantId as string) !== pid,
+    );
+  return sibLink
+    ? fx.participants.find((p) => p.id === sibLink.participantId)?.name
+    : undefined;
+}
 
 export type PayKind = "완납" | "미납" | "일할 청구";
 export type KidStatus = "재원" | "체험" | "휴원" | "퇴원 예정";
@@ -29,29 +76,108 @@ export interface Kid {
   gender?: "남" | "여" | "미입력";
 }
 
-export const KIDS: Kid[] = [
-  { id: "dodam", nm: "김도담", em: "🧒", age: 8, cls: "플레이2 월수반", coach: "김선재", status: "재원", parent: "010-****-1234 (어머님)", sib: "김서준 (동생) · 같은 보호자 연결", pay: "완납", payDetail: "원생별 분리 청구 · 보호자 합산 결제", total: "405,000원", gender: "남",
-    bill: [["수강료", "360,000"], ["차량비", "45,000"]], makeup: 2,
+/* 청구 상태(fixture Invoice.status) → 콘솔 수납 뱃지 */
+const PAY_OF: Record<string, PayKind> = { PAID: "완납", OVERDUE: "미납", ISSUED: "일할 청구" };
+
+/* 원생별 콘솔 뷰 장식(도메인 필드 아님) — 이름·반·금액은 fixture에서 파생.
+   bill의 label은 콘솔 표기, line은 fixture invoiceLines의 정본 금액 참조. */
+interface KidView {
+  em: string;
+  gender: NonNullable<Kid["gender"]>;
+  status: KidStatus;
+  payDetail: string;
+  sibRel?: string; // 형제 호칭(형/동생) — 뷰 장식
+  clsExtra?: string; // 다종목 표기 접미 — 뷰 장식
+  bill: { label: string; line?: string; raw?: string }[];
+  makeup: number;
+  veh: Kid["veh"];
+  alert?: string;
+  makeups?: Kid["makeups"];
+}
+const KID_VIEW: Record<string, KidView> = {
+  p_dodam: {
+    em: "🧒", gender: "남", status: "재원", sibRel: "동생",
+    payDetail: "원생별 분리 청구 · 보호자 합산 결제",
+    bill: [{ label: "수강료", line: "il_dodam_tuition" }, { label: "차량비", line: "il_dodam_vehicle" }],
+    makeup: 2,
     veh: { ride: "래미안아파트 정문 · 2:40 탑승", drop: "같은 곳 · 5:10 하원", seat: "주니어 카시트 필수 · 멀미 있어 앞좌석 선호" },
-    makeups: [{ t: "10/13 (학원 휴무 대체)", s: "보강일 미지정 · 학부모 요청 있음" }, { t: "10/16 결석 (병원)", s: "긴급결석 처리됨 · 원장 처리 전" }] },
-  { id: "seojun", nm: "김서준", em: "👦", age: 7, cls: "플레이2 월수반", coach: "김선재", status: "재원", parent: "010-****-1234 (어머님)", sib: "김도담 (형) · 같은 보호자 연결", pay: "완납", payDetail: "형제 20% 할인은 서준에게 적용", total: "333,000원", gender: "남",
-    bill: [["수강료", "360,000"], ["형제 20% 할인", "−72,000"], ["차량비", "45,000"]], makeup: 0,
-    veh: { ride: "래미안아파트 정문 · 2:40 탑승 (형과 동승)", drop: "같은 곳 · 5:10 하원", seat: "주니어 카시트 필수" } },
-  { id: "minjun", nm: "박민준", em: "🧒", age: 8, cls: "플레이2 월수반", coach: "김선재", status: "재원", parent: "010-****-5678 (어머님)", pay: "미납", payDetail: "마감 6일 지남 · 리마인드 2회 · 오늘 결석 예정(아파요)", total: "330,000원", gender: "남",
-    bill: [["수강료 (2분기 미납분)", "330,000"], ["차량", "미이용"]], makeup: 0, veh: null, alert: "⚠️ 견과류 알러지" },
-  { id: "hayun", nm: "정하윤", em: "👧", age: 8, cls: "플레이2 월수반", coach: "김선재", status: "재원", parent: "010-****-2345 (아버님)", pay: "완납", payDetail: "자동결제", total: "360,000원", gender: "여",
-    bill: [["수강료", "360,000"], ["차량", "미이용"]], makeup: 0, veh: null },
-  { id: "sua", nm: "이수아", em: "👧", age: 9, cls: "축구 화금반 + 인라인", coach: "이창진", status: "재원", parent: "010-****-8765 (어머님)", pay: "미납", payDetail: "다종목 10% — MAX 하나만 적용", total: "531,000원", gender: "여",
-    bill: [["수강료 (축구+인라인)", "540,000"], ["다종목 10% 할인", "−54,000"], ["차량비", "45,000"]], makeup: 0,
-    veh: { ride: "한빛초 후문 · 3:50 탑승", drop: "홈플러스 앞 · 6:20 하원", seat: "특이사항 없음" } },
-  { id: "jiho", nm: "최지호", em: "👦", age: 7, cls: "플레이2 월수반", coach: "김선재", status: "재원", parent: "010-****-9012 (어머님)", pay: "완납", payDetail: "플레이1→2 승급 반영", total: "450,000원", gender: "남",
-    bill: [["수강료 (승급 반영)", "450,000"], ["차량", "미이용"]], makeup: 0, veh: null },
-  { id: "yerin", nm: "한예린", em: "👧", age: 10, cls: "축구 화금반", coach: "이창진", status: "퇴원 예정", parent: "010-****-3456 (어머님)", pay: "완납", payDetail: "12월 퇴원 예정 · 부분 청구", total: "240,000원", gender: "여",
-    bill: [["수강료 (부분 청구)", "240,000"], ["차량", "미이용"]], makeup: 0, veh: null },
-  { id: "ian", nm: "최이안", em: "🧒", age: 7, cls: "축구 화금반", coach: "이창진", status: "재원", parent: "010-****-7890 (아버님)", pay: "일할 청구", payDetail: "10/28 입회 · 남은 실제 수업 10회 기준 일할", total: "243,750원", gender: "미입력",
-    bill: [["수강료 (일할 10/24회)", "225,000"], ["차량비 (일할 · 같은 구조)", "18,750"]], makeup: 0,
-    veh: { ride: "강동도서관 앞 · 3:50 탑승", drop: "같은 곳 · 6:20 하원", seat: "신규 — 첫 주 동승 확인 필요" } },
-];
+    makeups: [{ t: "10/13 (학원 휴무 대체)", s: "보강일 미지정 · 학부모 요청 있음" }, { t: "10/16 결석 (병원)", s: "긴급결석 처리됨 · 원장 처리 전" }],
+  },
+  p_seojun: {
+    em: "👦", gender: "남", status: "재원", sibRel: "형",
+    payDetail: "형제 20% 할인은 서준에게 적용",
+    bill: [{ label: "수강료", line: "il_seojun_tuition" }, { label: "형제 20% 할인", line: "il_seojun_sib" }, { label: "차량비", line: "il_seojun_vehicle" }],
+    makeup: 0,
+    veh: { ride: "래미안아파트 정문 · 2:40 탑승 (형과 동승)", drop: "같은 곳 · 5:10 하원", seat: "주니어 카시트 필수" },
+  },
+  p_minjun: {
+    em: "🧒", gender: "남", status: "재원",
+    payDetail: "마감 6일 지남 · 리마인드 2회 · 오늘 결석 예정(아파요)",
+    bill: [{ label: "수강료 (2분기 미납분)", line: "il_minjun_tuition" }, { label: "차량", raw: "미이용" }],
+    makeup: 0, veh: null, alert: "⚠️ 견과류 알러지",
+  },
+  p_hayun: {
+    em: "👧", gender: "여", status: "재원",
+    payDetail: "자동결제",
+    bill: [{ label: "수강료", line: "il_hayun_tuition" }, { label: "차량", raw: "미이용" }],
+    makeup: 0, veh: null,
+  },
+  p_sua: {
+    em: "👧", gender: "여", status: "재원", clsExtra: " + 인라인",
+    payDetail: "다종목 10% — MAX 하나만 적용",
+    bill: [{ label: "수강료 (축구+인라인)", line: "il_sua_tuition" }, { label: "다종목 10% 할인", line: "il_sua_multi" }, { label: "차량비", line: "il_sua_vehicle" }],
+    makeup: 0,
+    veh: { ride: "한빛초 후문 · 3:50 탑승", drop: "홈플러스 앞 · 6:20 하원", seat: "특이사항 없음" },
+  },
+  p_jiho: {
+    em: "👦", gender: "남", status: "재원",
+    payDetail: "플레이1→2 승급 반영",
+    bill: [{ label: "수강료 (승급 반영)", line: "il_jiho_tuition" }, { label: "차량", raw: "미이용" }],
+    makeup: 0, veh: null,
+  },
+  p_yerin: {
+    em: "👧", gender: "여", status: "퇴원 예정",
+    payDetail: "12월 퇴원 예정 · 부분 청구",
+    bill: [{ label: "수강료 (부분 청구)", line: "il_yerin_tuition" }, { label: "차량", raw: "미이용" }],
+    makeup: 0, veh: null,
+  },
+  p_ian: {
+    em: "🧒", gender: "미입력", status: "재원",
+    payDetail: "10/28 입회 · 남은 실제 수업 10회 기준 일할",
+    bill: [{ label: "수강료 (일할 10/24회)", line: "il_ian_tuition" }, { label: "차량비 (일할 · 같은 구조)", line: "il_ian_vehicle" }],
+    makeup: 0,
+    veh: { ride: "강동도서관 앞 · 3:50 탑승", drop: "같은 곳 · 6:20 하원", seat: "신규 — 첫 주 동승 확인 필요" },
+  },
+};
+
+/* 원생 8명 — 이름·나이·반·코치·보호자·형제·수납 상태·금액 전부 fixture 정본에서 파생 */
+export const KIDS: Kid[] = fx.participants.map((p) => {
+  const pid = p.id as string;
+  const v = KID_VIEW[pid]!;
+  const c = primaryClassOf(pid)!;
+  const inv = invoiceOf(pid)!;
+  const sibNm = siblingName(pid);
+  return {
+    id: pid.replace(/^p_/, ""),
+    nm: p.name,
+    em: v.em,
+    age: parseInt(p.ageLabel, 10) || 0,
+    cls: c.name + (v.clsExtra ?? ""),
+    coach: coachNm(c),
+    status: v.status,
+    parent: parentLabel(pid),
+    ...(sibNm && v.sibRel ? { sib: `${sibNm} (${v.sibRel}) · 같은 보호자 연결` } : {}),
+    pay: PAY_OF[inv.status] ?? "완납",
+    payDetail: v.payDetail,
+    total: `${fmt(inv.total)}원`,
+    gender: v.gender,
+    bill: v.bill.map((b): [string, string] => [b.label, b.line ? money(lineAmt(b.line)) : b.raw ?? ""]),
+    makeup: v.makeup,
+    veh: v.veh,
+    ...(v.alert ? { alert: v.alert } : {}),
+    ...(v.makeups ? { makeups: v.makeups } : {}),
+  };
+});
 
 /* 원생 도우미 */
 export function programOf(cls: string) {
@@ -70,7 +196,8 @@ export function dayOf(cls: string) {
   if (cls.indexOf("토") >= 0 || cls.indexOf("인라인") >= 0 || cls.indexOf("농구") >= 0) return "토";
   return "기타";
 }
-export const CLS_OPTS = ["플레이2 월수반", "플레이2 유아반", "축구 화금반", "플레이3 화목반", "인라인 토요반", "농구 토요특강"];
+/* 반 선택지 = fixture 반 정본 (6개 반 이름·순서 일치) */
+export const CLS_OPTS = fx.classes.map((c) => c.name);
 
 export const AF_GROUPS: { key: string; label: string; opts: string[] }[] = [
   { key: "age", label: "연령대", opts: ["5~6세", "7~9세", "10~12세"] },
@@ -84,29 +211,67 @@ export const AF_GROUPS: { key: string; label: string; opts: string[] }[] = [
   { key: "safe", label: "안전정보", opts: ["있음", "없음"] },
 ];
 
-/* 대시보드 반별 정원 */
+/* 대시보드 반별 정원 — 인원·정원·퍼센트는 fixture 반 정본에서 파생, 라벨 문구·tone은 로컬 */
 export interface Capacity { nm: string; sub: string; label: string; pct: number; tone: "accent" | "full" | "low"; }
-export const CAPACITY: Capacity[] = [
-  { nm: "플레이2 · 월수반", sub: "브레인 · 김선재", label: "등록 12 · 재원 10 / 정원 12", pct: 83, tone: "accent" },
-  { nm: "플레이2 · 유아반", sub: "브레인 · 이코치", label: "12 / 12 · 대기 1", pct: 100, tone: "full" },
-  { nm: "축구 · 화금반", sub: "액티브 · 이창진", label: "16 / 16 · 대기 2", pct: 100, tone: "full" },
-  { nm: "플레이3 · 화목반", sub: "브레인 · 박코치", label: "11 / 12", pct: 92, tone: "accent" },
-  { nm: "인라인 · 토요반", sub: "액티브 · 박코치", label: "5 / 12 · 42%", pct: 42, tone: "low" },
-  { nm: "농구 · 토요특강", sub: "액티브 · 김선재", label: "8 / 12 · 67%", pct: 67, tone: "accent" },
-];
+const CAP_VIEW: Record<string, { label: (enrolled: number, cap: number, pct: number) => string; tone: Capacity["tone"] }> = {
+  c_play2_mw: { label: (e, c) => `등록 12 · 재원 ${e} / 정원 ${c}`, tone: "accent" }, // 등록 12 = 재원 10 + 휴원 2(휴원은 뷰 장식)
+  c_play2_ya: { label: (e, c) => `${e} / ${c} · 대기 1`, tone: "full" },
+  c_soccer_tf: { label: (e, c) => `${e} / ${c} · 대기 2`, tone: "full" },
+  c_play3_th: { label: (e, c) => `${e} / ${c}`, tone: "accent" },
+  c_inline_sat: { label: (e, c, pct) => `${e} / ${c} · ${pct}%`, tone: "low" },
+  c_basket_sat: { label: (e, c, pct) => `${e} / ${c} · ${pct}%`, tone: "accent" },
+};
+export const CAPACITY: Capacity[] = fx.classes.map((c) => {
+  const v = CAP_VIEW[c.id as string]!;
+  const pct = Math.round((c.enrolled / c.capacity) * 100);
+  const pr = programById.get(c.programId as string)!;
+  return {
+    nm: c.name.replace(" ", " · "),
+    sub: `${DIV_KO[pr.division] ?? ""} · ${coachNm(c)}`,
+    label: v.label(c.enrolled, c.capacity, pct),
+    pct,
+    tone: v.tone,
+  };
+});
 
-/* 프로그램 */
+/* 프로그램 — 이름·부문·연령·반수·원생수·정원은 fixture 파생, 나머지 운영 카피는 로컬
+   (수강료는 fixture에 프로그램 단가 엔티티가 없어 콘솔 카피로 유지 — 청구 금액과 정합) */
 export interface ProgramRow {
   id: string; nm: string; div: string; sport: string; age: string; cur: string; cls: string; kids: string; st: string;
   time: string; cap: string; min: string; fee: string; veh: string; mid: string; rep: string; perm: string; permd: string;
 }
-export const PROGRAMS: ProgramRow[] = [
-  { id: "p2", nm: "플레이2", div: "브레인", sport: "밸런스·리듬 통합", age: "7~9세", cur: "24회 · v2026-1", cls: "2개 반", kids: "22명", st: "운영 중", time: "60분", cap: "12명", min: "6명", fee: "360,000 / 분기", veh: "45,000 별도 · 무할인", mid: "일할 계산 (실제 남은 수업일)", rep: "밸런스·리듬 등 5항목 + 사진", perm: "선택형", permd: "해당 회차 추천 활동 중 코치가 선택·순서 변경" },
-  { id: "p3", nm: "플레이3", div: "브레인", sport: "협응·전략 통합", age: "9~11세", cur: "24회 · v2026-1", cls: "1개 반", kids: "11명", st: "운영 중", time: "60분", cap: "12명", min: "6명", fee: "380,000 / 분기", veh: "45,000 별도 · 무할인", mid: "일할 계산 (실제 남은 수업일)", rep: "협응·집중 등 5항목 + 사진", perm: "선택형", permd: "해당 회차 추천 활동 중 코치가 선택·순서 변경" },
-  { id: "soc", nm: "유소년 축구", div: "액티브", sport: "축구", age: "7~10세", cur: "24회 · v2026-2", cls: "1개 반", kids: "16명", st: "운영 중", time: "70분", cap: "16명", min: "8명", fee: "540,000 / 분기", veh: "45,000 별도 · 무할인", mid: "일할 계산 (실제 남은 수업일)", rep: "드리블·슈팅 등 6항목 + 사진", perm: "자율형", permd: "학원 활동 라이브러리 안에서 코치가 자유 구성" },
-  { id: "bsk", nm: "농구 특강", div: "액티브", sport: "농구", age: "8~11세", cur: "12회 · v2026-1", cls: "1개 반", kids: "8명", st: "운영 중", time: "60분", cap: "12명", min: "6명", fee: "300,000 / 분기", veh: "미운행", mid: "일할 계산 (실제 남은 수업일)", rep: "드리블·패스·슛 등 4항목", perm: "자율형", permd: "학원 활동 라이브러리 안에서 코치가 자유 구성" },
-  { id: "inl", nm: "인라인 기초", div: "액티브", sport: "인라인", age: "7~9세", cur: "12회 · v2026-1", cls: "1개 반", kids: "5명", st: "모집 중", time: "60분", cap: "12명", min: "5명", fee: "300,000 / 분기", veh: "미운행", mid: "일할 계산 (실제 남은 수업일)", rep: "주행·제동 등 4항목", perm: "잠금형", permd: "원장 커리큘럼 그대로 — 코치는 완료·부분·미진행만 기록" },
+const PROGRAM_VIEW: { pid: string; id: string; sport: string; cur: string; st: string; time: string; min: string; fee: string; veh: string; mid: string; rep: string; perm: string; permd: string }[] = [
+  { pid: "pr_play2", id: "p2", sport: "밸런스·리듬 통합", cur: "24회 · v2026-1", st: "운영 중", time: "60분", min: "6명", fee: "360,000 / 분기", veh: "45,000 별도 · 무할인", mid: "일할 계산 (실제 남은 수업일)", rep: "밸런스·리듬 등 5항목 + 사진", perm: "선택형", permd: "해당 회차 추천 활동 중 코치가 선택·순서 변경" },
+  { pid: "pr_play3", id: "p3", sport: "협응·전략 통합", cur: "24회 · v2026-1", st: "운영 중", time: "60분", min: "6명", fee: "380,000 / 분기", veh: "45,000 별도 · 무할인", mid: "일할 계산 (실제 남은 수업일)", rep: "협응·집중 등 5항목 + 사진", perm: "선택형", permd: "해당 회차 추천 활동 중 코치가 선택·순서 변경" },
+  { pid: "pr_soccer", id: "soc", sport: "축구", cur: "24회 · v2026-2", st: "운영 중", time: "70분", min: "8명", fee: "540,000 / 분기", veh: "45,000 별도 · 무할인", mid: "일할 계산 (실제 남은 수업일)", rep: "드리블·슈팅 등 6항목 + 사진", perm: "자율형", permd: "학원 활동 라이브러리 안에서 코치가 자유 구성" },
+  { pid: "pr_basket", id: "bsk", sport: "농구", cur: "12회 · v2026-1", st: "운영 중", time: "60분", min: "6명", fee: "300,000 / 분기", veh: "미운행", mid: "일할 계산 (실제 남은 수업일)", rep: "드리블·패스·슛 등 4항목", perm: "자율형", permd: "학원 활동 라이브러리 안에서 코치가 자유 구성" },
+  { pid: "pr_inline", id: "inl", sport: "인라인", cur: "12회 · v2026-1", st: "모집 중", time: "60분", min: "5명", fee: "300,000 / 분기", veh: "미운행", mid: "일할 계산 (실제 남은 수업일)", rep: "주행·제동 등 4항목", perm: "잠금형", permd: "원장 커리큘럼 그대로 — 코치는 완료·부분·미진행만 기록" },
 ];
+export const PROGRAMS: ProgramRow[] = PROGRAM_VIEW.map((v) => {
+  const pr = programById.get(v.pid)!;
+  const cls = fx.classes.filter((c) => (c.programId as string) === v.pid);
+  const kids = cls.reduce((s, c) => s + c.enrolled, 0);
+  return {
+    id: v.id,
+    nm: pr.name,
+    div: DIV_KO[pr.division] ?? "",
+    sport: v.sport,
+    age: pr.ageLabel,
+    cur: v.cur,
+    cls: `${cls.length}개 반`,
+    kids: `${kids}명`,
+    st: v.st,
+    time: v.time,
+    cap: `${cls[0]?.capacity ?? 0}명`,
+    min: v.min,
+    fee: v.fee,
+    veh: v.veh,
+    mid: v.mid,
+    rep: v.rep,
+    perm: v.perm,
+    permd: v.permd,
+  };
+});
 export const PERMD: Record<string, string> = {
   잠금형: "원장 커리큘럼 그대로 — 코치는 완료·부분·미진행만 기록",
   선택형: "해당 회차 추천 활동 중 코치가 선택·순서 변경",
@@ -114,27 +279,43 @@ export const PERMD: Record<string, string> = {
   승인형: "코치가 새 활동 제안 → 원장 승인 후 반영",
 };
 
-/* 운영 중인 반 */
+/* 운영 중인 반 — 반·프로그램·요일·시작시간·코치·인원은 fixture 파생, 강의실·종료시간·라벨은 로컬 */
 export interface ClsRow { nm: string; prog: string; time: string; room: string; coach: string; cap: string; }
-export const CLASSES_OP: ClsRow[] = [
-  { nm: "월수반", prog: "플레이2", time: "월·수 14:30~15:30", room: "본관 2층", coach: "김선재", cap: "등록 12 · 재원 10 / 12" },
-  { nm: "유아반", prog: "플레이2", time: "화·목 10:30~11:20", room: "본관 1층", coach: "이코치", cap: "12 / 12" },
-  { nm: "화금반", prog: "유소년 축구", time: "화·금 16:00~17:10", room: "실내체육관", coach: "이창진", cap: "16 / 16 · 대기 2" },
-  { nm: "화목반", prog: "플레이3", time: "화·목 15:00~16:00", room: "본관 2층", coach: "박코치", cap: "11 / 12" },
-  { nm: "토요반", prog: "인라인 기초", time: "토 11:00~12:00", room: "야외 링크장", coach: "박코치", cap: "5 / 12" },
-  { nm: "토요특강", prog: "농구 특강", time: "토 10:00~11:00", room: "실내체육관", coach: "김선재", cap: "8 / 12" },
-];
+const OP_VIEW: Record<string, { room: string; end: string; cap: (enrolled: number, cap: number) => string }> = {
+  c_play2_mw: { room: "본관 2층", end: "15:30", cap: (e, c) => `등록 12 · 재원 ${e} / ${c}` },
+  c_play2_ya: { room: "본관 1층", end: "11:20", cap: (e, c) => `${e} / ${c}` },
+  c_soccer_tf: { room: "실내체육관", end: "17:10", cap: (e, c) => `${e} / ${c} · 대기 2` },
+  c_play3_th: { room: "본관 2층", end: "16:00", cap: (e, c) => `${e} / ${c}` },
+  c_inline_sat: { room: "야외 링크장", end: "12:00", cap: (e, c) => `${e} / ${c}` },
+  c_basket_sat: { room: "실내체육관", end: "11:00", cap: (e, c) => `${e} / ${c}` },
+};
+export const CLASSES_OP: ClsRow[] = fx.classes.map((c) => {
+  const v = OP_VIEW[c.id as string]!;
+  return {
+    nm: c.name.split(" ")[1] ?? c.name, // "플레이2 월수반" → "월수반"
+    prog: programById.get(c.programId as string)!.name,
+    time: `${c.daysLabel} ${c.time}~${v.end}`,
+    room: v.room,
+    coach: coachNm(c),
+    cap: v.cap(c.enrolled, c.capacity),
+  };
+});
 export const COACH_BUSY: Record<string, string> = { 김선재: "월·수", 이창진: "화·금", 이코치: "화·목", 박코치: "화·목·토" };
 
-/* 시간표 — 주간 */
+/* 시간표 — 주간. 세션 카드 = fixture 반 정본(이름·시간·코치) + 로컬 장식(강의실·종료시간) */
 export interface WeekSess { name: string; sub: string; tone?: "active" | "off"; }
+function weekSess(classId: string, tone?: WeekSess["tone"]): WeekSess {
+  const c = classById.get(classId)!;
+  const v = OP_VIEW[classId]!;
+  return { name: c.name, sub: `${c.time}~${v.end} · ${v.room} · ${coachNm(c)}`, ...(tone ? { tone } : {}) };
+}
 export const WEEK: { day: string; sess: WeekSess[] }[] = [
-  { day: "월", sess: [{ name: "플레이2 월수반", sub: "14:30~15:30 · 본관 2층 · 김선재" }] },
-  { day: "화", sess: [{ name: "플레이2 유아반", sub: "10:30~11:20 · 본관 1층 · 이코치" }, { name: "축구 화금반", sub: "16:00~17:10 · 실내체육관 · 이창진", tone: "active" }, { name: "플레이3 화목반", sub: "15:00~16:00 · 본관 2층 · 박코치" }] },
-  { day: "수", sess: [{ name: "플레이2 월수반", sub: "14:30~15:30 · 본관 2층 · 김선재" }] },
-  { day: "목", sess: [{ name: "플레이2 유아반", sub: "10:30~11:20 · 본관 1층 · 이코치" }, { name: "플레이3 화목반", sub: "15:00~16:00 · 본관 2층 · 박코치" }] },
-  { day: "금", sess: [{ name: "축구 화금반", sub: "16:00~17:10 · 실내체육관 · 이창진", tone: "active" }] },
-  { day: "토", sess: [{ name: "농구 토요특강", sub: "10:00~11:00 · 실내체육관 · 김선재" }, { name: "인라인 토요반", sub: "11:00~12:00 · 야외 링크장 · 박코치", tone: "active" }] },
+  { day: "월", sess: [weekSess("c_play2_mw")] },
+  { day: "화", sess: [weekSess("c_play2_ya"), weekSess("c_soccer_tf", "active"), weekSess("c_play3_th")] },
+  { day: "수", sess: [weekSess("c_play2_mw")] },
+  { day: "목", sess: [weekSess("c_play2_ya"), weekSess("c_play3_th")] },
+  { day: "금", sess: [weekSess("c_soccer_tf", "active")] },
+  { day: "토", sess: [weekSess("c_basket_sat"), weekSess("c_inline_sat", "active")] },
 ];
 /* 월간 Session 규칙(요일 0=일) + 예외 */
 export const TT_RECUR: Record<number, string[]> = { 0: [], 1: ["플레이2 월수반"], 2: ["플레이2 유아반", "축구 화금반", "플레이3 화목반"], 3: ["플레이2 월수반"], 4: ["플레이2 유아반", "플레이3 화목반"], 5: ["축구 화금반"], 6: ["농구 토요특강", "인라인 토요반"] };
@@ -171,13 +352,22 @@ export const MJ_OPTS = [
   { r: 5, date: "11/14 (금)", sub: "남은 실제 수업 5회" },
 ];
 
-/* 강사 */
+/* 강사 — 이름은 fixture 코치 정본(멤버십 순서), 담당·상태 카피는 로컬 */
 export interface Coach { init: string; nm: string; charge: string; status: string; tone: "ok" | "wait"; perm: string; swap?: boolean; }
-export const COACHES: Coach[] = [
-  { init: "김", nm: "김선재", charge: "플레이2 월수반 · 농구 토요 특강", status: "퇴사 예정 · 11/30", tone: "wait", perm: "담당 반 원생 · 안전 정보", swap: true },
-  { init: "이", nm: "이창진", charge: "축구 화금반", status: "재직", tone: "ok", perm: "담당 반 원생 · 안전 정보" },
-  { init: "박", nm: "박코치", charge: "플레이3 화목반 · 인라인 토요반", status: "재직", tone: "ok", perm: "담당 반 원생 · 안전 정보" },
-];
+const COACH_VIEW: Record<string, { charge: string; status: string; tone: Coach["tone"]; perm: string; swap?: boolean }> = {
+  u_coach_ksj: { charge: "플레이2 월수반 · 농구 토요 특강", status: "퇴사 예정 · 11/30", tone: "wait", perm: "담당 반 원생 · 안전 정보", swap: true },
+  u_coach_lcj: { charge: "축구 화금반", status: "재직", tone: "ok", perm: "담당 반 원생 · 안전 정보" },
+  u_coach_park: { charge: "플레이3 화목반 · 인라인 토요반", status: "재직", tone: "ok", perm: "담당 반 원생 · 안전 정보" },
+  // u_coach_lee(이코치·유아반)는 원본 콘솔 화면에 없음 — 화면 불변 위해 그대로 생략
+};
+export const COACHES: Coach[] = fx.memberships
+  .filter((m) => m.roles.includes("COACH"))
+  .flatMap((m) => {
+    const u = userById.get(m.userId as string);
+    const v = COACH_VIEW[m.userId as string];
+    if (!u || !v) return [];
+    return [{ init: u.name.slice(0, 1), nm: u.name, ...v }];
+  });
 export const SWAP_CLASSES = [
   { cls: "플레이2 월수반", kids: 10, sub: "재원 10명 (등록 12 · 휴원 2) · 알림 대상은 재원 10명 · 14개월 담당", def: true },
   { cls: "농구 토요 특강", kids: 8, sub: "8명 · 선택 안 하면 다른 코치에게 따로 배정", def: false },
@@ -228,7 +418,7 @@ export const SETTINGS_ROWS = [
   { label: "학원 정보", sub: "원더짐 아카데미 · 브레인/액티브 2부문 · 6프로그램" },
   { label: "할인 규칙", sub: "형제20 · 다종목10 · 장기5 중 MAX 하나 × 이벤트5 · 상한 20%" },
   { label: "환불 규정", sub: "적용 법령·계약·등록 방식 기준 · 학원 정책에 따라 조정 · 양측 확인 기록" },
-  { label: "수납 주기", sub: "3개월 단위 · 1·4·7·10월 시작 (원장 설정 · 변경 가능) · 차량비 별도·무할인" },
+  { label: "수납 주기", sub: "3개월 단위 · 3·6·9·12월 시작 (원장 설정 · 변경 가능) · 차량비 별도·무할인" },
   { label: "직원 권한", sub: "원장 1 · 데스크 1 · 코치 3 — 역할별 원생·수납·차량 접근 범위 설정" },
   { label: "감사 로그", sub: "프로그램·시간표·청구·출결·리포트의 모든 수정에 작성자·시각·이전 값·사유 기록" },
 ];
@@ -239,5 +429,3 @@ export const DASH_KPI = [
   { kk: "전체 원생", kv: "93명", kd: "신규 등록 +11명", tone: "up" as const },
   { kk: "이번 주 출석률", kv: "89%", kd: "긴급결석 1건 접수" },
 ];
-
-export const fmt = (n: number) => n.toLocaleString("ko-KR");

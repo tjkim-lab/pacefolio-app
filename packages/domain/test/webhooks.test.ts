@@ -1,7 +1,8 @@
 /* PG 웹훅: 중복·역순·재조회·시간 정규화 (리뷰 R2 P0-3 · R3 P0-8) */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decidePaymentWebhook, toEpochMs, type WebhookEvent, type PaymentSnapshot } from "../webhooks";
+import { decidePaymentWebhook, type WebhookEvent, type PaymentSnapshot } from "../webhooks";
+import { toEpochMs } from "../time";
 
 const ev = (over: Partial<WebhookEvent>): WebhookEvent => ({
   provider: "tosspay", providerEventId: "e1", targetStatus: "CAPTURED",

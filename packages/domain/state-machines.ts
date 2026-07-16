@@ -6,8 +6,9 @@
    상태전이 ≠ 권한검증 — 분리하되 서비스 계층에서 함께 호출.
    ========================================================= */
 import type { InvoiceStatus, PaymentStatus, RefundStatus } from "./enums";
-import type { Refund } from "./entities";
+import type { Refund, Invoice } from "./entities";
 import type { UserId } from "./ids";
+import { netPaidForInvoice, type SettlementInput } from "./billing";
 
 export interface TransitionResult {
   ok: boolean;
@@ -63,10 +64,34 @@ export function canTransitionInvoice(from: InvoiceStatus, to: InvoiceStatus): Tr
     : deny(`허용되지 않은 청구 전이: ${from}→${to}`);
 }
 
+/** R4 P0: 상태 인접성 + 금액 guard 결합.
+   인접성(canTransitionInvoice)은 "이동 가능한 경로"만 보고, 이 함수가
+   실제 장부 조건을 함께 검증한다 — 서비스 계층은 이 함수를 호출.
+   VOID: 순수납이 남은 청구서를 VOID 하면 장부가 깨진다.
+   입금이 있으면 환불·타 Invoice 이관·credit 처리 중 하나가 선행돼야 한다. */
+export function validateInvoiceTransition(
+  invoice: Invoice,
+  to: InvoiceStatus,
+  settlement: SettlementInput,
+): TransitionResult {
+  const adjacency = canTransitionInvoice(invoice.status, to);
+  if (!adjacency.ok) return adjacency;
+  if (to === "VOID") {
+    const net = netPaidForInvoice(invoice.id, settlement);
+    if (net !== 0) {
+      return deny(`VOID 불가: 순수납 ${net} ≠ 0 — 환불·이관·credit 선행 필요`);
+    }
+  }
+  return ok;
+}
+
 /* --- Refund --- */
 const REFUND_ALLOWED: Record<RefundStatus, readonly RefundStatus[]> = {
   REQUESTED: ["MUTUALLY_APPROVED", "REJECTED"],
-  MUTUALLY_APPROVED: ["PROCESSING", "REJECTED"],
+  // R4 P0: 상호 승인 후 단독 거절 금지 — 거절은 REQUESTED 단계에서만.
+  // 승인 후 취소가 필요해지면 REJECTED 와 구분되는 CANCELLED 상태를
+  // 도입하고 (누가·PG 실행 전까지만·상대 재동의·감사 사유) 정책을 함께 정의한다.
+  MUTUALLY_APPROVED: ["PROCESSING"],
   PROCESSING: ["COMPLETED", "FAILED", "UNKNOWN"], // PROCESSING→REJECTED 금지(진행 후 거절 불가)
   FAILED: ["PROCESSING"],       // PG 확정 실패 — 재시도 가능
   UNKNOWN: ["PROCESSING", "COMPLETED", "FAILED"], // 타임아웃 등 미확정 — PG 재조회로 수렴

@@ -11,15 +11,26 @@
    상태 정의: docs/03-state-machines.md §7.
    ========================================================= */
 import type { Participant } from "./entities";
-import type { AcademyId, ParticipantId, GuardianVerificationId } from "./ids";
+import type {
+  AcademyId, ParticipantId, GuardianVerificationId, GuardianId, UserId,
+  GuardianParticipantLinkId, GuardianInviteRedemptionId,
+} from "./ids";
 import type { VerificationStatus, RelationshipType } from "./enums";
+import { credentialExpired } from "./time";
 
-/** 서버가 OTP 성공 후 발급하는 검증 세션(클라가 boolean 을 주지 않는다). */
+/** 서버가 OTP 성공 후 발급하는 검증 세션(클라가 boolean 을 주지 않는다).
+   R4 P0-6: 세션은 발급받은 사용자에게 귀속되고(actor-binding), 목적이
+   고정되며, 링크 생성에 1회만 소비된다(consumedAt). 소비는 GuardianLink
+   생성과 같은 DB 트랜잭션이어야 한다. */
 export interface GuardianVerificationSession {
   id: GuardianVerificationId;
+  issuedToUserId: UserId;  // 발급 대상 — actor 와 일치해야 사용 가능
+  purpose: "GUARDIAN_LINK";// 다른 용도(로그인 등) OTP 세션 재사용 차단
   verifiedPhone: string;   // OTP 통과한 실제 전화번호(서버 도출)
   verifiedAt: string;      // ISO
   expiresAt: string;       // ISO — 만료 후 무효
+  consumedAt?: string | null;          // 1회 소비 — 있으면 재사용 불가
+  consumedByLinkId?: GuardianParticipantLinkId; // 어느 링크 생성에 소비됐나
 }
 
 /** 원장 선등록: 원생별 보호자 연락처(헌법: 원장 선등록→폰번호 클레임). */
@@ -43,22 +54,47 @@ export interface GuardianInvite {
   revokedAt?: string | null;
 }
 
-/** invite 가 (요청·후보 원생·OTP 전화) 조합에 유효한가. */
+/** invite 가 (요청 코드·후보 원생·OTP 전화) 조합에 유효한가.
+   R4 P0-4: requestCodeHash = 서버가 요청 원문 코드를 hash 한 값.
+   조회된 invite 와 요청 코드가 같은 초대인지 함수 내부에서 직접 결합 —
+   "임의 코드 문자열 + 관계없는 유효 invite context → VERIFIED" 차단. */
 export function isInviteUsable(
   invite: GuardianInvite,
+  requestCodeHash: string,
   academyId: AcademyId,
   candidateId: ParticipantId,
   otpPhone: string,
   nowISO: string,
 ): boolean {
+  if (!requestCodeHash || invite.codeHash !== requestCodeHash) return false; // 코드↔invite 결합
   if (invite.academyId !== academyId) return false;          // 타 학원 코드
   if (invite.participantId !== candidateId) return false;    // 타 원생 코드
   if (invite.revokedAt) return false;                        // 철회
-  if (invite.expiresAt <= nowISO) return false;              // 만료
+  if (credentialExpired(invite.expiresAt, nowISO)) return false; // 만료(epoch·fail-closed)
   if (invite.usedCount >= invite.maxUses) return false;      // 사용 소진
   if (invite.intendedPhone &&
       normalizePhone(invite.intendedPhone) !== normalizePhone(otpPhone)) return false;
   return true;
+}
+
+/* ── 원자적 redemption 계약 (R4 P0-5) ──
+   초대코드 소비는 DB 에서 하나의 트랜잭션이어야 한다:
+     1. Invite row lock(또는 optimistic version 확인)
+     2. revokedAt 확인          3. expiresAt 확인
+     4. usedCount < maxUses     5. redemption 중복 확인
+     6. GuardianLink 생성       7. GuardianVerification 기록
+     8. Redemption 생성(가변 usedCount 단독 증가보다 안전)
+     9. AuditLog               10. DomainEvent/Outbox
+   DB 제약: UNIQUE(inviteId, guardianId, participantId).
+   단일 사용 초대는 invite 단위 조건부 unique 추가. */
+export interface GuardianInviteRedemption {
+  id: GuardianInviteRedemptionId;
+  inviteCodeHash: string;               // 소비된 invite (hash 로 식별)
+  academyId: AcademyId;
+  guardianId: GuardianId;
+  participantId: ParticipantId;
+  verificationSessionId: GuardianVerificationId;
+  redeemedAt: string;                   // ISO
 }
 
 export interface LinkRequest {
@@ -79,10 +115,12 @@ export interface LinkResult {
 }
 
 export interface LinkContext {
+  actorUserId: UserId;                          // 요청 사용자(서버 세션 도출) — R4 P0-6
   session: GuardianVerificationSession | null;  // 서버 조회(없거나 만료면 무효)
   participants: readonly Participant[];         // academyId 격리 조회된 원생
   registeredContacts: readonly RegisteredGuardianContact[]; // 선등록 보호자 연락처
   invite?: GuardianInvite | null;               // 서버가 codeHash 로 해석한 invite(R3 P0-5)
+  requestCodeHash?: string;                     // hash(req.academyInviteCode) — 서버 계산(R4 P0-4)
   nowISO: string;
 }
 
@@ -92,7 +130,17 @@ export function evaluateLink(req: LinkRequest, ctx: LinkContext): LinkResult {
   if (!s || s.id !== req.verificationSessionId) {
     return { status: "PENDING", reason: "휴대전화 인증(OTP) 세션 없음" };
   }
-  if (s.expiresAt <= ctx.nowISO) {
+  // R4 P0-6: 세션 actor-binding — 남의 OTP 세션 재사용 차단
+  if (s.issuedToUserId !== ctx.actorUserId) {
+    return { status: "PENDING", reason: "인증 세션이 요청 사용자에게 발급되지 않음" };
+  }
+  if (s.purpose !== "GUARDIAN_LINK") {
+    return { status: "PENDING", reason: "다른 목적의 인증 세션 — 자녀 연결용 재인증 필요" };
+  }
+  if (s.consumedAt) {
+    return { status: "PENDING", reason: "이미 사용된 인증 세션 — 재인증 필요" };
+  }
+  if (credentialExpired(s.expiresAt, ctx.nowISO)) {
     return { status: "PENDING", reason: "인증 세션 만료 — 재인증 필요" };
   }
   // 2) 필수 동의(버전 포함)
@@ -119,9 +167,10 @@ export function evaluateLink(req: LinkRequest, ctx: LinkContext): LinkResult {
   if (contactMatch) {
     return { status: "VERIFIED", participantId: candidate.id };
   }
-  // 4-b) 대안 — 학원·원생에 귀속된 초대코드(만료·철회·사용횟수·지정전화 검증)
-  if (req.academyInviteCode && ctx.invite &&
-      isInviteUsable(ctx.invite, req.academyId, candidate.id, s.verifiedPhone, ctx.nowISO)) {
+  // 4-b) 대안 — 학원·원생에 귀속된 초대코드.
+  //      요청 코드 hash ↔ 조회된 invite 결합까지 검증(R4 P0-4).
+  if (req.academyInviteCode && ctx.invite && ctx.requestCodeHash &&
+      isInviteUsable(ctx.invite, ctx.requestCodeHash, req.academyId, candidate.id, s.verifiedPhone, ctx.nowISO)) {
     return { status: "VERIFIED", participantId: candidate.id };
   }
   // 5) 전화 주체가 등록 보호자와 결합되지 않음 → 자동 VERIFIED 금지(수동 심사 대기)

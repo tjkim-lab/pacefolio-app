@@ -1,15 +1,33 @@
 /* =========================================================
-   PACEFOLIO — 코치 앱 전용 mock (DB 없음, 프로토타입)
-   공용 lib/mock/data.ts 는 건드리지 않는다. 여기만 확장.
+   PACEFOLIO — 코치 앱 어댑터 (DB 없음, 프로토타입)
+   ---------------------------------------------------------
+   B4 전환: 겹치는 엔티티(반 명단·이름·보호자·예정결석)는 공용
+   fixture(lib/fixtures)에서 파생 — 이름·형제 관계가 원장/학부모 앱과 일치.
+   코치 화면 전용 장식(컨디션·안전배지·채팅·커리큘럼·인수인계)은 여기 로컬.
    순수 데이터·타입만 — "use client" 금지, JSX/아이콘 금지
    (서버·클라이언트 양쪽에서 import 가능해야 함)
    ========================================================= */
+import * as fx from "@/lib/fixtures";
 
-/* ---------- 코치 · 학원 ---------- */
+/* 코치 홈 반 = 플레이2 월수반. 재원 명단은 fixture 정본에서 파생. */
+function play2Participant(id: string) {
+  return fx.participants.find((p) => p.id === (id as never));
+}
+/* 코치 화면 표시명 = 성(姓) 제외 (fixture 정본 이름에서 파생) */
+function shortName(fullName: string): string {
+  return fullName.length >= 3 ? fullName.slice(1) : fullName;
+}
+/* "8세" → 8 */
+function ageOf(ageLabel: string): number {
+  return parseInt(ageLabel, 10) || 0;
+}
+
+/* ---------- 코치 · 학원 (이름·학원명은 fixture 정본) ---------- */
+const KSJ = fx.users.find((u) => u.name === "김선재");
 export const coach = {
-  name: "김선재",
+  name: KSJ?.name ?? "김선재",
   initial: "선",
-  academy: "원더짐 아카데미",
+  academy: fx.academy.name,
   tenure: "14개월째",
   classCount: 2,
   studentCount: 18,
@@ -97,12 +115,32 @@ export interface Kid {
   safe?: string; // 안전 배지
   paused?: boolean; // 휴원
 }
-export const KIDS: Kid[] = [
-  { n: "도담", a: 8, cond: "컨디션 주의" },
-  { n: "서준", a: 7 },
-  { n: "하윤", a: 8 },
-  { n: "민준", a: 8, planned: true, why: "아파요", safe: "⚠ 알레르기" },
-  { n: "지호", a: 7 },
+/* 코치 화면 전용 뷰 플래그(도메인 필드 아님): 컨디션·안전배지. */
+const COACH_VIEW_FLAGS: Record<string, Pick<Kid, "cond" | "safe">> = {
+  p_dodam: { cond: "컨디션 주의" },
+  p_minjun: { safe: "⚠ 알레르기" },
+};
+/* 오늘 예정 결석(보호자 통보) — fixture attendanceNotices 정본 */
+const plannedAbsence = new Map(
+  fx.attendanceNotices
+    .filter((n) => n.type === "ABSENCE")
+    .map((n) => [n.participantId as string, n.reason]),
+);
+/* 코치 홈 반(플레이2 월수반) 재원 — fixture 정본, 코치 표시 순서 */
+const P2_ROSTER_ORDER = ["p_dodam", "p_seojun", "p_hayun", "p_minjun", "p_jiho"];
+const rosterKids: Kid[] = P2_ROSTER_ORDER.flatMap((id) => {
+  const p = play2Participant(id);
+  if (!p) return [];
+  const why = plannedAbsence.get(id);
+  return [{
+    n: shortName(p.name),
+    a: ageOf(p.ageLabel),
+    ...(why ? { planned: true, why } : {}),
+    ...COACH_VIEW_FLAGS[id],
+  }];
+});
+/* 코치 전용(다른 앱에 없는) 원생 — 로컬 장식 */
+const localOnlyKids: Kid[] = [
   { n: "수아", a: 8 },
   { n: "예린", a: 8 },
   { n: "시우", a: 7 },
@@ -111,17 +149,25 @@ export const KIDS: Kid[] = [
   { n: "로아", a: 8, paused: true },
   { n: "준서", a: 7, paused: true },
 ];
+export const KIDS: Kid[] = [...rosterKids, ...localOnlyKids];
 export const ATT_CYCLE: Record<AttStatus, AttStatus> = { "": "p", p: "a", a: "l", l: "p" };
 export const ATT_TXT: Record<AttStatus, string> = { "": "미체크", p: "출석 ○", l: "지각 △", a: "결석 ✕" };
 
 /* 결석 예정 → 실제 출결 확정 시트 옵션 */
 export const ABS_WHY = ["아이가 실제로 도착함", "학부모가 현장에서 취소함", "예정대로 결석", "기타"];
 
-/* 보호자 관계 (도담·서준 = 같은 보호자 → 알림 합산) */
-export const GUARDIAN_GID: Record<string, string> = {
-  도담: "g1", 서준: "g1", 하윤: "g2", 민준: "g3", 지호: "g4", 수아: "g5",
-  예린: "g6", 시우: "g7", 은우: "g8", 다온: "g9", 로아: "g10", 준서: "g11",
-};
+/* 보호자 그룹(형제 = 같은 보호자 → 알림 합산) — fixture guardianLinks 정본.
+   도담·서준이 같은 보호자를 공유하는 것이 원장·학부모 앱과 단일 소스로 일치. */
+export const GUARDIAN_GID: Record<string, string> = {};
+for (const id of P2_ROSTER_ORDER) {
+  const p = play2Participant(id);
+  const link = p && fx.guardianLinks.find((l) => l.participantId === p.id);
+  if (p && link) GUARDIAN_GID[shortName(p.name)] = link.guardianId as string;
+}
+/* 코치 전용 원생은 개별 보호자(로컬) */
+["수아", "예린", "시우", "은우", "다온", "로아", "준서"].forEach((n, i) => {
+  GUARDIAN_GID[n] = `gd_local_${i + 1}`;
+});
 
 /* ---------- 수업 모드 STEP2 · 오늘 활동 ---------- */
 export interface ClassAct {

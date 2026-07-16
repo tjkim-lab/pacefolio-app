@@ -1,8 +1,13 @@
 /* =========================================================
-   PACEFOLIO 원장 앱 — 목업(pacefolio-owner-app.html) 이식용 mock
-   공용 lib/mock/data.ts 는 건드리지 않고, 목업의 풍부한 데이터를
-   여기 별도 모듈로 둔다. (plain 모듈 — "use client" 아님)
+   PACEFOLIO — 원장 앱 어댑터 (DB 없음, 프로토타입)
+   ---------------------------------------------------------
+   B4 전환: 겹치는 엔티티(원생·반·코치·보호자·청구 금액·예정결석)는
+   공용 fixture(lib/fixtures)에서 파생 — 이름·형제 관계·금액이
+   코치/학부모 앱과 단일 소스로 일치.
+   원장 화면 전용 장식(이모지·재원상태·차량·보강·위저드 문구·설정 행)은
+   여기 로컬. (plain 모듈 — "use client" 아님)
    ========================================================= */
+import * as fx from "@/lib/fixtures";
 
 export type KidStatus = "재원" | "체험" | "휴원" | "퇴원 예정";
 export type PayLabel = "완납" | "미납" | "일할 청구";
@@ -34,61 +39,127 @@ export interface Kid {
   makeups?: Makeup[];
 }
 
-export const KIDS: Kid[] = [
-  {
-    id: "dodam", nm: "김도담", em: "🧒", age: 8, cls: "플레이2 월수반", coach: "김선재",
-    status: "재원", parent: "010-****-1234 (어머님)", sib: "김서준 (동생) · 같은 보호자 연결",
-    pay: "완납", payDetail: "₩405,000 · 수강료 360,000 + 차량 45,000 · 원생별 분리 청구", makeup: 2,
+/* ---------- fixture 파생 헬퍼 ---------- */
+const fmtWon = (n: number) => `₩${n.toLocaleString("ko-KR")}`;
+/* "010-3000-1234" → "010-****-1234" (금액·연락처는 개인정보 — 마스킹 표시) */
+function maskPhone(phone: string): string {
+  const [a, , c] = phone.split("-");
+  return `${a}-****-${c}`;
+}
+const REL_LABEL: Record<string, string> = { MOTHER: "어머님", FATHER: "아버님" };
+/* 청구 상태 → 원장 화면 수납 라벨 */
+const PAY_LABEL: Record<string, PayLabel> = {
+  PAID: "완납",
+  OVERDUE: "미납",
+  ISSUED: "일할 청구",
+};
+
+/* 원장 화면 전용 뷰 플래그(도메인 필드 아님): 이모지·재원상태·차량·보강·
+   수납 부가설명. 금액·이름·반·보호자는 fixture 정본에서 파생. */
+interface OwnerViewFlags {
+  em: string;
+  status: KidStatus;
+  payNote: string; // payDetail 뒷부분 설명 (금액 앞머리는 fixture invoice.total)
+  makeup: number;
+  veh: Veh | null;
+  sibRel?: string; // 형제 관계 표기(동생/형) — 관계 자체는 guardianLinks 정본
+  alert?: string;
+  makeups?: Makeup[];
+}
+const OWNER_VIEW_FLAGS: Record<string, OwnerViewFlags> = {
+  p_dodam: {
+    em: "🧒", status: "재원", sibRel: "동생",
+    payNote: "수강료 360,000 + 차량 45,000 · 원생별 분리 청구", makeup: 2,
     veh: { ride: "래미안아파트 정문 · 2:40 탑승", drop: "같은 곳 · 5:10 하원", seat: "주니어 카시트 필수 · 멀미 있어 앞좌석 선호" },
     makeups: [
       { t: "10/13 (학원 휴무 대체)", s: "보강일 미지정 · 학부모 요청 있음" },
       { t: "10/16 결석 (병원)", s: "긴급결석 처리됨 · 원장 처리 전" },
     ],
   },
-  {
-    id: "seojun", nm: "김서준", em: "👦", age: 7, cls: "플레이2 월수반", coach: "김선재",
-    status: "재원", parent: "010-****-1234 (어머님)", sib: "김도담 (형) · 같은 보호자 연결",
-    pay: "완납", payDetail: "₩333,000 · 수강료 288,000(형제 20%) + 차량 45,000", makeup: 0,
+  p_seojun: {
+    em: "👦", status: "재원", sibRel: "형",
+    payNote: "수강료 288,000(형제 20%) + 차량 45,000", makeup: 0,
     veh: { ride: "래미안아파트 정문 · 2:40 탑승 (형과 동승)", drop: "같은 곳 · 5:10 하원", seat: "주니어 카시트 필수" },
   },
-  {
-    id: "minjun", nm: "박민준", em: "🧒", age: 8, cls: "플레이2 월수반", coach: "김선재",
-    status: "재원", parent: "010-****-5678 (어머님)",
-    pay: "미납", payDetail: "₩330,000 · 마감 6일 지남 · 리마인드 2회", makeup: 0,
+  p_minjun: {
+    em: "🧒", status: "재원",
+    payNote: "마감 6일 지남 · 리마인드 2회", makeup: 0,
     veh: null, alert: "⚠️ 견과류 알러지",
   },
-  {
-    id: "hayun", nm: "정하윤", em: "👧", age: 8, cls: "플레이2 월수반", coach: "김선재",
-    status: "재원", parent: "010-****-2345 (아버님)",
-    pay: "완납", payDetail: "₩360,000 · 자동결제", makeup: 0, veh: null,
+  p_hayun: {
+    em: "👧", status: "재원",
+    payNote: "자동결제", makeup: 0, veh: null,
   },
-  {
-    id: "sua", nm: "이수아", em: "👧", age: 9, cls: "축구 화금반 + 인라인", coach: "이창진",
-    status: "재원", parent: "010-****-8765 (어머님)",
-    pay: "미납", payDetail: "₩486,000 · 다종목 10% 적용가", makeup: 0,
+  p_sua: {
+    em: "👧", status: "재원",
+    payNote: "다종목 10% 적용가", makeup: 0,
     veh: { ride: "한빛초 후문 · 3:50 탑승", drop: "홈플러스 앞 · 6:20 하원", seat: "특이사항 없음" },
   },
-  {
-    id: "jiho", nm: "최지호", em: "👦", age: 7, cls: "플레이2 월수반", coach: "김선재",
-    status: "재원", parent: "010-****-9012 (어머님)",
-    pay: "완납", payDetail: "₩450,000 · 플레이1→2 승급 반영", makeup: 0, veh: null,
+  p_jiho: {
+    em: "👦", status: "재원",
+    payNote: "플레이1→2 승급 반영", makeup: 0, veh: null,
   },
-  {
-    id: "yerin", nm: "한예린", em: "👧", age: 10, cls: "축구 화금반", coach: "이창진",
-    status: "퇴원 예정", parent: "010-****-3456 (어머님)",
-    pay: "완납", payDetail: "₩240,000 · 12월 퇴원 예정 (부분 청구)", makeup: 0, veh: null,
+  p_yerin: {
+    em: "👧", status: "퇴원 예정",
+    payNote: "12월 퇴원 예정 (부분 청구)", makeup: 0, veh: null,
   },
-  {
-    id: "ian", nm: "최이안", em: "🧒", age: 7, cls: "축구 화금반", coach: "이창진",
-    status: "재원", parent: "010-****-7890 (아버님)",
-    pay: "일할 청구", payDetail: "₩225,000 · 10/28 입회 · 남은 실제 수업 10회", makeup: 0,
+  p_ian: {
+    em: "🧒", status: "재원",
+    payNote: "10/28 입회 · 남은 실제 수업 10회", makeup: 0,
     veh: { ride: "강동도서관 앞 · 3:50 탑승", drop: "같은 곳 · 6:20 하원", seat: "신규 — 첫 주 동승 확인 필요" },
   },
-];
+};
+
+/* 원생 8명 — 이름·나이·반·코치·보호자(형제 그룹)·금액은 fixture 정본에서 파생 */
+export const KIDS: Kid[] = fx.participants.map((p) => {
+  const v = OWNER_VIEW_FLAGS[p.id as string];
+
+  /* 반·코치: 활성 등록 → 반 → 담당 코치. 다종목(수아)은 "주반 + 종목" 표기 */
+  const ens = fx.enrollments.filter((e) => e.participantId === p.id && e.status === "ACTIVE");
+  const classes = ens.map((e) => fx.classes.find((c) => c.id === e.classId)!);
+  const extra = classes.slice(1).map((c) => {
+    const pr = fx.programs.find((x) => x.id === c.programId);
+    return ` + ${(pr?.name ?? c.name).split(" ")[0]}`; // "인라인 기초" → "인라인"
+  });
+  const cls = classes[0].name + extra.join("");
+  const coach = fx.users.find((u) => u.id === classes[0].coachUserId)?.name ?? "";
+
+  /* 보호자: guardianLinks 정본 → 마스킹 연락처 + 관계. 형제 = 같은 보호자 */
+  const link = fx.guardianLinks.find((l) => l.participantId === p.id)!;
+  const gUser = fx.users.find(
+    (u) => u.id === fx.guardians.find((g) => g.id === link.guardianId)?.userId,
+  )!;
+  const parent = `${maskPhone(gUser.phone ?? "")} (${REL_LABEL[link.relationshipType] ?? "보호자"})`;
+  const sibLink = fx.guardianLinks.find(
+    (l) => l.guardianId === link.guardianId && l.participantId !== p.id,
+  );
+  const sibName = sibLink && fx.participants.find((x) => x.id === sibLink.participantId)?.name;
+
+  /* 수납: fixture invoice 정본 — 합계·상태가 학부모 앱 청구서와 일치 */
+  const inv = fx.invoices.find((i) => i.participantId === p.id)!;
+
+  return {
+    id: (p.id as string).replace(/^p_/, ""),
+    nm: p.name,
+    em: v.em,
+    age: parseInt(p.ageLabel, 10) || 0,
+    cls,
+    coach,
+    status: v.status,
+    parent,
+    ...(sibName ? { sib: `${sibName} (${v.sibRel}) · 같은 보호자 연결` } : {}),
+    pay: PAY_LABEL[inv.status] ?? "완납",
+    payDetail: `${fmtWon(inv.total)} · ${v.payNote}`,
+    makeup: v.makeup,
+    veh: v.veh,
+    ...(v.alert ? { alert: v.alert } : {}),
+    ...(v.makeups ? { makeups: v.makeups } : {}),
+  };
+});
 
 export const kidById = (id: string) => KIDS.find((k) => k.id === id);
 
-/* ───── 홈: 반별 정원 현황 ───── */
+/* ───── 홈: 반별 정원 현황 — 반이름·정원·재원은 fixture classes 정본 ───── */
 export type MeterTone = "ok" | "full" | "low";
 export interface CapMeter {
   nm: string;
@@ -99,16 +170,43 @@ export interface CapMeter {
   tone: MeterTone;
   recruit?: boolean;
 }
-export const CAP_METERS: CapMeter[] = [
-  { nm: "플레이2 · 월수반", sub: "브레인 · 김선재", cur: 10, cap: 12, note: "10 / 12", tone: "ok" },
-  { nm: "플레이2 · 유아반", sub: "브레인 · 이코치", cur: 12, cap: 12, note: "12 / 12", tone: "full" },
-  { nm: "축구 · 화금반", sub: "액티브 · 이창진", cur: 16, cap: 16, note: "16 / 16 · 대기 2", tone: "full" },
-  { nm: "플레이3 · 화목반", sub: "브레인 · 박코치", cur: 11, cap: 12, note: "11 / 12", tone: "ok" },
-  { nm: "인라인 토요반", sub: "액티브 · 박코치", cur: 5, cap: 12, note: "5 / 12 · 42%", tone: "low", recruit: true },
-  { nm: "농구 · 토요특강", sub: "액티브 · 김선재", cur: 8, cap: 12, note: "8 / 12", tone: "ok" },
-];
+const DIV_LABEL: Record<string, string> = { BRAIN: "브레인", ACTIVE: "액티브" };
+/* 원장 화면 전용 뷰 플래그: 톤·대기 표기·모집 배지. 수치는 fixture 정본 */
+const CAP_VIEW_FLAGS: Record<string, { tone: MeterTone; noteSuffix?: string; recruit?: boolean; plainName?: boolean }> = {
+  c_play2_mw: { tone: "ok" },
+  c_play2_ya: { tone: "full" },
+  c_soccer_tf: { tone: "full", noteSuffix: " · 대기 2" },
+  c_play3_th: { tone: "ok" },
+  c_inline_sat: { tone: "low", noteSuffix: " · 42%", recruit: true, plainName: true },
+  c_basket_sat: { tone: "ok" },
+};
+export const CAP_METERS: CapMeter[] = fx.classes.map((c) => {
+  const v = CAP_VIEW_FLAGS[c.id as string];
+  const pr = fx.programs.find((x) => x.id === c.programId);
+  const coach = fx.users.find((u) => u.id === c.coachUserId)?.name ?? "";
+  return {
+    nm: v.plainName ? c.name : c.name.replace(" ", " · "), // "플레이2 월수반" → "플레이2 · 월수반"
+    sub: `${DIV_LABEL[pr?.division ?? ""] ?? ""} · ${coach}`,
+    cur: c.enrolled,
+    cap: c.capacity,
+    note: `${c.enrolled} / ${c.capacity}${v.noteSuffix ?? ""}`,
+    tone: v.tone,
+    ...(v.recruit ? { recruit: true } : {}),
+  };
+});
 
-/* ───── 홈: 오늘 처리할 일 ───── */
+/* ───── 홈: 오늘 처리할 일 ─────
+   미납 합계 = fixture OVERDUE 청구(민준 330,000 + 수아 531,000 정본)
+   + 목업 전용 로컬 미납 3명(fixture 밖) — 정본 금액이 바뀌면 합계도 따라감 */
+const overdueInvoices = fx.invoices.filter((i) => i.status === "OVERDUE");
+const UNPAID_LOCAL = { count: 3, amount: 804000 }; // 목업 전용 미납분(원생 미표시)
+const UNPAID_COUNT = overdueInvoices.length + UNPAID_LOCAL.count;
+const UNPAID_TOTAL = overdueInvoices.reduce((s, i) => s + i.total, 0) + UNPAID_LOCAL.amount;
+/* 긴급결석 = fixture attendanceNotices 정본(박민준 · "아파요") — 코치 앱과 동일 건 */
+const absNotice = fx.attendanceNotices.find((n) => n.type === "ABSENCE");
+const absKidName =
+  fx.participants.find((p) => p.id === absNotice?.participantId)?.name ?? "";
+
 export type TodoKey = "notice" | "unpaid" | "event" | "absence";
 export interface TodoDef {
   key: TodoKey;
@@ -128,8 +226,8 @@ export const TODOS: TodoDef[] = [
     action: "다시 알림", after: "재알림 발송 완료 · 추적 중", afterSub: "다음 확인: 내일 오전 10시", bn: "재알림 ✓",
   },
   {
-    key: "unpaid", icon: "card", title: "수강료 기한 초과 5명",
-    sub: "9월 시작 수납기간 ₩1,620,000 · 전원 마감 지남(연체)",
+    key: "unpaid", icon: "card", title: `수강료 기한 초과 ${UNPAID_COUNT}명`,
+    sub: `9월 시작 수납기간 ${fmtWon(UNPAID_TOTAL)} · 전원 마감 지남(연체)`,
     action: "리마인드", after: "리마인드 발송 완료 · 결제 대기", afterSub: "결제 완료 아님 — 입금 시 자동 확인", bn: "발송 ✓",
   },
   {
@@ -138,8 +236,8 @@ export const TODOS: TodoDef[] = [
     action: "재발송", after: "재발송 완료 · 응답 대기", afterSub: "응답이 오면 알려드려요", bn: "재발송 ✓",
   },
   {
-    key: "absence", icon: "alert", hot: true, title: "긴급결석 1건 — 박민준",
-    sub: '오늘 2:30 플레이2 · 사유: "아파요" · 학부모 접수',
+    key: "absence", icon: "alert", hot: true, title: `긴급결석 1건 — ${absKidName}`,
+    sub: `오늘 2:30 플레이2 · 사유: "${absNotice?.reason ?? ""}" · 학부모 접수`,
     action: "확인", after: "긴급결석 확인 완료", afterSub: "학부모에게 '확인했어요' 전달 — 보강 자동 생성 아님", bn: "확인 ✓",
   },
 ];
@@ -158,7 +256,7 @@ export const TODO_CONFIRM: Record<
   },
   unpaid: {
     title: "미납 리마인드",
-    rows: [["대상 원생(기한 초과)", "5명"], ["미납 합계", "1,620,000원"], ["발송 채널", "알림톡 우선 · 실패 시 SMS 대체"]],
+    rows: [["대상 원생(기한 초과)", `${UNPAID_COUNT}명`], ["미납 합계", `${UNPAID_TOTAL.toLocaleString("ko-KR")}원`], ["발송 채널", "알림톡 우선 · 실패 시 SMS 대체"]],
     label: "리마인드 발송",
     toast: "리마인드 발송 완료 · 결제 대기",
   },
@@ -204,7 +302,7 @@ export const BILL_CLASSES: BillClass[] = [
   { nm: "인라인 · 토요반", days: "토", plan: 13, hol: 0, holNote: "수업 요일과 겹치는 공휴일 없음", off: 1, offNote: "12/27(토) 연말 휴무", extra: 0, extraNote: "—", fin: 12 },
 ];
 
-/* ───── 수납: 청구 초안 특이 케이스 ───── */
+/* ───── 수납: 청구 초안 특이 케이스 (금액 = fixture 정본과 동일) ───── */
 export interface BillFlag {
   ini: string;
   gold?: boolean;
@@ -216,8 +314,8 @@ export interface BillFlag {
 }
 export const BILL_FLAGS: BillFlag[] = [
   { ini: "지", gold: true, name: "최지호 — 반 변경", sub: "플레이1 → 플레이2 승급 (연령 배정)", tag: "+90,000", tagTone: "warn", amt: "₩450,000" },
-  { ini: "예", gold: true, name: "한예린 — 12월 퇴원 예정", sub: "남은 회차만 부분 청구 (일할)", tag: "부분", tagTone: "warn", amt: "₩120,000" },
-  { ini: "수", name: "이수아 — 다종목 할인 적용", sub: "축구+인라인 · MAX 10% 하나만", tag: "10%↓", tagTone: "accent", amt: "₩486,000" },
+  { ini: "예", gold: true, name: "한예린 — 12월 퇴원 예정", sub: "남은 회차만 부분 청구 (일할)", tag: "부분", tagTone: "warn", amt: "₩240,000" },
+  { ini: "수", name: "이수아 — 다종목 할인 적용", sub: "축구+인라인 · MAX 10% 하나만", tag: "10%↓", tagTone: "accent", amt: "₩531,000" },
 ];
 
 /* ───── 수납: 중간입회 계산기 ───── */
@@ -245,12 +343,27 @@ export const NOTICE_TARGETS: { label: string; n: number; p: number }[] = [
   { label: "인라인만", n: 12, p: 12 },
 ];
 
-/* ───── 학원: 강사 ───── */
-export const COACHES: { ini: string; gold?: boolean; name: string; sub: string; swap?: boolean; state?: string }[] = [
-  { ini: "김", gold: true, name: "김선재 코치", sub: "플레이2 월수반 · 퇴사 예정 (마지막 근무 11/30)", swap: true },
-  { ini: "이", name: "이창진 코치", sub: "축구 화금반 · 어제 가입 완료", state: "재직" },
-  { ini: "박", name: "박코치", sub: "플레이3 화목반 · 인라인 토요반", state: "재직" },
-];
+/* ───── 학원: 강사 — 이름은 fixture users 정본, 상태 장식은 로컬 ───── */
+const COACH_ORDER = ["u_coach_ksj", "u_coach_lcj", "u_coach_park"];
+const COACH_VIEW_FLAGS: Record<string, { gold?: boolean; sub: string; swap?: boolean; state?: string }> = {
+  u_coach_ksj: { gold: true, sub: "플레이2 월수반 · 퇴사 예정 (마지막 근무 11/30)", swap: true },
+  u_coach_lcj: { sub: "축구 화금반 · 어제 가입 완료", state: "재직" },
+  u_coach_park: { sub: "플레이3 화목반 · 인라인 토요반", state: "재직" },
+};
+export const COACHES: { ini: string; gold?: boolean; name: string; sub: string; swap?: boolean; state?: string }[] =
+  COACH_ORDER.flatMap((id) => {
+    const u = fx.users.find((x) => x.id === (id as never));
+    if (!u) return [];
+    const v = COACH_VIEW_FLAGS[id];
+    return [{
+      ini: u.name[0],
+      ...(v.gold ? { gold: true } : {}),
+      name: u.name.includes("코치") ? u.name : `${u.name} 코치`, // "박코치"는 그대로
+      sub: v.sub,
+      ...(v.swap ? { swap: true } : {}),
+      ...(v.state ? { state: v.state } : {}),
+    }];
+  });
 
 /* ───── 학원: 설정 항목 ───── */
 export const SETTINGS_ROWS: { label: string; sub: string }[] = [

@@ -25,6 +25,8 @@ jobs:
         run: npm run typecheck
       - name: Domain tests (정산 불변식·상태전이·권한 actor-binding·웹훅·멱등·동의·OpenAPI drift)
         run: npm test
+      - name: OpenAPI lint (R4 — YAML 파서 검증 + Redocly 규칙, drift test 가 못 잡는 문법 오류 차단)
+        run: npx --yes @redocly/cli@1.34.2 lint api/openapi.yaml
       - name: Web lint
         run: npm run lint
       - name: Web build

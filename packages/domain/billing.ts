@@ -250,25 +250,59 @@ export function checkReferenceIntegrity(
     }
   }
 
-  // Refund 금액 ↔ allocation 합계 (R3 P0-6)
+  // Refund 금액 ↔ allocation 합계 (R3 P0-6) + 부분승인 금지 정책 (R4 P0-1)
+  // 정책: 초기 버전은 부분승인 미지원 — 전액 승인 또는 전액 거절.
+  // 일부만 승인하려면 기존 요청을 거절하고 수정 금액으로 재요청한다.
+  // (requested = Σalloc 강제 + approved < requested 허용은 모순 — 리뷰 §3)
   for (const r of i.refunds) {
     const allocSum = sum(i.refundAllocations.filter((ra) => ra.refundId === r.id).map((ra) => ra.amount));
     if (r.requestedAmount !== allocSum) {
       v.push({ code: "REFUND_AMOUNT_MISMATCH", ref: r.id, message: `requestedAmount ${r.requestedAmount} ≠ Σalloc ${allocSum}` });
     }
-    if (r.approvedAmount !== undefined && r.approvedAmount > r.requestedAmount) {
-      v.push({ code: "REFUND_AMOUNT_MISMATCH", ref: r.id, message: `approved ${r.approvedAmount} > requested ${r.requestedAmount}` });
+    // 부분승인 금지: approvedAmount 가 있으면 반드시 requestedAmount 와 동일
+    if (r.approvedAmount !== undefined) {
+      if (!isValidMoney(r.approvedAmount)) {
+        v.push({ code: "INVALID_MONEY_AMOUNT", ref: r.id, message: `Refund.approvedAmount ${r.approvedAmount}` });
+      } else if (r.approvedAmount !== r.requestedAmount) {
+        v.push({ code: "REFUND_PARTIAL_APPROVAL_UNSUPPORTED", ref: r.id, message: `approved ${r.approvedAmount} ≠ requested ${r.requestedAmount} — 부분승인 미지원(거절 후 재요청)` });
+      }
+    }
+    // 상태별 필수 금액: 상호승인·처리중·완료부터 approvedAmount 필수
+    if ((r.status === "MUTUALLY_APPROVED" || r.status === "PROCESSING" || r.status === "COMPLETED") &&
+        r.approvedAmount === undefined) {
+      v.push({ code: "REFUND_APPROVED_AMOUNT_REQUIRED", ref: r.id, message: `${r.status} 인데 approvedAmount 없음` });
     }
     if (r.status === "COMPLETED") {
       if (r.completedAmount === undefined) {
         v.push({ code: "REFUND_AMOUNT_MISMATCH", ref: r.id, message: "COMPLETED 인데 completedAmount 없음" });
       } else {
+        if (!isValidMoney(r.completedAmount)) {
+          v.push({ code: "INVALID_MONEY_AMOUNT", ref: r.id, message: `Refund.completedAmount ${r.completedAmount}` });
+        }
         if (r.completedAmount !== allocSum) {
           v.push({ code: "REFUND_AMOUNT_MISMATCH", ref: r.id, message: `completed ${r.completedAmount} ≠ Σalloc ${allocSum} — 장부 이중차감 위험` });
         }
-        if (r.approvedAmount !== undefined && r.completedAmount > r.approvedAmount) {
-          v.push({ code: "REFUND_AMOUNT_MISMATCH", ref: r.id, message: `completed ${r.completedAmount} > approved ${r.approvedAmount}` });
+        if (r.approvedAmount !== undefined && r.completedAmount !== r.approvedAmount) {
+          v.push({ code: "REFUND_AMOUNT_MISMATCH", ref: r.id, message: `completed ${r.completedAmount} ≠ approved ${r.approvedAmount}` });
         }
+      }
+    }
+  }
+
+  // R4 P0-2: Refund 1건 = 원생 1명 연쇄 무결성.
+  // Refund.participantId = 모든 RefundAllocation.participantId = Invoice.participantId.
+  // 합산결제에서 형제 청구서를 함께 결제했어도 환불은 원생별 Refund 로 분리한다
+  // (상호 승인·사유·회차 계산·분쟁 대응·AuditLog 가 원생 단위로 명확해짐).
+  for (const r of i.refunds) {
+    const ras = i.refundAllocations.filter((ra) => ra.refundId === r.id);
+    for (const ra of ras) {
+      if (ra.participantId !== r.participantId) {
+        v.push({ code: "REFUND_PARTICIPANT_CHAIN_MISMATCH", ref: ra.id, message: `alloc.participant ${ra.participantId} ≠ Refund.participant ${r.participantId} — 환불은 원생 1명 귀속` });
+      }
+      // Refund.academyId = Invoice.academyId (Payment 쪽은 기존 검사에 있음)
+      const inv = invoiceById.get(ra.invoiceId);
+      if (inv && r.academyId !== inv.academyId) {
+        v.push({ code: "REFUND_TENANT_MISMATCH", ref: ra.id, message: `Refund.academy ${r.academyId} ≠ Invoice.academy ${inv.academyId}` });
       }
     }
   }

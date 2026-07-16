@@ -1,9 +1,13 @@
 /* =========================================================
-   PACEFOLIO 학부모 앱 — 목업(pacefolio-parent-app.html) 이식용 데이터
-   순수 모듈(no "use client") — 서버/클라 어디서든 import 가능.
-   ⚠️ 공용 lib/mock/data.ts 는 건드리지 않음 (헌법).
-   원천의 CONTENT/DETAIL/BANNERS/QA/BILL/INV_AMT 를 1:1 전사.
+   PACEFOLIO — 학부모 앱 어댑터 (DB 없음, 프로토타입)
+   ---------------------------------------------------------
+   B4 전환: 겹치는 엔티티(청구액·합산결제·자녀 나이·반/코치 표기)는 공용
+   fixture(lib/fixtures)에서 파생 — 금액·형제 관계가 원장/코치 앱과 일치.
+   학부모 화면 전용 장식(타일·피드·리포트 문구·채팅·배너·Q&A·강동 학원)은
+   여기 로컬. 순수 모듈(no "use client") — 서버/클라 어디서든 import 가능.
+   ⚠️ 공용 lib/fixtures 는 읽기 전용 (헌법).
    ========================================================= */
+import * as fx from "@/lib/fixtures";
 
 export type ChildName = "도담" | "서준";
 export type AcademyName = "원더짐 아카데미" | "강동 스포츠클럽";
@@ -13,6 +17,36 @@ export type IconKey =
   | "home" | "cal" | "chat" | "user" | "bell" | "check" | "cam" | "award"
   | "mega" | "clock" | "book" | "chev" | "back" | "send" | "lock" | "shield"
   | "loop" | "trend" | "bulb" | "doc" | "help" | "trophy";
+
+/* =========================================================
+   fixture 파생 — 로그인 보호자 = 박서연(gd_psy), 자녀 = 도담·서준 형제.
+   청구액·합산액·나이·반/코치 표기를 정본에서 파생해 원장·코치 앱과 일치.
+   ========================================================= */
+/* 화면 표시명 = 성(姓) 제외 ("김도담" → "도담") — 코치 앱과 동일 규칙 */
+const shortName = (full: string): string => (full.length >= 3 ? full.slice(1) : full);
+/* 405000 → "405,000" (단위 없이) */
+const comma = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+const PSY_USER = fx.users.find((u) => u.name === "박서연");
+const PSY_GUARDIAN = fx.guardians.find((g) => g.userId === PSY_USER?.id);
+/* 보호자 청구서 묶음(도담·서준, 항목·기납부액 포함) — invoice.total = Σlines 정합 보장 */
+const PSY_INVOICES = PSY_GUARDIAN ? fx.invoicesForGuardian(PSY_GUARDIAN.id) : [];
+const invTotalOf = (child: ChildName): number | undefined =>
+  PSY_INVOICES.find((r) => shortName(r.participantName) === child)?.invoice.total;
+/* 자녀 나이 라벨 — fixture participants 정본 */
+const ageOf = (child: ChildName): string | undefined =>
+  fx.participants.find((p) => shortName(p.name) === child)?.ageLabel;
+
+/* 도담의 원더짐 반·코치 — enrollment → class → program/coach 로 파생.
+   학부모 화면 표기: 반은 프로그램명("플레이2"), 코치는 성+코치("김코치") */
+const dodamP = fx.participants.find((p) => p.name === "김도담");
+const dodamEnr = dodamP && fx.enrollments.find((e) => e.participantId === dodamP.id && e.status === "ACTIVE");
+const dodamCls = dodamEnr && fx.classes.find((c) => c.id === dodamEnr.classId);
+const dodamProg = dodamCls && fx.programs.find((p) => p.id === dodamCls.programId);
+const dodamCoach = dodamCls && fx.users.find((u) => u.id === dodamCls.coachUserId);
+const P2 = dodamProg?.name ?? "플레이2";
+const P2_COACH = `${(dodamCoach?.name ?? "김선재").charAt(0)}코치`;
+const P2_PERWEEK = dodamCls?.perWeek ?? 2;
 
 /* ---------- 원생·학원별 상태 초기값 (participantId + academyId) ---------- */
 export interface PState {
@@ -34,19 +68,25 @@ export const initialPS = (): Record<string, PState> => ({
 });
 
 /* ---------- 결제 상태 (보호자 계정 + 학원 단위) ---------- */
+/* TODO(정본 간극): fixture 정본은 원더짐 4분기 PAID(738,000 합산결제 완료)이나,
+   학부모 앱 데모는 결제 플로우 시연을 위해 미결제 상태로 시작 — 화면 보존 우선으로 로컬 유지. */
 export interface PayState { paid: boolean; autoPay: boolean; payMethod: string }
 export const initialPay = (): Record<AcademyName, PayState> => ({
   "원더짐 아카데미": { paid: false, autoPay: false, payMethod: "카카오페이" },
   "강동 스포츠클럽": { paid: true, autoPay: false, payMethod: "카카오페이" },
 });
 
+/* 나이는 fixture 정본 파생 · 다니는 학원 목록은 로컬(강동은 원더짐 fixture 밖 별도 학원) */
 export const CHILDREN: Record<ChildName, { age: string; acads: AcademyName[] }> = {
-  "도담": { age: "8세", acads: ["원더짐 아카데미", "강동 스포츠클럽"] },
-  "서준": { age: "7세", acads: ["원더짐 아카데미"] },
+  "도담": { age: ageOf("도담") ?? "8세", acads: ["원더짐 아카데미", "강동 스포츠클럽"] },
+  "서준": { age: ageOf("서준") ?? "7세", acads: ["원더짐 아카데미"] },
 };
 
-/* ---------- 원생별 청구액 (원더짐 · 가정 단위 합산) ---------- */
-export const INV_AMT: Record<ChildName, number> = { "도담": 405000, "서준": 333000 };
+/* ---------- 원생별 청구액 (원더짐 · 가정 단위 합산) — fixture 청구서 정본 파생 ---------- */
+export const INV_AMT: Record<ChildName, number> = {
+  "도담": invTotalOf("도담") ?? 405000,
+  "서준": invTotalOf("서준") ?? 333000,
+};
 
 /* ---------- 콘텐츠 (홈·일정·채팅·우리아이가 모두 이 데이터로 바뀜) ---------- */
 export interface Tile { v: string; k: string; cls?: "good" | "warn"; tab?: ChildSeg | "child" }
@@ -71,17 +111,20 @@ export interface Content {
 }
 
 export const CONTENT: Record<string, Content> = {
+  /* 도담의 반(P2="플레이2")·코치(P2_COACH="김코치") 표기는 fixture 정본 파생 — 개명 시 함께 반영 */
   "도담|원더짐 아카데미": {
-    hero: { tone: "today", cls: "오늘 · 플레이2 수업", when: "오후 2:30 · 본관 2층 · 김코치", dd: "D-3시간", canAbsent: true, rsvpRequested: false, absCls: "플레이2" },
+    hero: { tone: "today", cls: `오늘 · ${P2} 수업`, when: `오후 2:30 · 본관 2층 · ${P2_COACH}`, dd: "D-3시간", canAbsent: true, rsvpRequested: false, absCls: P2 },
     tiles: [{ v: "92%", k: "참여율 (보강 포함)", cls: "good", tab: "child" }, { v: "3주째", k: "꾸준히 참여하고 있어요", cls: "good" }, { v: "1개", k: "새 마일스톤", cls: "warn", tab: "child" }],
-    feed: [{ ic: "book", push: "report", html: "지난 수업 리포트가 도착했어요 — 한발 서기 <b>18초 신기록!</b>", sub: "플레이2 12회차 · 10/20(월)", neu: true }, { ic: "cam", push: "photos", html: "지난 수업 사진 3장", sub: "플레이2 · 10/20(월)", neu: true }],
-    mstone: { title: "드리블 스텝2 달성 🎉", sub: "김코치가 수업 중 기록 · 10/25(토) 축구", prog: 60, next: "다음 목표 <b>스텝3</b>까지 2회 남았어요" },
+    feed: [{ ic: "book", push: "report", html: "지난 수업 리포트가 도착했어요 — 한발 서기 <b>18초 신기록!</b>", sub: `${P2} 12회차 · 10/20(월)`, neu: true }, { ic: "cam", push: "photos", html: "지난 수업 사진 3장", sub: `${P2} · 10/20(월)`, neu: true }],
+    mstone: { title: "드리블 스텝2 달성 🎉", sub: `${P2_COACH}가 수업 중 기록 · 10/25(토) 축구`, prog: 60, next: "다음 목표 <b>스텝3</b>까지 2회 남았어요" },
     notices: [{ t: "플레이2 금토반 신규 모집 (12월 개강 · 7~9세)", s: "오늘 오전", read: false }, { t: "강동 유소년 챔피언십 접수 마감 D-7", s: "참가비 19,900원", read: false }, { t: "10월 시설점검 안내 (10/13 월)", s: "지난주", read: true }],
-    chat: { room: "플레이2 전체방", sub: "플레이2", preview: "김코치: 수업 마쳤습니다! 리포트 보냈어요 🙂", coach: "김코치 1:1", coachPrev: "네 어머님, 도담이 오늘 컨디션 좋았어요" },
-    events: { "27": [{ en: "오늘 · 플레이2 수업", em: "오후 2:30–3:30 · 본관 2층 · 김코치 · 탭하면 오늘의 진도", tag: "수업", push: "lesson", today: true }], "29": [{ en: "수 · 플레이2 수업", em: "오후 2:30–3:30 · 본관 2층 · 김코치", tag: "수업" }], "1": [{ en: "토 · 액티브 축구", em: "오전 11:00–12:00 · 야외 코트 · 김코치", tag: "수업" }] },
-    profile: { desc: "브레인스포츠 플레이2 (주2회) · 액티브 축구", chips: ["등번호 7", "포지션 미드필더", "14회차 진행"] },
+    chat: { room: `${P2} 전체방`, sub: P2, preview: `${P2_COACH}: 수업 마쳤습니다! 리포트 보냈어요 🙂`, coach: `${P2_COACH} 1:1`, coachPrev: "네 어머님, 도담이 오늘 컨디션 좋았어요" },
+    events: { "27": [{ en: `오늘 · ${P2} 수업`, em: `오후 2:30–3:30 · 본관 2층 · ${P2_COACH} · 탭하면 오늘의 진도`, tag: "수업", push: "lesson", today: true }], "29": [{ en: `수 · ${P2} 수업`, em: `오후 2:30–3:30 · 본관 2층 · ${P2_COACH}`, tag: "수업" }], "1": [{ en: "토 · 액티브 축구", em: `오전 11:00–12:00 · 야외 코트 · ${P2_COACH}`, tag: "수업" }] },
+    profile: { desc: `브레인스포츠 ${P2} (주${P2_PERWEEK}회) · 액티브 축구`, chips: ["등번호 7", "포지션 미드필더", "14회차 진행"] },
     hasContest: true, hasAbsenceCard: true, growth: "dodam", bill: "wg", contest: "dodam",
   },
+  /* TODO(C5): 서준 화면의 "플레이2 유아반 · 이코치"는 fixture 정본(플레이2 월수반 · 김선재)과
+     불일치 — 알려진 간극. 화면 보존 우선으로 로컬 문자열 유지, 정본 정렬은 별도 결정 후. */
   "서준|원더짐 아카데미": {
     hero: { tone: "today", cls: "오늘 · 플레이2 유아반", when: "오전 10:00 · 본관 1층 · 이코치", dd: "곧 시작", canAbsent: true, rsvpRequested: true, absCls: "플레이2 유아반" },
     tiles: [{ v: "96%", k: "참여율", cls: "good", tab: "child" }, { v: "2주째", k: "꾸준히 나오고 있어요", cls: "good" }, { v: "0개", k: "새 마일스톤" }],
@@ -118,20 +161,22 @@ const act = (a: [string, string, string, string, string, string[], string]): Act
   ({ emoji: a[0], name: a[1], min: a[2], skill: a[3], desc: a[4], prep: a[5], goal: a[6] });
 
 export const DETAIL: Record<string, Detail> = {
+  /* 도담 상세의 반·코치 표기도 fixture 정본 파생(P2·P2_COACH) — 리포트 문구·사진은 로컬 장식 */
   "도담|원더짐 아카데미": {
-    report: { sub: "10/20(월) · 12회차", meta: "10/20(월) · 플레이2 · 12회차 · 실제 진행한 수업 (코치 확인 완료)", title: "도담이의 수업 리포트", who: "출석 ✓ · 오후 2:30–3:30 · 김코치",
+    report: { sub: "10/20(월) · 12회차", meta: `10/20(월) · ${P2} · 12회차 · 실제 진행한 수업 (코치 확인 완료)`, title: "도담이의 수업 리포트", who: `출석 ✓ · 오후 2:30–3:30 · ${P2_COACH}`,
       items: [["done", "한발 서기 밸런스", "18초 — 신기록! 🎉"], ["done", "리듬 스텝 점프", "완료"], ["half", "색깔 신호 반응 게임", "다음 시간 이어서"]],
-      coach: "김코치", say: "도담이가 오늘 밸런스에서 반 최고 기록을 세웠어요! 집중력도 좋아지고 있어서 다음 주 평가가 기대돼요 👏", photos: ["🤸", "🥁", "📷"],
+      coach: P2_COACH, say: "도담이가 오늘 밸런스에서 반 최고 기록을 세웠어요! 집중력도 좋아지고 있어서 다음 주 평가가 기대돼요 👏", photos: ["🤸", "🥁", "📷"],
       note: "측정·관찰은 <b>코치가 기록</b>하고, 기록된 결과(18초·신기록)는 <b>성장 리포트에 자동 반영</b> — 우리 아이 탭의 마일스톤이 함께 갱신돼요." },
-    lesson: { sub: "플레이2 · 14회차", lk: "오늘 오후 2:30 예정 · 플레이2", title: "14회차 · 균형과 리듬 ②", lm: "분기 커리큘럼 24회 중 14번째 · 김코치", prog: 58,
+    lesson: { sub: `${P2} · 14회차`, lk: `오늘 오후 2:30 예정 · ${P2}`, title: "14회차 · 균형과 리듬 ②", lm: `분기 커리큘럼 24회 중 14번째 · ${P2_COACH}`, prog: 58,
       acts: [
         act(["🤸", "한발 서기 밸런스 게임", "10분", "균형감각", "한 발로 서서 버티는 시간을 재요. 친구들과 게임처럼 겨루면서 균형 감각을 키우는 활동이에요.", ["맨몸 (준비물 없음)"], "지난주보다 5초 더 버티기"]),
         act(["🥁", "리듬 스텝 — 박자에 맞춰 점프", "12분", "협응성", "음악 박자에 맞춰 스텝을 밟고 점프해요. 몸과 머리가 같이 움직이는 협응 과제예요.", ["실내화", "스텝판 (학원 준비)"], "8박자 스텝, 2번 연속 성공하기"]),
         act(["🧠", "색깔 신호 반응 게임", "8분", "인지·집중", "코치가 드는 색깔 카드를 보고 몸이 바로 반응해요. 초록이면 점프, 빨강이면 멈춤!", ["색깔 카드 (학원 준비)"], "신호 보고 1초 안에 반응하기"]),
       ], prep: ["👟 실내화", "물통", "양말 필수"] },
-    room: { coach: "김코치", coachMsg: "수업 마쳤습니다! 아이들 모두 잘했어요. 리포트 보냈으니 확인해주세요 🙂", cardH: "수업 완료 · 12회차", cardB: "밸런스 기초 · 출석 8명<br>개별 수업 리포트가 <b>각 보호자의 앱으로</b> 발송됐어요", parent: "하윤맘", parentMsg: "오늘도 감사합니다 코치님!", when: "10/20(월) 오후 3:40" },
-    noti: [["invoice", "doc", "3분기 수강료 청구서가 도착했어요 (11/10까지)", "결제 필요 · 어제", "행동 필요"], ["lesson", "clock", "오늘 플레이2 수업 3시간 전이에요 — 준비물을 확인해 주세요", "자동 리마인드 · 오전 11:30", "새 소식"], ["photos", "cam", "새 수업 사진 3장이 올라왔어요", "플레이2 · 10/20(월)", ""], ["@child", "award", "도담이가 드리블 스텝2를 달성했어요", "성장 기록 · 10/25(토)", ""]],
+    room: { coach: P2_COACH, coachMsg: "수업 마쳤습니다! 아이들 모두 잘했어요. 리포트 보냈으니 확인해주세요 🙂", cardH: "수업 완료 · 12회차", cardB: "밸런스 기초 · 출석 8명<br>개별 수업 리포트가 <b>각 보호자의 앱으로</b> 발송됐어요", parent: "하윤맘", parentMsg: "오늘도 감사합니다 코치님!", when: "10/20(월) 오후 3:40" },
+    noti: [["invoice", "doc", "3분기 수강료 청구서가 도착했어요 (11/10까지)", "결제 필요 · 어제", "행동 필요"], ["lesson", "clock", `오늘 ${P2} 수업 3시간 전이에요 — 준비물을 확인해 주세요`, "자동 리마인드 · 오전 11:30", "새 소식"], ["photos", "cam", "새 수업 사진 3장이 올라왔어요", `${P2} · 10/20(월)`, ""], ["@child", "award", "도담이가 드리블 스텝2를 달성했어요", "성장 기록 · 10/25(토)", ""]],
   },
+  /* TODO(C5): 서준 상세의 "플레이2 유아반 · 이코치"도 위 CONTENT와 같은 알려진 간극 — 로컬 유지 */
   "서준|원더짐 아카데미": {
     report: { sub: "10/20(월) · 11회차", meta: "10/20(월) · 플레이2 유아반 · 11회차 · 실제 진행한 수업 (코치 확인 완료)", title: "서준이의 수업 리포트", who: "출석 ✓ · 오전 10:00–10:50 · 이코치",
       items: [["done", "제자리 균형 서기", "5초 — 잘 버텼어요"], ["done", "콩주머니 던지기", "완료"], ["half", "라인 따라 걷기", "다음 시간 이어서"]],
@@ -201,8 +246,12 @@ export const QA: Record<AcademyName, { updated: string; items: QAItem[] }> = {
 
 /* ---------- 학원 단위 청구 정보 ---------- */
 export interface Bill { k: string; title: string; amount: string; detail: string; due: string; dday: string }
+/* 원더짐(wg) 합산액·원생별 내역 = fixture 청구서 정본 파생 (박서연 합산결제 738,000과 정합).
+   강동(gd)은 원더짐 fixture 밖 별도 학원 — 로컬 유지. 납기 문구는 데모 장식(로컬). */
+const wgTotal = PSY_INVOICES.reduce((s, r) => s + r.invoice.total, 0);
+const wgBreakdown = PSY_INVOICES.map((r) => `${shortName(r.participantName)} ${comma(r.invoice.total)}`).join(" + ");
 export const BILL: Record<"wg" | "gd", Bill> = {
-  wg: { k: "결제할 청구서 — 원생별 2건 · 합산 결제", title: "9~11월 수강료", amount: "738,000원", detail: "도담 405,000 + 서준 333,000 · 원생별 2건 합산", due: "11/10", dday: "D-14" },
+  wg: { k: `결제할 청구서 — 원생별 ${PSY_INVOICES.length}건 · 합산 결제`, title: "9~11월 수강료", amount: `${comma(wgTotal)}원`, detail: `${wgBreakdown} · 원생별 ${PSY_INVOICES.length}건 합산`, due: "11/10", dday: "D-14" },
   gd: { k: "", title: "9~11월 수영 수강료", amount: "96,000원", detail: "도담 수영 초급반 · 주1회", due: "11/10", dday: "완납" },
 };
 

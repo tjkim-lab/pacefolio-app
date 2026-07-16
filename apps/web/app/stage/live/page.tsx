@@ -10,9 +10,9 @@ import Link from "next/link";
 import * as db from "@/lib/fixtures";
 import type { AttendanceRecordStatus } from "@pacefolio/domain";
 
-const SESSION_ID = "s_soccer_1028"; // 10/28(화) 축구반
-const HAJUN_ID = "p_hajun";
-const GUARDIAN_ID = "gd_psy";
+const SESSION_ID = "s_play2_1027"; // 10/27(월) 플레이2 월수반
+const KID_ID = "p_dodam";          // 김도담(박서연 자녀)
+const GUARDIAN_ID = "gd_psy";      // 박서연 → 도담·서준
 
 export default function LiveSourceDemo() {
   // 클라이언트 상태 = 이 데모에서 조작 가능한 부분 (나머진 fixtures 그대로)
@@ -27,18 +27,18 @@ export default function LiveSourceDemo() {
   // ── 세 역할이 "같은 데이터"를 각자 관점으로 ──
   const roster = soccerEnroll.map((e) => {
     const p = db.participants.find((x) => x.id === e.participantId)!;
-    const isHajun = p.id === (HAJUN_ID as never);
+    const isKid = p.id === (KID_ID as never);
     return {
       name: p.name,
-      expected: isHajun && noticeAbsent ? "결석 예정" : null,
-      actual: isHajun ? record : null,
+      expected: isKid && noticeAbsent ? "결석 예정" : null,
+      actual: isKid ? record : null,
     };
   });
 
   const ownerTask = useMemo(() => {
     if (!noticeAbsent) return null; // 통보 없으면 할 일 없음
-    if (record) return { title: "이하준 10/28 결석 — 처리 완료", stage: "RESOLVED", result: "ACKNOWLEDGED" };
-    return { title: "이하준 10/28 결석 통보 — 코치 반영 확인", stage: "IN_PROGRESS", result: "ACKNOWLEDGED" };
+    if (record) return { title: "김도담 10/27 결석 — 처리 완료", stage: "RESOLVED", result: "ACKNOWLEDGED" };
+    return { title: "김도담 10/27 결석 통보 — 코치 반영 확인", stage: "IN_PROGRESS", result: "ACKNOWLEDGED" };
   }, [noticeAbsent, record]);
 
   const parentInvoices = db.invoicesForGuardian(GUARDIAN_ID as never);
@@ -60,7 +60,7 @@ export default function LiveSourceDemo() {
         </div>
         <p className="text-[13px] text-white/50 mb-5">
           아래 버튼을 누르면 <b className="text-white/80">lib/fixtures 하나</b>가 학부모·코치·원장 세 화면에 동시에 반영됩니다.
-          같은 <code className="text-emerald-300">participantId=p_hajun</code> · <code className="text-emerald-300">sessionId=s_soccer_1028</code> 로 연결.
+          같은 <code className="text-emerald-300">participantId=p_dodam</code> · <code className="text-emerald-300">sessionId=s_play2_1027</code> 로 연결.
         </p>
 
         {/* 조작 패널 */}
@@ -69,7 +69,7 @@ export default function LiveSourceDemo() {
             onClick={() => { setNoticeAbsent((v) => !v); setRecord(null); }}
             className={`text-[13px] font-bold px-4 h-11 rounded-xl transition ${noticeAbsent ? "bg-amber-400/90 text-black" : "bg-white/10 text-white/80 hover:bg-white/15"}`}
           >
-            👩 엄마: 이하준 10/28 결석 통보 {noticeAbsent ? "취소" : "하기"}
+            👩 엄마: 김도담 10/27 결석 통보 {noticeAbsent ? "취소" : "하기"}
           </button>
           <button
             onClick={() => setRecord((v) => (v ? null : "ABSENT"))}
@@ -85,7 +85,7 @@ export default function LiveSourceDemo() {
           {/* 학부모 */}
           <RoleCard tone="#3b82f6" emoji="👨‍👩‍👧" role="학부모 (박서연)">
             <div className="space-y-3">
-              <Row label="이하준 · 10/28 축구">
+              <Row label="김도담 · 10/27 플레이2">
                 {noticeAbsent
                   ? <Pill tone="amber">결석 통보함 ✓</Pill>
                   : <Pill tone="slate">정상 등원 예정</Pill>}
@@ -104,7 +104,7 @@ export default function LiveSourceDemo() {
 
           {/* 코치 */}
           <RoleCard tone="#f97316" emoji="🏃" role="코치 (김선재)">
-            <div className="text-[11px] text-white/40 mb-1.5">10/28(화) 축구반 명단 · {roster.length}명</div>
+            <div className="text-[11px] text-white/40 mb-1.5">10/27(월) 플레이2 월수반 명단 · {roster.length}명</div>
             <div className="space-y-1.5">
               {roster.map((r) => (
                 <div key={r.name} className="flex items-center justify-between text-[12.5px]">

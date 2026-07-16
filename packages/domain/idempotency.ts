@@ -10,6 +10,7 @@
    operation namespace: 결제준비/승인/환불요청/환불승인 각각 분리.
    ========================================================= */
 import type { IdempotencyRecordId, UserId, AcademyId } from "./ids";
+import { dedupRecordExpired } from "./time";
 // scope = academyId + actorId + operation + idempotencyKey (R3 P1-4)
 
 export interface IdempotencyRecord {
@@ -51,8 +52,9 @@ export function resolveIdempotency(
 ): IdempotencyDecision {
   if (!existing) return { action: "PROCEED" };
 
-  // 보관기간 만료 → 신규 취급
-  if (existing.expiresAt <= incoming.nowISO) return { action: "PROCEED" };
+  // 보관기간 만료 → 신규 취급 (epoch 비교. 파싱 실패 = 미만료 취급 —
+  // 만료 오판이 PROCEED(재처리) → 이중 처리 위험이므로 차단 유지가 fail-closed)
+  if (dedupRecordExpired(existing.expiresAt, incoming.nowISO)) return { action: "PROCEED" };
 
   // 스코프 방어(정상 조회면 일치) — academy/actor/operation 불일치면 재사용 충돌로 간주
   if (

@@ -14,8 +14,13 @@ export type SheetId = "noti" | "abs" | "contest" | "mk" | "auto" | "autoOff" | "
 
 /* ⚠️ PG 시뮬레이션 (R3 P1-6): UI 성공 ≠ PG CAPTURED.
    paymentSubmitted = 제출(AUTHORIZED, 청구서 미변경) → paymentCaptured = 승인 확정(PAID).
-   실서비스: 승인 확정은 webhook/PG 재조회로만 — 이 시뮬레이션은 실결제 전이 근거 아님. */
-export const PG_SIMULATION = true;
+   실서비스: 승인 확정은 webhook/PG 재조회로만 — 이 시뮬레이션은 실결제 전이 근거 아님.
+   R4 §15: 프로덕션 빌드에서 강제 false(상수 활성 금지) — dev 이거나
+   검토 프리뷰 플래그(빌드 시점 env)일 때만 시뮬레이터 동작. 실결제 화면은
+   서버 payment ID polling + webhook 결과만 신뢰하는 경로로 대체 예정. */
+export const PG_SIMULATION =
+  process.env.NODE_ENV !== "production" ||
+  process.env.NEXT_PUBLIC_PACEFOLIO_PG_SIMULATION === "1";
 export const PG_SIMULATION_CAPTURE_MS = 1200; // 가짜 webhook 지연
 
 export interface Receipt {
