@@ -45,7 +45,7 @@ const dodamCls = dodamEnr && fx.classes.find((c) => c.id === dodamEnr.classId);
 const dodamProg = dodamCls && fx.programs.find((p) => p.id === dodamCls.programId);
 const dodamCoach = dodamCls && fx.users.find((u) => u.id === dodamCls.coachUserId);
 const P2 = dodamProg?.name ?? "플레이2";
-const P2_COACH = `${(dodamCoach?.name ?? "김선재").charAt(0)}코치`;
+export const P2_COACH = `${(dodamCoach?.name ?? "김선재").charAt(0)}코치`;
 const P2_PERWEEK = dodamCls?.perWeek ?? 2;
 
 /* ---------- 원생·학원별 상태 초기값 (participantId + academyId) ---------- */
@@ -137,13 +137,13 @@ export const CONTENT: Record<string, Content> = {
     hasContest: false, hasAbsenceCard: false, growth: "seojun", bill: "wg", contest: "none",
   },
   "도담|강동 스포츠클럽": {
-    hero: { tone: "week", cls: "이번 주 · 수영 초급반", when: "토 오전 10:00 · 강동 스포츠클럽 · 박코치", dd: "D-5일", canAbsent: false, rsvpRequested: false, absCls: "수영 초급반" },
+    hero: { tone: "week", cls: "이번 주 · 수영 초급반", when: "토 오전 10:00 · 강동 스포츠클럽 · 박수진 선생님", dd: "D-5일", canAbsent: false, rsvpRequested: false, absCls: "수영 초급반" },
     tiles: [{ v: "100%", k: "참여율", cls: "good" }, { v: "6주째", k: "개근 중", cls: "good" }, { v: "자유형", k: "현재 단계" }],
     feed: [{ ic: "book", push: "report", html: "수영 진도 안내가 도착했어요", sub: "수영 초급반 · 10/25(토)", neu: false }],
     mstone: null,
     notices: [{ t: "강동 스포츠클럽 11월 자유수영 개방 안내", s: "이번 주", read: false }],
-    chat: { room: "수영 초급반 전체방", sub: "수영 초급반", preview: "박코치: 오늘 발차기 좋았어요", coach: "박코치 1:1", coachPrev: "도담이 물 무서움이 많이 줄었어요" },
-    events: { "1": [{ en: "토 · 수영 초급반", em: "오전 10:00–10:50 · 강동 스포츠클럽 · 박코치", tag: "수업", push: "lesson", today: true }] },
+    chat: { room: "수영 초급반 전체방", sub: "수영 초급반", preview: "박수진 선생님: 오늘 발차기 좋았어요", coach: "박수진 선생님 1:1", coachPrev: "도담이 물 무서움이 많이 줄었어요" },
+    events: { "1": [{ en: "토 · 수영 초급반", em: "오전 10:00–10:50 · 강동 스포츠클럽 · 박수진 선생님", tag: "수업", push: "lesson", today: true }] },
     profile: { desc: "수영 초급반 (주1회) · 강동 스포츠클럽", chips: ["자유형 단계", "6주째 개근"] },
     hasContest: false, hasAbsenceCard: false, growth: "swim", bill: "gd", contest: "none",
   },
@@ -191,16 +191,16 @@ export const DETAIL: Record<string, Detail> = {
     noti: [["invoice", "doc", "3분기 수강료 청구서가 도착했어요 (11/10까지)", "결제 필요 · 어제", "행동 필요"], ["report", "book", "지난 수업 리포트가 도착했어요", "플레이2 유아반 11회차 · 10/20(월)", "새 소식"], ["@child", "award", "서준이가 제자리 균형 5초를 기록했어요", "성장 기록 · 10/23(목)", ""]],
   },
   "도담|강동 스포츠클럽": {
-    report: { sub: "10/25(토) · 수영 초급", meta: "10/25(토) · 수영 초급반 · 실제 진행한 수업 (코치 확인 완료)", title: "도담이의 수영 진도 안내", who: "출석 ✓ · 오전 10:00–10:50 · 박코치",
+    report: { sub: "10/25(토) · 수영 초급", meta: "10/25(토) · 수영 초급반 · 실제 진행한 수업 (코치 확인 완료)", title: "도담이의 수영 진도 안내", who: "출석 ✓ · 오전 10:00–10:50 · 박수진 선생님",
       items: [["done", "자유형 발차기", "리듬이 안정됐어요"], ["done", "물속 호흡", "완료"], ["half", "팔 동작 연결", "다음 시간 이어서"]],
-      coach: "박코치", say: "도담이가 물 무서움이 많이 줄었어요. 발차기 리듬이 좋아져서 다음엔 호흡 연결을 해볼게요 🏊", photos: ["🏊", "💧", "📷"],
-      note: "수영 진도는 <b>박코치가 기록</b>하고, 현재 단계(자유형 등)는 <b>우리 아이 탭</b>에서 이어서 확인할 수 있어요." },
-    lesson: { sub: "수영 초급반 · 주1회", lk: "이번 주 토 오전 10:00 예정 · 수영 초급반", title: "자유형 발차기 · 호흡", lm: "주1회 진행 · 박코치", prog: 70,
+      coach: "박수진 선생님", say: "도담이가 물 무서움이 많이 줄었어요. 발차기 리듬이 좋아져서 다음엔 호흡 연결을 해볼게요 🏊", photos: ["🏊", "💧", "📷"],
+      note: "수영 진도는 <b>박수진 선생님이 기록</b>하고, 현재 단계(자유형 등)는 <b>우리 아이 탭</b>에서 이어서 확인할 수 있어요." },
+    lesson: { sub: "수영 초급반 · 주1회", lk: "이번 주 토 오전 10:00 예정 · 수영 초급반", title: "자유형 발차기 · 호흡", lm: "주1회 진행 · 박수진 선생님", prog: 70,
       acts: [
         act(["🏊", "자유형 발차기", "15분", "지구력", "킥판을 잡고 발차기 리듬을 익혀요. 곧게 차는 연습이에요.", ["수영복", "수경", "수모"], "25m 발차기 이어가기"]),
         act(["💧", "물속 호흡", "10분", "호흡", "코로 물속에서 숨을 내쉬고 고개를 들어 마셔요.", ["수경"], "5회 연속 호흡하기"]),
       ], prep: ["🩱 수영복", "🥽 수경", "🧢 수모"] },
-    room: { coach: "박코치", coachMsg: "오늘 발차기 좋았어요! 다음 주엔 호흡을 붙여볼게요 🙂", cardH: "수업 완료 · 수영 초급", cardB: "자유형 발차기 · 출석 6명<br>진도 안내가 <b>각 보호자의 앱으로</b> 발송됐어요", parent: "선우맘", parentMsg: "감사합니다 코치님!", when: "10/25(토) 오전 11:00" },
+    room: { coach: "박수진 선생님", coachMsg: "오늘 발차기 좋았어요! 다음 주엔 호흡을 붙여볼게요 🙂", cardH: "수업 완료 · 수영 초급", cardB: "자유형 발차기 · 출석 6명<br>진도 안내가 <b>각 보호자의 앱으로</b> 발송됐어요", parent: "선우맘", parentMsg: "감사합니다 코치님!", when: "10/25(토) 오전 11:00" },
     noti: [["report", "book", "수영 진도 안내가 도착했어요", "수영 초급반 · 10/25(토)", "새 소식"], ["@child", "award", "도담이가 자유형 발차기를 완료했어요", "수영 진도 · 10/25(토)", ""]],
   },
 };

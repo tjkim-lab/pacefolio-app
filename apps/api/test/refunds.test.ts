@@ -253,6 +253,66 @@ test("R9-P0-02: 다른 Invoice 의 PaymentAllocation 을 가리키는 RA 직접 
   );
 });
 
+test("R10(R9-P0-02 마지막 경계): Invoice·RA participant 는 일치, Refund 만 다른 원생 → 정확히 새 FK 가 거부", async () => {
+  /* 리뷰 §7 구성 그대로: Payment P 가 원생 B 의 Invoice 를 결제,
+     Refund 는 원생 A 명의 — 기존 4개 FK 는 전부 만족, 새 3열 FK 만이 차단. */
+  await db.insert(s.participants).values([
+    { id: "p_childA", academyId: "a_wg", name: "원생A", birth: "2018-01-01", ageLabel: "7세" },
+    { id: "p_childB", academyId: "a_wg", name: "원생B", birth: "2018-02-02", ageLabel: "7세" },
+  ]);
+  await db.insert(s.invoices).values({
+    id: "inv_childB", academyId: "a_wg", participantId: "p_childB", enrollmentId: "e_cb",
+    billingPeriodId: "bp_q4", status: "PAID", total: 70000, dueDate: "2025-12-10",
+  });
+  await db.insert(s.payments).values({
+    id: "pay_p", academyId: "a_wg", guardianId: "gd_mom", amount: 70000, status: "CAPTURED", idempotencyKey: "kp",
+  });
+  await db.insert(s.paymentAllocations).values({
+    id: "pa_p", paymentId: "pay_p", invoiceId: "inv_childB", academyId: "a_wg", amount: 70000,
+  });
+  // Refund 는 원생 A 명의 (같은 Payment)
+  await db.insert(s.refunds).values({
+    id: "ref_childA", academyId: "a_wg", paymentId: "pay_p", participantId: "p_childA",
+    status: "REQUESTED", reasonCode: "X", requestedAmount: 70000,
+    requestedByUserId: mom.userId, requestedAt: NOW(), idempotencyKey: "rk-x",
+  });
+  // 위장 RA: refund=원생A 명의, RA·Invoice=원생B — 기존 4 FK 전부 만족하는 구성
+  await assert.rejects(
+    db.insert(s.refundAllocations).values({
+      id: "ra_mismatch", refundId: "ref_childA", paymentAllocationId: "pa_p",
+      paymentId: "pay_p", invoiceId: "inv_childB",
+      participantId: "p_childB", // Invoice 와 일치 — fk_ra_invoice_participant 통과
+      academyId: "a_wg", amount: 70000,
+    }),
+    (e: unknown) => {
+      // 정확히 새 제약으로 실패했는지 — 다른 FK 의 우연한 거부가 아님을 증명
+      const msgs: string[] = [];
+      for (let cur = e as { message?: string; cause?: unknown } | undefined; cur; cur = cur.cause as never) {
+        if (cur.message) msgs.push(cur.message);
+      }
+      assert.match(msgs.join(" | "), /fk_ra_refund_participant_academy/);
+      return true;
+    },
+  );
+  // 대조군: participant 를 Refund 와 일치시키면… Invoice 는 원생 B 라 이번엔
+  // fk_ra_invoice_participant 가 막는다 — 두 FK 가 양방향 경계를 완성
+  await assert.rejects(
+    db.insert(s.refundAllocations).values({
+      id: "ra_mismatch2", refundId: "ref_childA", paymentAllocationId: "pa_p",
+      paymentId: "pay_p", invoiceId: "inv_childB",
+      participantId: "p_childA", academyId: "a_wg", amount: 70000,
+    }),
+    (e: unknown) => {
+      const msgs: string[] = [];
+      for (let cur = e as { message?: string; cause?: unknown } | undefined; cur; cur = cur.cause as never) {
+        if (cur.message) msgs.push(cur.message);
+      }
+      assert.match(msgs.join(" | "), /fk_ra_invoice_participant/);
+      return true;
+    },
+  );
+});
+
 test("종결 후: 중복 COMPLETED 웹훅 = 상태 불변 · 재환불 요청 거부", async () => {
   const w = await webhook({ kind: "refund", providerEventId: "rf-3", refundId, targetStatus: "FAILED", occurredAt: new Date(Date.now() + 3000).toISOString() });
   assert.equal(((await w.json()) as { decision: string }).decision, "RECONCILE"); // 종결 되돌리기 금지

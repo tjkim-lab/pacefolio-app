@@ -193,9 +193,10 @@ test("C8-01 회귀: 동일 Invoice 의 두 Payment CAPTURED 동시 도착 → AP
     { id: rid("paB"), paymentId: payB, invoiceId, academyId: w.academyId, amount: 100000 },
   ]);
   const t = NOW();
+  const evA = rid("evA"); const evB = rid("evB");
   const [dA, dB] = await Promise.all([
-    processPgWebhook(w.db, "mockpg", { providerEventId: rid("evA"), paymentId: payA, targetStatus: "CAPTURED", occurredAt: t, rawPayload: "{}" }, NOW()),
-    processPgWebhook(w.db, "mockpg", { providerEventId: rid("evB"), paymentId: payB, targetStatus: "CAPTURED", occurredAt: t, rawPayload: "{}" }, NOW()),
+    processPgWebhook(w.db, "mockpg", { providerEventId: evA, paymentId: payA, targetStatus: "CAPTURED", occurredAt: t, rawPayload: "{}" }, NOW()),
+    processPgWebhook(w.db, "mockpg", { providerEventId: evB, paymentId: payB, targetStatus: "CAPTURED", occurredAt: t, rawPayload: "{}" }, NOW()),
   ]);
   const actions = [dA.action, dB.action].sort();
   assert.deepEqual(actions, ["APPLY", "RECONCILE"], `기대 APPLY+RECONCILE, 실제 ${actions}`);
@@ -206,19 +207,16 @@ test("C8-01 회귀: 동일 Invoice 의 두 Payment CAPTURED 동시 도착 → AP
   // Invoice PAID · CAPTURED 배분 합 ≤ total
   const inv = (await w.db.select().from(s2.invoices).where(eq2(s2.invoices.id, invoiceId)))[0];
   assert.equal(inv.status, "PAID");
-  // inbox APPLIED 1 · RECONCILE_REQUIRED 1 / outbox PAYMENT_CAPTURED 1
-  const inbox = (await w.db.select().from(s2.webhookInbox)).filter((i) =>
-    [payA, payB].some(() => true) && (i.status === "APPLIED" || i.status === "RECONCILE_REQUIRED"));
-  const applied = inbox.filter((i) => i.status === "APPLIED").length;
-  const reconcile = inbox.filter((i) => i.status === "RECONCILE_REQUIRED").length;
-  assert.ok(applied >= 1 && reconcile >= 1, `inbox APPLIED ${applied} / RECONCILE ${reconcile}`);
-  const outbox = (await w.db.select().from(s2.outboxEvents))
-    .filter((o) => o.eventType === "PAYMENT_CAPTURED" && o.payload.includes(payA.slice(0, 8)) || o.payload.includes(payB));
+  // R9-P1-02: 이번 두 이벤트 ID 로 특정해 inbox 상태를 **정확히 1+1** 검증
+  const inbox = (await w.db.select().from(s2.webhookInbox))
+    .filter((i) => i.providerEventId === evA || i.providerEventId === evB);
+  assert.equal(inbox.length, 2);
+  assert.equal(inbox.filter((i) => i.status === "APPLIED").length, 1, "APPLIED 정확히 1건");
+  assert.equal(inbox.filter((i) => i.status === "RECONCILE_REQUIRED").length, 1, "RECONCILE_REQUIRED 정확히 1건");
   assert.equal(
     (await w.db.select().from(s2.outboxEvents)).filter((o) =>
       o.eventType === "PAYMENT_CAPTURED" && (o.payload.includes(payA) || o.payload.includes(payB))).length,
     1, "PAYMENT_CAPTURED outbox 정확히 1건");
-  void outbox;
 });
 
 test("C8-02 B: 동일 Invoice 에 서로 다른 멱등키 prepare ×20 → Payment 1·나머지 ACTIVE_ATTEMPT", { skip }, async () => {

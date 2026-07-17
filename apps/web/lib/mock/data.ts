@@ -97,10 +97,10 @@ export const programs: Program[] = [
 ];
 
 export const classes: ClassRoom[] = [
-  { id: "c-play2-mwf", programId: "p-play2", name: "플레이2 월수금 4시반", daysLabel: "월·수·금", perWeek: 3, time: "16:00~16:50", coachName: "박코치", capacity: 12, enrolled: 10 },
-  { id: "c-play2-tt", programId: "p-play2", name: "플레이2 화목 5시반", daysLabel: "화·목", perWeek: 2, time: "17:00~17:50", coachName: "박코치", capacity: 12, enrolled: 8 },
-  { id: "c-inline-tt", programId: "p-inline", name: "인라인 화목 4시반", daysLabel: "화·목", perWeek: 2, time: "16:00~16:50", coachName: "이코치", capacity: 10, enrolled: 9 },
-  { id: "c-soccer-sat", programId: "p-soccer", name: "축구 토요반", daysLabel: "토", perWeek: 1, time: "10:00~11:20", coachName: "정코치", capacity: 16, enrolled: 14 },
+  { id: "c-play2-mwf", programId: "p-play2", name: "플레이2 월수금 4시반", daysLabel: "월·수·금", perWeek: 3, time: "16:00~16:50", coachName: "김선재", capacity: 12, enrolled: 10 },
+  { id: "c-play2-tt", programId: "p-play2", name: "플레이2 화목 5시반", daysLabel: "화·목", perWeek: 2, time: "17:00~17:50", coachName: "이도현", capacity: 12, enrolled: 8 },
+  { id: "c-inline-tt", programId: "p-inline", name: "인라인 화목 4시반", daysLabel: "화·목", perWeek: 2, time: "16:00~16:50", coachName: "박정우", capacity: 10, enrolled: 9 },
+  { id: "c-soccer-sat", programId: "p-soccer", name: "축구 토요반", daysLabel: "토", perWeek: 1, time: "10:00~11:20", coachName: "이창진", capacity: 16, enrolled: 14 },
 ];
 
 export const parents: Parent[] = [

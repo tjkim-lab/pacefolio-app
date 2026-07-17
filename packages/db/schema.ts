@@ -451,6 +451,7 @@ export const refunds = pgTable("refunds", {
   uniqueIndex("uq_refund_idem").on(t.academyId, t.requestedByUserId, t.idempotencyKey),
   uniqueIndex("uq_refund_id_academy").on(t.id, t.academyId),
   uniqueIndex("uq_refund_id_payment").on(t.id, t.paymentId), // R9-P0-02 연쇄 FK 대상
+  uniqueIndex("uq_refund_id_participant_academy").on(t.id, t.participantId, t.academyId), // R10: Refund↔RA participant 연쇄 대상
   index("ix_refund_payment").on(t.paymentId),
   check("ck_refund_requested_positive", sql`${t.requestedAmount} > 0`),
   // 부분승인 금지를 DB 도 강제(R4 P0-1): approved 가 있으면 반드시 requested 와 동일
@@ -473,7 +474,6 @@ export const refundAllocations = pgTable("refund_allocations", {
   uniqueIndex("uq_refund_alloc").on(t.refundId, t.paymentAllocationId), // 중복 차감 차단(R6·R7)
   index("ix_ra_payment_allocation").on(t.paymentAllocationId),
   check("ck_ra_amount_positive", sql`${t.amount} > 0`),
-  foreignKey({ name: "fk_ra_refund_academy", columns: [t.refundId, t.academyId], foreignColumns: [refunds.id, refunds.academyId] }),
   foreignKey({ name: "fk_ra_invoice_academy", columns: [t.invoiceId, t.academyId], foreignColumns: [invoices.id, invoices.academyId] }),
   /* R9-P0-02: 연쇄 무결성을 DB 가 직접 강제 —
      RA.invoiceId = PA.invoiceId · RA.paymentId = PA.paymentId ·
@@ -482,4 +482,8 @@ export const refundAllocations = pgTable("refund_allocations", {
   foreignKey({ name: "fk_ra_pa_payment", columns: [t.paymentAllocationId, t.paymentId], foreignColumns: [paymentAllocations.id, paymentAllocations.paymentId] }),
   foreignKey({ name: "fk_ra_refund_payment", columns: [t.refundId, t.paymentId], foreignColumns: [refunds.id, refunds.paymentId] }),
   foreignKey({ name: "fk_ra_invoice_participant", columns: [t.invoiceId, t.participantId], foreignColumns: [invoices.id, invoices.participantId] }),
+  /* R10(R9-P0-02 마지막 경계): Refund.participantId = RA.participantId 를 DB 가
+     직접 강제 — Invoice·RA 는 일치시키고 Refund 만 다른 원생인 위장 차단.
+     3열 FK 가 기존 fk_ra_refund_academy(2열)를 포함하므로 그 제약은 정리. */
+  foreignKey({ name: "fk_ra_refund_participant_academy", columns: [t.refundId, t.participantId, t.academyId], foreignColumns: [refunds.id, refunds.participantId, refunds.academyId] }),
 ]);

@@ -44,7 +44,7 @@ function Hero() {
         <div className="flex justify-between items-start gap-2.5">
           <div>
             <div className="text-[18px] font-extrabold tracking-tight">결석 접수됨 · 오늘 {h.absCls}</div>
-            <div className="text-[13.5px] opacity-90 mt-1 font-medium">사유: {cur.absReason} · 김코치·원장님께 바로 알렸어요</div>
+            <div className="text-[13.5px] opacity-90 mt-1 font-medium">사유: {cur.absReason} · 코치·원장님께 바로 알렸어요</div>
           </div>
           <span className="text-[12px] font-bold bg-white/20 px-2.5 py-1 rounded-full whitespace-nowrap">접수 완료</span>
         </div>

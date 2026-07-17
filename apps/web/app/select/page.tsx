@@ -30,7 +30,7 @@ const MARKETING_CONSENT = {
 
 const ROLES = [
   { href: "/parent", emoji: "👨‍👩‍👧", label: "학부모", desc: "김도담·김서준 보호자", tone: "#3b82f6" },
-  { href: "/coach", emoji: "🏃", label: "코치", desc: "박코치 · 인라인 A반 담당", tone: "#f97316" },
+  { href: "/coach", emoji: "🏃", label: "코치", desc: "김선재 · 플레이2 월수반 담당", tone: "#f97316" },
   { href: "/owner", emoji: "🏫", label: "원장", desc: "원더짐 아카데미", tone: "#12b5a5" },
 ];
 

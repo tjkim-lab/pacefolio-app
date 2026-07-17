@@ -187,7 +187,7 @@ function AbsSheet() {
     toast(was ? "결석 사유를 변경했어요" : "결석 접수 — 코치·원장님께 알렸어요. 전화 안 하셔도 돼요");
   };
   return (
-    <SheetShell title="못 가는 이유가 뭐예요?" sub="하나만 골라주세요 — 김코치·원장님께 바로 전달돼요 (10초)">
+    <SheetShell title="못 가는 이유가 뭐예요?" sub="하나만 골라주세요 — 코치·원장님께 바로 전달돼요 (10초)">
       <div className="flex flex-wrap gap-2">
         {[["🤒 아파요", "아파요"], ["가족 일정", "가족 일정"], ["기타", "기타"]].map(([label, v]) => (
           <button key={v} onClick={() => pick(v)}
