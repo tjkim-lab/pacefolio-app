@@ -50,6 +50,13 @@
       "when": 1784254065575,
       "tag": "0006_tiresome_maximus",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784268991665,
+      "tag": "0007_first_jane_foster",
+      "breakpoints": true
     }
   ]
 }

@@ -285,6 +285,7 @@ export const invoices = pgTable("invoices", {
   index("ix_invoice_participant").on(t.participantId),
   index("ix_invoice_academy_status").on(t.academyId, t.status),
   uniqueIndex("uq_invoice_id_academy").on(t.id, t.academyId), // R7 P0-6 복합 FK 대상
+  uniqueIndex("uq_invoice_id_participant").on(t.id, t.participantId), // R9-P0-02 연쇄 FK 대상
   check("ck_invoice_total_positive", sql`${t.total} > 0`),
   // R7 P0-6: A학원 Invoice + B학원 Participant/BillingPeriod 를 DB 가 직접 차단
   foreignKey({ name: "fk_invoice_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
@@ -335,6 +336,9 @@ export const paymentAllocations = pgTable("payment_allocations", {
   uniqueIndex("uq_alloc_payment_invoice").on(t.paymentId, t.invoiceId), // 같은 결제가 같은 청구 이중 배분 금지
   index("ix_alloc_invoice").on(t.invoiceId),
   check("ck_alloc_amount_positive", sql`${t.amount} > 0`),
+  // R9-P0-02: RefundAllocation 연쇄 FK 대상
+  uniqueIndex("uq_alloc_id_invoice").on(t.id, t.invoiceId),
+  uniqueIndex("uq_alloc_id_payment").on(t.id, t.paymentId),
   // R7 P0-6 핵심: A학원 결제에 B학원 청구서 배분을 DB 가 직접 차단
   foreignKey({ name: "fk_alloc_payment_academy", columns: [t.paymentId, t.academyId], foreignColumns: [payments.id, payments.academyId] }),
   foreignKey({ name: "fk_alloc_invoice_academy", columns: [t.invoiceId, t.academyId], foreignColumns: [invoices.id, invoices.academyId] }),
@@ -446,6 +450,7 @@ export const refunds = pgTable("refunds", {
 }, (t) => [
   uniqueIndex("uq_refund_idem").on(t.academyId, t.requestedByUserId, t.idempotencyKey),
   uniqueIndex("uq_refund_id_academy").on(t.id, t.academyId),
+  uniqueIndex("uq_refund_id_payment").on(t.id, t.paymentId), // R9-P0-02 연쇄 FK 대상
   index("ix_refund_payment").on(t.paymentId),
   check("ck_refund_requested_positive", sql`${t.requestedAmount} > 0`),
   // 부분승인 금지를 DB 도 강제(R4 P0-1): approved 가 있으면 반드시 requested 와 동일
@@ -459,6 +464,7 @@ export const refundAllocations = pgTable("refund_allocations", {
   id: text("id").primaryKey(),                    // ra_xxx
   refundId: text("refund_id").notNull().references(() => refunds.id),
   paymentAllocationId: text("payment_allocation_id").notNull().references(() => paymentAllocations.id),
+  paymentId: text("payment_id").notNull(), // R9-P0-02: Refund↔PA 의 payment 연쇄 강제용
   invoiceId: text("invoice_id").notNull(),
   participantId: text("participant_id").notNull(), // = Refund.participantId (서비스 tx 검증)
   academyId: text("academy_id").notNull().references(() => academies.id),
@@ -469,4 +475,11 @@ export const refundAllocations = pgTable("refund_allocations", {
   check("ck_ra_amount_positive", sql`${t.amount} > 0`),
   foreignKey({ name: "fk_ra_refund_academy", columns: [t.refundId, t.academyId], foreignColumns: [refunds.id, refunds.academyId] }),
   foreignKey({ name: "fk_ra_invoice_academy", columns: [t.invoiceId, t.academyId], foreignColumns: [invoices.id, invoices.academyId] }),
+  /* R9-P0-02: 연쇄 무결성을 DB 가 직접 강제 —
+     RA.invoiceId = PA.invoiceId · RA.paymentId = PA.paymentId ·
+     Refund.paymentId = RA.paymentId · RA.participantId = Invoice.participantId */
+  foreignKey({ name: "fk_ra_pa_invoice", columns: [t.paymentAllocationId, t.invoiceId], foreignColumns: [paymentAllocations.id, paymentAllocations.invoiceId] }),
+  foreignKey({ name: "fk_ra_pa_payment", columns: [t.paymentAllocationId, t.paymentId], foreignColumns: [paymentAllocations.id, paymentAllocations.paymentId] }),
+  foreignKey({ name: "fk_ra_refund_payment", columns: [t.refundId, t.paymentId], foreignColumns: [refunds.id, refunds.paymentId] }),
+  foreignKey({ name: "fk_ra_invoice_participant", columns: [t.invoiceId, t.participantId], foreignColumns: [invoices.id, invoices.participantId] }),
 ]);

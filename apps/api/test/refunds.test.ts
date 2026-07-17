@@ -165,6 +165,94 @@ test("환불 웹훅: PROCESSING → COMPLETED — Payment REFUNDED + Invoice 재
   assert.ok(outbox.some((o) => o.eventType === "REFUND_COMPLETED"));
 });
 
+/* ── R9 신규 P0 3종 ── */
+
+test("R9-P0-01: 관계없는 보호자·비결제자의 보호자 측 승인 거부 — 실제 결제자만", async () => {
+  // 새 결제·환불 요청 seed (도담 두 번째 청구)
+  await db.insert(s.invoices).values({
+    id: "inv_d2", academyId: "a_wg", participantId: "p_dodam", enrollmentId: "e_d2",
+    billingPeriodId: "bp_q4", status: "ISSUED", total: 100000, dueDate: "2025-12-10",
+  });
+  const prep = await post(mom.cookie, mom.csrf, "/academies/a_wg/payments/prepare",
+    { invoiceIds: ["inv_d2"] }, "pay-key-2");
+  const { paymentId: pay2 } = await prep.json() as { paymentId: string };
+  await webhook({ providerEventId: "cap-2", paymentId: pay2, targetStatus: "CAPTURED", occurredAt: NOW() });
+  const req = await post(mom.cookie, mom.csrf, "/academies/a_wg/refunds",
+    { paymentId: pay2, participantId: "p_dodam", reasonCode: "PARENT_REQUEST" }, "rk-2");
+  const { refundId: ref2 } = await req.json() as { refundId: string };
+
+  // 아버지(같은 원생의 VERIFIED 보호자·GUARDIAN 역할)의 보호자 측 승인 → 거부
+  const dadApprove = await post(dad.cookie, dad.csrf, `/academies/a_wg/refunds/${ref2}/approvals`);
+  assert.equal(dadApprove.status, 409);
+  assert.match(((await dadApprove.json()) as { reason: string }).reason, /실제 결제자/);
+  // 실제 결제자(어머니) 승인 → 성공
+  const momApprove = await post(mom.cookie, mom.csrf, `/academies/a_wg/refunds/${ref2}/approvals`);
+  assert.equal(momApprove.status, 200);
+  // 원장 승인 → MUTUALLY_APPROVED (정상 흐름 유지 확인)
+  const ownerApprove = await post(owner.cookie, owner.csrf, `/academies/a_wg/refunds/${ref2}/approvals`);
+  assert.equal(((await ownerApprove.json()) as { status: string }).status, "MUTUALLY_APPROVED");
+});
+
+test("R9-P0-03: Payment 2건 결제된 Invoice 에서 1건만 환불 → PARTIALLY_PAID (REFUNDED 오판 방지)", async () => {
+  // Invoice 100,000 에 Payment 2건(각 50,000 CAPTURED) 직접 seed
+  await db.insert(s.invoices).values({
+    id: "inv_two", academyId: "a_wg", participantId: "p_dodam", enrollmentId: "e_two",
+    billingPeriodId: "bp_q4", status: "PAID", total: 100000, dueDate: "2025-12-10",
+  });
+  const gdMom = (await db.select().from(s.guardians))[0]; // gd_mom
+  await db.insert(s.payments).values([
+    { id: "pay_h1", academyId: "a_wg", guardianId: "gd_mom", amount: 50000, status: "CAPTURED", idempotencyKey: "h1" },
+    { id: "pay_h2", academyId: "a_wg", guardianId: "gd_mom", amount: 50000, status: "CAPTURED", idempotencyKey: "h2" },
+  ]);
+  await db.insert(s.paymentAllocations).values([
+    { id: "pa_h1", paymentId: "pay_h1", invoiceId: "inv_two", academyId: "a_wg", amount: 50000 },
+    { id: "pa_h2", paymentId: "pay_h2", invoiceId: "inv_two", academyId: "a_wg", amount: 50000 },
+  ]);
+  // pay_h1 만 전액 환불 (요청→양측 승인→웹훅 완료)
+  const req = await post(mom.cookie, mom.csrf, "/academies/a_wg/refunds",
+    { paymentId: "pay_h1", participantId: "p_dodam", reasonCode: "PARENT_REQUEST" }, "rk-h1");
+  assert.equal(req.status, 201);
+  const { refundId: refH } = await req.json() as { refundId: string };
+  await post(mom.cookie, mom.csrf, `/academies/a_wg/refunds/${refH}/approvals`);
+  await post(owner.cookie, owner.csrf, `/academies/a_wg/refunds/${refH}/approvals`);
+  await webhook({ kind: "refund", providerEventId: "rf-h1", refundId: refH, targetStatus: "PROCESSING", occurredAt: new Date(Date.now() + 100).toISOString() });
+  await webhook({ kind: "refund", providerEventId: "rf-h2", refundId: refH, targetStatus: "COMPLETED", occurredAt: new Date(Date.now() + 200).toISOString() });
+
+  // 핵심: 다른 Payment(pay_h2) 50,000 이 순수납에 남음 → PARTIALLY_PAID
+  const inv = (await db.select().from(s.invoices).where(eq(s.invoices.id, "inv_two")))[0];
+  assert.equal(inv.status, "PARTIALLY_PAID", `기대 PARTIALLY_PAID, 실제 ${inv.status} — 다른 Payment 누락 시 REFUNDED 오판`);
+  const payH1 = (await db.select().from(s.payments).where(eq(s.payments.id, "pay_h1")))[0];
+  assert.equal(payH1.status, "REFUNDED");
+  const payH2 = (await db.select().from(s.payments).where(eq(s.payments.id, "pay_h2")))[0];
+  assert.equal(payH2.status, "CAPTURED"); // 무관한 결제는 불변
+  void gdMom;
+});
+
+test("R9-P0-02: 다른 Invoice 의 PaymentAllocation 을 가리키는 RA 직접 insert → DB 연쇄 FK 거부", async () => {
+  // inv_dodam 의 pa 를 참조하면서 invoiceId 는 inv_two 로 위장 — fk_ra_pa_invoice 가 차단
+  const anyRefund = (await db.select().from(s.refunds))[0];
+  const paDodam = (await db.select().from(s.paymentAllocations).where(eq(s.paymentAllocations.invoiceId, "inv_dodam")))[0];
+  await assert.rejects(
+    db.insert(s.refundAllocations).values({
+      id: "ra_forge", refundId: anyRefund.id, paymentAllocationId: paDodam.id,
+      paymentId: paDodam.paymentId, invoiceId: "inv_two", // 위장
+      participantId: "p_dodam", academyId: "a_wg", amount: 1000,
+    }),
+  );
+  // participant 위장도 차단 (fk_ra_invoice_participant)
+  await db.insert(s.participants).values({
+    id: "p_forge", academyId: "a_wg", name: "위장", birth: "2018-01-01", ageLabel: "7세",
+  });
+  await assert.rejects(
+    db.insert(s.refundAllocations).values({
+      id: "ra_forge2", refundId: anyRefund.id, paymentAllocationId: paDodam.id,
+      paymentId: paDodam.paymentId, invoiceId: paDodam.invoiceId,
+      participantId: "p_forge", // Invoice 의 원생이 아님
+      academyId: "a_wg", amount: 1000,
+    }),
+  );
+});
+
 test("종결 후: 중복 COMPLETED 웹훅 = 상태 불변 · 재환불 요청 거부", async () => {
   const w = await webhook({ kind: "refund", providerEventId: "rf-3", refundId, targetStatus: "FAILED", occurredAt: new Date(Date.now() + 3000).toISOString() });
   assert.equal(((await w.json()) as { decision: string }).decision, "RECONCILE"); // 종결 되돌리기 금지

@@ -136,7 +136,9 @@ export async function requestRefund(
       idempotencyKey: input.idempotencyKey, createdAt: nowISO, updatedAt: nowISO,
     });
     await tx.insert(s.refundAllocations).values(targetAllocs.map((a) => ({
-      id: newId("ra"), refundId, paymentAllocationId: a.id, invoiceId: a.invoiceId,
+      id: newId("ra"), refundId, paymentAllocationId: a.id,
+      paymentId: pay.id, // R9-P0-02: 연쇄 FK(RA↔PA↔Refund 의 payment 일치를 DB 가 강제)
+      invoiceId: a.invoiceId,
       participantId: input.participantId, academyId: input.academyId, amount: a.amount,
     })));
 
@@ -171,6 +173,18 @@ export async function approveRefund(
 
     const verdict = canApplyRefundApproval(toDomainRefund(row), input.side, asId(input.actorUserId));
     if (!verdict.ok) return { kind: "DENIED", reason: verdict.error ?? "승인 불가" };
+
+    /* R9-P0-01 수정: 보호자 측 승인 = **실제 결제자**만 — 역할(GUARDIAN)만으로는
+       같은 학원의 관계없는 보호자도 승인 가능했음. 승인 시점에 소유권 재검증. */
+    if (input.side === "GUARDIAN") {
+      const payRows = await tx.select().from(s.payments)
+        .where(eq(s.payments.id, row.paymentId));
+      const gd = await tx.select().from(s.guardians)
+        .where(eq(s.guardians.userId, input.actorUserId));
+      if (!payRows[0] || !gd[0] || payRows[0].guardianId !== gd[0].id) {
+        return { kind: "DENIED", reason: "보호자 측 승인은 실제 결제자만 가능" };
+      }
+    }
 
     const patch: Partial<typeof s.refunds.$inferInsert> =
       input.side === "GUARDIAN"
@@ -268,8 +282,19 @@ export async function processRefundWebhook(
             const allRefunds = allRefundIds.length
               ? await tx.select().from(s.refunds).where(inArray(s.refunds.id, allRefundIds))
               : [];
+            /* R9-P0-03 수정: 이 Invoice 들에 배분된 **모든** Payment 를 정산에
+               포함 — 환불 대상 1건만 넣으면 다른 CAPTURED Payment 의 납부액이
+               누락돼 순수납 과소계산 → Invoice 가 잘못 REFUNDED 될 수 있음
+               (예: 50k+50k 결제 중 50k 환불 → 기대 PARTIALLY_PAID). */
+            const allPayIds = [...new Set(allAllocs.map((a) => a.paymentId))];
+            const allPays = allPayIds.length
+              ? await tx.select().from(s.payments).where(inArray(s.payments.id, allPayIds))
+              : [];
             const settlement: SettlementInput = {
-              payments: [{ ...toPaymentDomain(pay), status: nextPayStatus }],
+              payments: allPays.map((p) =>
+                p.id === pay.id
+                  ? { ...toPaymentDomain(p), status: nextPayStatus } // 방금 갱신분 반영
+                  : toPaymentDomain(p)),
               paymentAllocations: allAllocs.map((a) => ({
                 id: asId(a.id), paymentId: asId(a.paymentId), invoiceId: asId(a.invoiceId), amount: a.amount,
               })),
