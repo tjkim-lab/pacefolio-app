@@ -9,7 +9,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import {
   resolveIdempotency, outstandingForInvoice, deriveInvoiceStatus,
-  decidePaymentWebhook, canGuardianPayInvoices, asId,
+  decidePaymentWebhook, canGuardianPayInvoices, asId, isValidMoneyAmount,
   type IdempotencyRecord, type SettlementInput, type Invoice as DInvoice,
   type Payment as DPayment, type PaymentAllocation as DAlloc,
   type AuthorizationContext, type WebhookDecision, type PaymentStatus,
@@ -148,6 +148,11 @@ export async function preparePayment(
       return { kind: "DENIED", reason: "이미 결제된 청구서 포함" };
     }
     const amount = parts.reduce((sum, p) => sum + p.due, 0);
+    /* C10-01: 서버 계산 금액도 상한 검증 — 청구 데이터 오염·합산 폭주 시
+       fail-closed (DB CHECK ck_payment_amount_max 와 2중 방어) */
+    if (!isValidMoneyAmount(amount) || parts.some((p) => !isValidMoneyAmount(p.due))) {
+      return { kind: "DENIED", reason: "결제 금액이 허용 범위 밖(상한 초과)" };
+    }
 
     /* 6) Payment(PENDING) + Allocation 생성 — UI 성공 ≠ CAPTURED, 확정은 webhook 만 */
     const paymentId = newId("pay");

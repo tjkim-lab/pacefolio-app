@@ -238,6 +238,64 @@ test("R7 P0-7: 원생당 Primary 보호자 1명 — 두 번째 primary insert �
   await db.insert(s.guardianParticipantLinks).values({ id: "gl_f2", guardianId: "gd_f", isPrimaryGuardian: false, ...base });
 });
 
+/* ── C10-01: 금액 상한 CHECK — int4 오버플로·오염 금액을 DB 가 직접 거부 ── */
+
+test("C10-01: 금액 상한 1억 초과 insert 를 CHECK 제약명으로 거부", async () => {
+  await seedTwoAcademies();
+  await db.insert(s.users).values({ id: "u_max", name: "상한", phone: "010-max" }).onConflictDoNothing();
+  await db.insert(s.guardians).values({ id: "gd_max", userId: "u_max" }).onConflictDoNothing();
+  // Payment 상한 초과
+  await rejectsWith(
+    db.insert(s.payments).values({
+      id: "pay_max", academyId: "a_wg", guardianId: "gd_max", amount: 100_000_001,
+      status: "PENDING", idempotencyKey: "max-k",
+    }),
+    /ck_payment_amount_max/,
+  );
+  // Invoice total 상한 초과
+  await db.insert(s.participants).values({
+    id: "p_max", academyId: "a_wg", name: "상한원생", birth: "2018-01-01", ageLabel: "7세",
+  }).onConflictDoNothing();
+  await rejectsWith(
+    db.insert(s.invoices).values({
+      id: "inv_max", academyId: "a_wg", participantId: "p_max",
+      enrollmentId: "e_max", billingPeriodId: "bp_a", status: "ISSUED",
+      total: 100_000_001, dueDate: "2025-09-10",
+    }),
+    /ck_invoice_total_max/,
+  );
+  // Refund 상한 초과 — 정상 payment 에 비정상 요청액
+  await db.insert(s.payments).values({
+    id: "pay_ok", academyId: "a_wg", guardianId: "gd_max", amount: 50000,
+    status: "CAPTURED", idempotencyKey: "ok-k",
+  }).onConflictDoNothing();
+  await rejectsWith(
+    db.insert(s.refunds).values({
+      id: "rf_max", academyId: "a_wg", paymentId: "pay_ok", participantId: "p_max",
+      status: "REQUESTED", requestedAmount: 100_000_001,
+      requestedByUserId: "u_max", requestedAt: "2026-07-17T00:00:00Z",
+      reasonCode: "OTHER", idempotencyKey: "rf-max-k",
+    }),
+    /ck_refund_requested_max/,
+  );
+  // DISCOUNT 음수 라인: -1억 초과 절대값 거부(범위 CHECK)
+  await db.insert(s.invoices).values({
+    id: "inv_line", academyId: "a_wg", participantId: "p_max",
+    enrollmentId: "e_l", billingPeriodId: "bp_a", status: "ISSUED", total: 10000, dueDate: "2025-09-10",
+  }).onConflictDoNothing();
+  await rejectsWith(
+    db.insert(s.invoiceLines).values({
+      id: "il_max", invoiceId: "inv_line", type: "DISCOUNT", label: "오염 할인", amount: -100_000_001,
+    }),
+    /ck_line_amount_range/,
+  );
+  // 경계값 1억 정확히 = 허용
+  await db.insert(s.payments).values({
+    id: "pay_edge", academyId: "a_wg", guardianId: "gd_max", amount: 100_000_000,
+    status: "PENDING", idempotencyKey: "edge-k",
+  });
+});
+
 test("트랜잭션: 실패 시 전체 rollback (Phase 0 완료 기준)", async () => {
   await seedUserAcademy();
   await assert.rejects(

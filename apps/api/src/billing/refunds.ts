@@ -10,7 +10,8 @@ import { schema as s } from "@pacefolio/db";
 import {
   canGuardianRequestRefundForPayment, canApplyRefundApproval, isRefundMutuallyApproved,
   decideRefundWebhook, deriveInvoiceStatus, canTransitionRefund,
-  asId, type AuthorizationContext, type GuardianId, type UserId,
+  asId, isValidMoneyAmount,
+  type AuthorizationContext, type GuardianId, type UserId,
   type Payment as DPayment,
   type PaymentAllocation as DAlloc, type Invoice as DInvoice, type Refund as DRefund,
   type SettlementInput, type RefundWebhookDecision, type RefundStatus,
@@ -127,6 +128,10 @@ export async function requestRefund(
 
     /* 4) Refund + RefundAllocation 생성 — 전액(요청=Σ배분) */
     const requestedAmount = targetAllocs.reduce((sum, a) => sum + a.amount, 0);
+    /* C10-01: 서버 계산 금액 상한 검증 (DB CHECK ck_refund_requested_max 와 2중) */
+    if (!isValidMoneyAmount(requestedAmount)) {
+      return { kind: "DENIED", reason: "환불 금액이 허용 범위 밖(상한 초과)" };
+    }
     const refundId = newId("ref");
     await tx.insert(s.refunds).values({
       id: refundId, academyId: input.academyId, paymentId: pay.id,

@@ -13,6 +13,14 @@ import type {
 import type { InvoiceId, PaymentId, PaymentAllocationId } from "./ids";
 import type { PaymentStatus, InvoiceStatus } from "./enums";
 
+/* C10-01: 금액 상한 — int4 오버플로·데이터 오염·청구 폭주 방어.
+   모든 돈 컬럼 공통 상한(DB CHECK ck_*_max 와 동일 값). 1억원 =
+   학원 정산 단위에서 정상 범위 밖 — 초과는 항상 버그·오염이다. */
+export const MAX_MONEY_AMOUNT = 100_000_000;
+export function isValidMoneyAmount(n: number): boolean {
+  return Number.isSafeInteger(n) && n > 0 && n <= MAX_MONEY_AMOUNT;
+}
+
 /** 납부액으로 인정되는 Payment 상태(리뷰 R2 P0-1).
    PENDING·AUTHORIZED·FAILED·CANCELLED 는 미포함. */
 export function isEffectivePayment(status: PaymentStatus): boolean {

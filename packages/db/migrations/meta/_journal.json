@@ -64,6 +64,13 @@
       "when": 1784270962492,
       "tag": "0008_white_human_fly",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784298122956,
+      "tag": "0009_amount-max-checks",
+      "breakpoints": true
     }
   ]
 }

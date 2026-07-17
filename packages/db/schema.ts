@@ -287,6 +287,7 @@ export const invoices = pgTable("invoices", {
   uniqueIndex("uq_invoice_id_academy").on(t.id, t.academyId), // R7 P0-6 복합 FK 대상
   uniqueIndex("uq_invoice_id_participant").on(t.id, t.participantId), // R9-P0-02 연쇄 FK 대상
   check("ck_invoice_total_positive", sql`${t.total} > 0`),
+  check("ck_invoice_total_max", sql`${t.total} <= 100000000`), // C10-01 금액 상한(도메인 MAX_MONEY_AMOUNT 와 동일)
   // R7 P0-6: A학원 Invoice + B학원 Participant/BillingPeriod 를 DB 가 직접 차단
   foreignKey({ name: "fk_invoice_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
   foreignKey({ name: "fk_invoice_bp_academy", columns: [t.billingPeriodId, t.academyId], foreignColumns: [billingPeriods.id, billingPeriods.academyId] }),
@@ -300,6 +301,8 @@ export const invoiceLines = pgTable("invoice_lines", {
   amount: integer("amount").notNull(),            // DISCOUNT 는 음수 허용
 }, (t) => [
   index("ix_line_invoice").on(t.invoiceId),
+  // C10-01: DISCOUNT 음수 허용이라 절대값 범위로
+  check("ck_line_amount_range", sql`${t.amount} BETWEEN -100000000 AND 100000000`),
 ]);
 
 export const payments = pgTable("payments", {
@@ -324,6 +327,7 @@ export const payments = pgTable("payments", {
   uniqueIndex("uq_payment_id_academy").on(t.id, t.academyId), // R7 P0-6 복합 FK 대상
   index("ix_payment_provider").on(t.providerPaymentId),
   check("ck_payment_amount_positive", sql`${t.amount} > 0`),
+  check("ck_payment_amount_max", sql`${t.amount} <= 100000000`), // C10-01
 ]);
 
 export const paymentAllocations = pgTable("payment_allocations", {
@@ -336,6 +340,7 @@ export const paymentAllocations = pgTable("payment_allocations", {
   uniqueIndex("uq_alloc_payment_invoice").on(t.paymentId, t.invoiceId), // 같은 결제가 같은 청구 이중 배분 금지
   index("ix_alloc_invoice").on(t.invoiceId),
   check("ck_alloc_amount_positive", sql`${t.amount} > 0`),
+  check("ck_alloc_amount_max", sql`${t.amount} <= 100000000`), // C10-01
   // R9-P0-02: RefundAllocation 연쇄 FK 대상
   uniqueIndex("uq_alloc_id_invoice").on(t.id, t.invoiceId),
   uniqueIndex("uq_alloc_id_payment").on(t.id, t.paymentId),
@@ -454,6 +459,7 @@ export const refunds = pgTable("refunds", {
   uniqueIndex("uq_refund_id_participant_academy").on(t.id, t.participantId, t.academyId), // R10: Refund↔RA participant 연쇄 대상
   index("ix_refund_payment").on(t.paymentId),
   check("ck_refund_requested_positive", sql`${t.requestedAmount} > 0`),
+  check("ck_refund_requested_max", sql`${t.requestedAmount} <= 100000000`), // C10-01 (approved·completed 는 =requested CHECK 로 전파)
   // 부분승인 금지를 DB 도 강제(R4 P0-1): approved 가 있으면 반드시 requested 와 동일
   check("ck_refund_no_partial_approval", sql`${t.approvedAmount} IS NULL OR ${t.approvedAmount} = ${t.requestedAmount}`),
   // 교차 테넌트 차단(R7 P0-6): Payment·Participant 와 academy 결합
@@ -474,6 +480,7 @@ export const refundAllocations = pgTable("refund_allocations", {
   uniqueIndex("uq_refund_alloc").on(t.refundId, t.paymentAllocationId), // 중복 차감 차단(R6·R7)
   index("ix_ra_payment_allocation").on(t.paymentAllocationId),
   check("ck_ra_amount_positive", sql`${t.amount} > 0`),
+  check("ck_ra_amount_max", sql`${t.amount} <= 100000000`), // C10-01
   foreignKey({ name: "fk_ra_invoice_academy", columns: [t.invoiceId, t.academyId], foreignColumns: [invoices.id, invoices.academyId] }),
   /* R9-P0-02: 연쇄 무결성을 DB 가 직접 강제 —
      RA.invoiceId = PA.invoiceId · RA.paymentId = PA.paymentId ·
