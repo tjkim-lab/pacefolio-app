@@ -5,7 +5,7 @@
    [웹훅]     Inbox unique insert → Payment lock → 전이 guard(도메인)
               → Payment 갱신 → Invoice 재계산 → decision 기록
    금액 판단·상태 도출은 전부 packages/domain 재사용 — 여기는 잠금과 영속만. */
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import {
   resolveIdempotency, outstandingForInvoice, deriveInvoiceStatus,
@@ -224,34 +224,40 @@ export async function processPgWebhook(
       );
     }
 
-    /* 2-b) R7 P0-3 이중 CAPTURE 방어(2층): CAPTURED 적용 전에 대상 Invoice 가
-       이미 PAID/REFUNDED 면 이 결제를 무조건 반영하지 않는다 — RECONCILE 로
-       (활성 attempt 차단(1층)의 경계 케이스: attempt 만료 후 재결제 + 늦은 웹훅). */
-    if (decision.action === "APPLY" && decision.to === "CAPTURED" && pay) {
+    /* 2-b) R8 C8-01 수정: 이중 CAPTURE 방어(2층)의 TOCTOU 제거.
+       기존 결함: Invoice 를 잠금 없이 사전 조회 → Payment 를 CAPTURED 로
+       변경 → 그 후에야 Invoice 잠금(decision 재판정 없음) — 동시 웹훅 둘 다
+       APPLY 가능. 수정: **Payment 상태 변경 전에** 관련 Invoice 전부를
+       FOR UPDATE 로 잠그고(ID 정렬 = 데드락 방지 잠금 순서 고정), 잠금
+       획득 후의 최신 상태로 최종 판정한다. 두 번째 트랜잭션은 잠금 대기
+       후 PAID 를 보고 RECONCILE 로 전환된다. */
+    let lockedInvoices: (typeof s.invoices.$inferSelect)[] = [];
+    if (decision.action === "APPLY" && pay) {
       const allocPre = await tx.select().from(s.paymentAllocations)
         .where(eq(s.paymentAllocations.paymentId, pay.id));
-      const invPre = allocPre.length
-        ? await tx.select().from(s.invoices)
-            .where(inArray(s.invoices.id, allocPre.map((a) => a.invoiceId)))
-        : [];
-      if (invPre.some((i) => i.status === "PAID" || i.status === "REFUNDED")) {
+      const invIds = [...new Set(allocPre.map((a) => a.invoiceId))].sort(); // 잠금 순서 고정
+      if (invIds.length) {
+        lockedInvoices = await tx.select().from(s.invoices)
+          .where(inArray(s.invoices.id, invIds))
+          .orderBy(asc(s.invoices.id))   // deterministic — 모든 웹훅 경로 공통
+          .for("update");                // ← 잠금 후의 최신 상태가 판정 근거
+      }
+      if (decision.to === "CAPTURED" &&
+          lockedInvoices.some((i) => i.status === "PAID" || i.status === "REFUNDED")) {
         decision = { action: "RECONCILE", reason: "대상 청구서가 이미 종결(PAID/REFUNDED) — 이중 결제 의심, PG 재조회·취소/환불 절차 필요" };
       }
     }
 
-    /* 3) APPLY — Payment 갱신 + 영향 Invoice 재계산(도메인 도출) */
+    /* 3) APPLY — Invoice 잠금·최종 판정 이후에만 Payment 갱신 + 재계산 */
     if (decision.action === "APPLY" && pay) {
       await tx.update(s.payments)
         .set({ status: decision.to, lastEventAt: evt.occurredAt, updatedAt: nowISO,
                version: sql`${s.payments.version} + 1` })
         .where(eq(s.payments.id, pay.id));
 
-      const allocRows = await tx.select().from(s.paymentAllocations)
-        .where(eq(s.paymentAllocations.paymentId, pay.id));
-      const invIds = allocRows.map((a) => a.invoiceId);
+      const invIds = lockedInvoices.map((i) => i.id);
       if (invIds.length) {
-        const invRows = await tx.select().from(s.invoices)
-          .where(inArray(s.invoices.id, invIds)).for("update");
+        const invRows = lockedInvoices; // 이미 잠근 최신 행 재사용
         // 이 invoice 들의 전체 정산 재료(다른 결제 포함) 재조회
         const allAllocs = await tx.select().from(s.paymentAllocations)
           .where(inArray(s.paymentAllocations.invoiceId, invIds));

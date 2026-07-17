@@ -130,3 +130,117 @@ test("동일 OTP session 20개 동시 요청 → 정확히 1개만 성공", { sk
   const successes = results.filter((r) => r.ok).length;
   assert.equal(successes, 1, `성공 ${successes}개 — OTP 1회 소비여야 함`);
 });
+
+/* ── R8 C8-02: 결제 경쟁 테스트 (C8-01 수정의 P0 종료 증거) ── */
+import { processPgWebhook, preparePayment } from "../src/billing/service";
+import { schema as s2 } from "@pacefolio/db";
+import { eq as eq2, inArray as inArray2 } from "drizzle-orm";
+
+/** 결제 경쟁용 seed — invoice 100,000 + 보호자·링크·멤버십 */
+async function setupBilling(w: World) {
+  const userId = rid("u");
+  const gdId = rid("gd");
+  const invoiceId = rid("inv");
+  await w.db.insert(s2.users).values({ id: userId, name: "결제경쟁", phone: "010-7" });
+  await w.db.insert(s2.academyMemberships).values({
+    id: rid("m"), userId, academyId: w.academyId, roles: ["GUARDIAN"], status: "ACTIVE", joinedAt: "2025-03-02",
+  });
+  await w.db.insert(s2.guardians).values({ id: gdId, userId });
+  await w.db.insert(s2.guardianParticipantLinks).values({
+    id: rid("gl"), guardianId: gdId, participantId: w.participantId, academyId: w.academyId,
+    relationshipType: "MOTHER", isPrimaryGuardian: false, verificationStatus: "VERIFIED",
+    canViewSchedule: true, canViewAttendance: true, canViewHealthInfo: true,
+    canReceivePhotos: true, canPay: true, canRequestRefund: true,
+  });
+  await w.db.insert(s2.billingPeriods).values({
+    id: rid("bp"), academyId: w.academyId, periodStart: "2025-09-01", periodEnd: "2025-11-30", cycleMonths: 3,
+  }).then(async () => {
+    const bp = (await w.db.select().from(s2.billingPeriods)).find((b) => b.academyId === w.academyId)!;
+    await w.db.insert(s2.invoices).values({
+      id: invoiceId, academyId: w.academyId, participantId: w.participantId, enrollmentId: rid("e"),
+      billingPeriodId: bp.id, status: "ISSUED", total: 100000, dueDate: "2025-09-10",
+    });
+  });
+  return { userId, gdId, invoiceId };
+}
+
+test("C8-01 회귀: 동일 Invoice 의 두 Payment CAPTURED 동시 도착 → APPLY 1·RECONCILE 1", { skip }, async () => {
+  const w = await setup();
+  const { gdId, invoiceId } = await setupBilling(w);
+  // 만료된 attempt A + 새 attempt B — 리뷰 재현 조건 그대로
+  const past = new Date(Date.now() - 3600_000).toISOString();
+  const payA = rid("payA"); const payB = rid("payB");
+  await w.db.insert(s2.payments).values([
+    { id: payA, academyId: w.academyId, guardianId: gdId, amount: 100000, status: "PENDING", idempotencyKey: rid("kA"), attemptExpiresAt: past },
+    { id: payB, academyId: w.academyId, guardianId: gdId, amount: 100000, status: "PENDING", idempotencyKey: rid("kB") },
+  ]);
+  await w.db.insert(s2.paymentAllocations).values([
+    { id: rid("paA"), paymentId: payA, invoiceId, academyId: w.academyId, amount: 100000 },
+    { id: rid("paB"), paymentId: payB, invoiceId, academyId: w.academyId, amount: 100000 },
+  ]);
+  const t = NOW();
+  const [dA, dB] = await Promise.all([
+    processPgWebhook(w.db, "mockpg", { providerEventId: rid("evA"), paymentId: payA, targetStatus: "CAPTURED", occurredAt: t, rawPayload: "{}" }, NOW()),
+    processPgWebhook(w.db, "mockpg", { providerEventId: rid("evB"), paymentId: payB, targetStatus: "CAPTURED", occurredAt: t, rawPayload: "{}" }, NOW()),
+  ]);
+  const actions = [dA.action, dB.action].sort();
+  assert.deepEqual(actions, ["APPLY", "RECONCILE"], `기대 APPLY+RECONCILE, 실제 ${actions}`);
+  // CAPTURED 정확히 1건 · 나머지 PENDING 유지
+  const pays = await w.db.select().from(s2.payments).where(inArray2(s2.payments.id, [payA, payB]));
+  assert.equal(pays.filter((p) => p.status === "CAPTURED").length, 1);
+  assert.equal(pays.filter((p) => p.status === "PENDING").length, 1);
+  // Invoice PAID · CAPTURED 배분 합 ≤ total
+  const inv = (await w.db.select().from(s2.invoices).where(eq2(s2.invoices.id, invoiceId)))[0];
+  assert.equal(inv.status, "PAID");
+  // inbox APPLIED 1 · RECONCILE_REQUIRED 1 / outbox PAYMENT_CAPTURED 1
+  const inbox = (await w.db.select().from(s2.webhookInbox)).filter((i) =>
+    [payA, payB].some(() => true) && (i.status === "APPLIED" || i.status === "RECONCILE_REQUIRED"));
+  const applied = inbox.filter((i) => i.status === "APPLIED").length;
+  const reconcile = inbox.filter((i) => i.status === "RECONCILE_REQUIRED").length;
+  assert.ok(applied >= 1 && reconcile >= 1, `inbox APPLIED ${applied} / RECONCILE ${reconcile}`);
+  const outbox = (await w.db.select().from(s2.outboxEvents))
+    .filter((o) => o.eventType === "PAYMENT_CAPTURED" && o.payload.includes(payA.slice(0, 8)) || o.payload.includes(payB));
+  assert.equal(
+    (await w.db.select().from(s2.outboxEvents)).filter((o) =>
+      o.eventType === "PAYMENT_CAPTURED" && (o.payload.includes(payA) || o.payload.includes(payB))).length,
+    1, "PAYMENT_CAPTURED outbox 정확히 1건");
+  void outbox;
+});
+
+test("C8-02 B: 동일 Invoice 에 서로 다른 멱등키 prepare ×20 → Payment 1·나머지 ACTIVE_ATTEMPT", { skip }, async () => {
+  const w = await setup();
+  const { userId, invoiceId } = await setupBilling(w);
+  const results = await Promise.all(Array.from({ length: 20 }, (_, i) =>
+    preparePayment(w.db, {
+      actorUserId: userId, academyId: w.academyId, invoiceIds: [invoiceId],
+      idempotencyKey: rid(`k${i}`), requestHash: `h${i}`,
+    }, NOW()).then((r) => r.kind, () => "ERROR")));
+  const created = results.filter((k) => k === "CREATED").length;
+  const blocked = results.filter((k) => k === "ACTIVE_ATTEMPT_EXISTS").length;
+  assert.equal(created, 1, `CREATED ${created}개 — 정확히 1개여야 함 (${JSON.stringify(results)})`);
+  assert.equal(blocked, 19);
+  const allocs = (await w.db.select().from(s2.paymentAllocations))
+    .filter((a) => a.invoiceId === invoiceId);
+  assert.equal(allocs.length, 1); // Allocation 도 1개
+});
+
+test("C8-02 C: 같은 providerEventId CAPTURED ×20 → APPLY 1·IGNORE 19·version +1", { skip }, async () => {
+  const w = await setup();
+  const { userId, invoiceId } = await setupBilling(w);
+  const prep = await preparePayment(w.db, {
+    actorUserId: userId, academyId: w.academyId, invoiceIds: [invoiceId],
+    idempotencyKey: rid("k"), requestHash: "h",
+  }, NOW());
+  assert.equal(prep.kind, "CREATED");
+  const paymentId = (prep as { paymentId: string }).paymentId;
+  const evId = rid("ev-same");
+  const t = NOW();
+  const decisions = await Promise.all(Array.from({ length: 20 }, () =>
+    processPgWebhook(w.db, "mockpg", { providerEventId: evId, paymentId, targetStatus: "CAPTURED", occurredAt: t, rawPayload: "{}" }, NOW())
+      .then((d) => d.action, () => "ERROR")));
+  assert.equal(decisions.filter((a) => a === "APPLY").length, 1);
+  assert.equal(decisions.filter((a) => a === "IGNORE_ALREADY_SEEN").length, 19);
+  const pay = (await w.db.select().from(s2.payments).where(eq2(s2.payments.id, paymentId)))[0];
+  assert.equal(pay.status, "CAPTURED");
+  assert.equal(pay.version, 2); // 정확히 1회 갱신(+1)
+});

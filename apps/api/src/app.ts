@@ -10,6 +10,7 @@ import type { ProviderRegistry, OAuthProviderName } from "./auth/provider";
 import { requireSession, requireCsrf, requireAcademyContext, SESSION_COOKIE, CSRF_COOKIE, type GuardEnv } from "./guard";
 import { requestGuardianLink } from "./linking/service";
 import { preparePayment, processPgWebhook } from "./billing/service";
+import { requestRefund, approveRefund, processRefundWebhook } from "./billing/refunds";
 import { listGuardianInvoices } from "./billing/queries";
 import { sha256Hex } from "./crypto";
 
@@ -192,13 +193,68 @@ export function createApp(cfg: ApiConfig) {
     return c.json({ invoices: rows });
   });
 
-  /* ── PG 웹훅 — 서명 검증은 provider 연동 시(지금은 시뮬 헤더 게이트) ── */
-  const WebhookBody = z.object({
-    providerEventId: z.string().min(1).max(128),
+  /* ── 환불 (R7 배치 5) — 요청·양측 승인. 실행(PG 환불 API)은 provider 연동 시 ── */
+  const RefundBody = z.object({
     paymentId: z.string().min(1).max(64),
-    targetStatus: z.enum(["PENDING", "AUTHORIZED", "CAPTURED", "FAILED", "CANCELLED", "PARTIALLY_REFUNDED", "REFUNDED"]),
-    occurredAt: z.string().min(10).max(40),
+    participantId: z.string().min(1).max(64), // Refund 1건 = 원생 1명(R4 P0-2)
+    reasonCode: z.string().min(1).max(40),
+    reasonText: z.string().max(500).optional(),
   }).strict();
+
+  app.post("/academies/:academyId/refunds", guard, csrf, guardianCtx, async (c) => {
+    const idempotencyKey = c.req.header("idempotency-key");
+    if (!idempotencyKey || idempotencyKey.length > 128) {
+      return c.json({ error: "IDEMPOTENCY_KEY_REQUIRED" }, 422);
+    }
+    const parsed = RefundBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth");
+    const r = await requestRefund(cfg.db, {
+      actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+      ...parsed.data, idempotencyKey,
+    }, now()).catch((e: Error) => {
+      console.warn(`[refund] tx rejected: ${e.message}`); // 멱등 unique 등
+      return null;
+    });
+    if (!r) return c.json({ error: "CONFLICT" }, 409);
+    if (r.kind === "DENIED") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ refundId: r.refundId, requestedAmount: r.requestedAmount, status: "REQUESTED" }, 201);
+  });
+
+  /* 양측 승인 — side 는 body 가 아니라 서버가 역할로 도출(OpenAPI 계약) */
+  app.post("/academies/:academyId/refunds/:refundId/approvals", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth");
+    const m = c.get("membership");
+    const side = m.roles.includes("OWNER") ? "ACADEMY" as const
+      : m.roles.includes("GUARDIAN") ? "GUARDIAN" as const : null;
+    if (!side) return c.json({ error: "FORBIDDEN_ROLE" }, 403);
+    const r = await approveRefund(cfg.db, {
+      actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+      refundId: c.req.param("refundId")!, side,
+    }, now());
+    if (r.kind === "DENIED") return c.json({ error: "APPROVAL_REJECTED", reason: r.reason }, 409);
+    return c.json({ refundId: r.refundId, status: r.status }, 200);
+  });
+
+  /* ── PG 웹훅 — 서명 검증은 provider 연동 시(지금은 시뮬 헤더 게이트) ── */
+  /* mockpg 전용 body — 결제/환불 이벤트를 kind 로 분기(오분류 방지, R6 P0-3).
+     kind 생략 = payment(하위 호환). 실 provider 는 adapter 가 event 매핑. */
+  const WebhookBody = z.discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("payment").default("payment"),
+      providerEventId: z.string().min(1).max(128),
+      paymentId: z.string().min(1).max(64),
+      targetStatus: z.enum(["PENDING", "AUTHORIZED", "CAPTURED", "FAILED", "CANCELLED", "PARTIALLY_REFUNDED", "REFUNDED"]),
+      occurredAt: z.string().min(10).max(40),
+    }).strict(),
+    z.object({
+      kind: z.literal("refund"),
+      providerEventId: z.string().min(1).max(128),
+      refundId: z.string().min(1).max(64),
+      targetStatus: z.enum(["REQUESTED", "MUTUALLY_APPROVED", "PROCESSING", "COMPLETED", "FAILED", "UNKNOWN", "REJECTED"]),
+      occurredAt: z.string().min(10).max(40),
+    }).strict(),
+  ]);
 
   app.post("/webhooks/pg/:provider", async (c) => {
     /* R7 P0-1: fail-closed —
@@ -226,14 +282,19 @@ export function createApp(cfg: ApiConfig) {
 
     let parsedJson: unknown;
     try { parsedJson = JSON.parse(raw); } catch { return c.json({ error: "INVALID_BODY" }, 422); }
+    // kind 생략 = payment (하위 호환)
+    if (parsedJson && typeof parsedJson === "object" && !("kind" in parsedJson)) {
+      (parsedJson as Record<string, unknown>).kind = "payment";
+    }
     const parsed = WebhookBody.safeParse(parsedJson);
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
-    // ⚠️ 이 body 형식(paymentId·targetStatus 직접 지정)은 mockpg 전용.
+    // ⚠️ 이 body 형식(내부 ID·targetStatus 직접 지정)은 mockpg 전용.
     //    실 provider 는 adapter 가 (provider, providerPaymentId)로 내부 결제를
     //    찾고 event type 을 내부 상태로 매핑한다(R7 P0-4 — provider 연동 시).
-    const decision = await processPgWebhook(cfg.db, providerName, {
-      ...parsed.data, rawPayload: raw,
-    }, now());
+    const d = parsed.data;
+    const decision = d.kind === "refund"
+      ? await processRefundWebhook(cfg.db, providerName, { ...d, rawPayload: raw }, now())
+      : await processPgWebhook(cfg.db, providerName, { ...d, rawPayload: raw }, now());
     // 중복·stale 포함 항상 200 — 내부 판단은 inbox (openapi 계약)
     return c.json({ decision: decision.action }, 200);
   });

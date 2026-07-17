@@ -9,6 +9,21 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
+/* R8 C8-04: 조건부 boot validation — "조용한 장애" 방지.
+   실 provider 를 활성화(ENABLED_PG_PROVIDERS)했는데 verifier 가 없으면
+   웹훅이 전부 404 로 조용히 유실됨(결제는 PENDING 잔류) → 부팅 자체를 실패.
+   활성 provider 미지정(개발·mock 단계)은 통과 — 과도한 차단 방지. */
+const enabledProviders = (process.env.ENABLED_PG_PROVIDERS ?? "")
+  .split(",").map((p) => p.trim()).filter(Boolean);
+const registeredVerifiers: Record<string, unknown> = {}; // 실 adapter 등록 시 채움
+if (process.env.NODE_ENV === "production") {
+  const missing = enabledProviders.filter((p) => !registeredVerifiers[p]);
+  if (missing.length > 0) {
+    console.error(`[boot] 활성 PG provider 의 verifier 미등록: ${missing.join(", ")} — 웹훅이 조용히 유실됩니다. 부팅 중단.`);
+    process.exit(1);
+  }
+}
+
 const app = createApp({
   db: createDb(databaseUrl),
   providers: {}, // 실제 provider 는 클라이언트 키 발급 후 등록(카카오 앵커부터)

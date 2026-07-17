@@ -413,3 +413,60 @@ export const outboxEvents = pgTable("outbox_events", {
 }, (t) => [
   index("ix_outbox_unpublished").on(t.publishedAt, t.createdAt), // publisher 폴링
 ]);
+
+/* ── R7 배치 5: 환불 persistence (domain Refund·RefundAllocation 이행) ──
+   정책(코드·OpenAPI·docs 동일): 부분승인 미지원(approved=requested) ·
+   Refund 1건=원생 1명 · 요청자=실제 결제자 · 상호 승인(동일인 금지). */
+export const refundStatusEnum = pgEnum("refund_status", ["REQUESTED", "MUTUALLY_APPROVED", "PROCESSING", "COMPLETED", "FAILED", "UNKNOWN", "REJECTED"]);
+
+export const refunds = pgTable("refunds", {
+  id: text("id").primaryKey(),                    // ref_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  paymentId: text("payment_id").notNull(),
+  participantId: text("participant_id").notNull(), // 원생 1명 귀속(R4 P0-2)
+  status: refundStatusEnum("status").notNull(),
+  reasonCode: text("reason_code").notNull(),
+  reasonText: text("reason_text"),
+  requestedAmount: integer("requested_amount").notNull(),
+  approvedAmount: integer("approved_amount"),      // 부분승인 금지 — 있으면 =requested
+  completedAmount: integer("completed_amount"),
+  requestedByUserId: text("requested_by_user_id").notNull().references(() => users.id),
+  requestedAt: timestamp("requested_at", { withTimezone: true, mode: "string" }).notNull(),
+  guardianApprovedByUserId: text("guardian_approved_by_user_id"),
+  guardianApprovedAt: timestamp("guardian_approved_at", { withTimezone: true, mode: "string" }),
+  academyApprovedByUserId: text("academy_approved_by_user_id"),
+  academyApprovedAt: timestamp("academy_approved_at", { withTimezone: true, mode: "string" }),
+  idempotencyKey: text("idempotency_key").notNull(),
+  providerRefundId: text("provider_refund_id"),
+  lastEventAt: timestamp("last_event_at", { withTimezone: true, mode: "string" }),
+  completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: version(),
+}, (t) => [
+  uniqueIndex("uq_refund_idem").on(t.academyId, t.requestedByUserId, t.idempotencyKey),
+  uniqueIndex("uq_refund_id_academy").on(t.id, t.academyId),
+  index("ix_refund_payment").on(t.paymentId),
+  check("ck_refund_requested_positive", sql`${t.requestedAmount} > 0`),
+  // 부분승인 금지를 DB 도 강제(R4 P0-1): approved 가 있으면 반드시 requested 와 동일
+  check("ck_refund_no_partial_approval", sql`${t.approvedAmount} IS NULL OR ${t.approvedAmount} = ${t.requestedAmount}`),
+  // 교차 테넌트 차단(R7 P0-6): Payment·Participant 와 academy 결합
+  foreignKey({ name: "fk_refund_payment_academy", columns: [t.paymentId, t.academyId], foreignColumns: [payments.id, payments.academyId] }),
+  foreignKey({ name: "fk_refund_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+]);
+
+export const refundAllocations = pgTable("refund_allocations", {
+  id: text("id").primaryKey(),                    // ra_xxx
+  refundId: text("refund_id").notNull().references(() => refunds.id),
+  paymentAllocationId: text("payment_allocation_id").notNull().references(() => paymentAllocations.id),
+  invoiceId: text("invoice_id").notNull(),
+  participantId: text("participant_id").notNull(), // = Refund.participantId (서비스 tx 검증)
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  amount: integer("amount").notNull(),
+}, (t) => [
+  uniqueIndex("uq_refund_alloc").on(t.refundId, t.paymentAllocationId), // 중복 차감 차단(R6·R7)
+  index("ix_ra_payment_allocation").on(t.paymentAllocationId),
+  check("ck_ra_amount_positive", sql`${t.amount} > 0`),
+  foreignKey({ name: "fk_ra_refund_academy", columns: [t.refundId, t.academyId], foreignColumns: [refunds.id, refunds.academyId] }),
+  foreignKey({ name: "fk_ra_invoice_academy", columns: [t.invoiceId, t.academyId], foreignColumns: [invoices.id, invoices.academyId] }),
+]);
