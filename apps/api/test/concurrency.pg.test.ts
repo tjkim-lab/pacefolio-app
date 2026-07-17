@@ -6,7 +6,7 @@
    근거 잠금: invite row FOR UPDATE(경쟁 직렬화) + OTP 조건부 UPDATE +
    UNIQUE(invite, guardian, participant).
    실행: DATABASE_URL_TEST 설정 시에만(CI postgres:16 service). 로컬은 skip. */
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -34,10 +34,24 @@ interface World {
   child: { childName: string; childBirth: string };
 }
 
+/* ⚠️ 단일 공유 pool — 테스트마다 새 Pool 을 만들면 닫히지 않은 idle 커넥션이
+   누적돼 Postgres max_connections(기본 100)를 초과한다(CI Run #12 실패 원인).
+   경쟁 테스트 6종 × 20 동시 tx 도 이 pool 하나(max 30)로 순차 수용. */
+let sharedPool: Pool | null = null;
+let sharedDb: ReturnType<typeof drizzle> | null = null;
+let migrated = false;
+after(async () => { await sharedPool?.end(); }); // 커넥션 정리 — runner hang 방지
+
 async function setup(): Promise<World> {
-  const pool = new Pool({ connectionString: DATABASE_URL_TEST, max: 25 }); // 20 동시 tx 수용
-  const db = drizzle(pool);
-  await migrate(db, { migrationsFolder }); // 재적용은 no-op(migrator 저널)
+  if (!sharedDb) {
+    sharedPool = new Pool({ connectionString: DATABASE_URL_TEST, max: 30 });
+    sharedDb = drizzle(sharedPool);
+  }
+  const db = sharedDb;
+  if (!migrated) {
+    await migrate(db, { migrationsFolder }); // 재적용은 no-op(migrator 저널)
+    migrated = true;
+  }
   const academyId = rid("a");
   const participantId = rid("p");
   await db.insert(s.academies).values({
