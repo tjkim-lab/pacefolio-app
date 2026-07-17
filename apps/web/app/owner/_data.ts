@@ -169,6 +169,10 @@ export interface CapMeter {
   note: string;
   tone: MeterTone;
   recruit?: boolean;
+  /* 13A: 요일 OR 필터·accordion 상세용 — fixture 정본(daysLabel·time) 파생 */
+  days: string[];
+  time: string;
+  prog: string;
 }
 const DIV_LABEL: Record<string, string> = { BRAIN: "브레인", ACTIVE: "액티브" };
 /* 원장 화면 전용 뷰 플래그: 톤·대기 표기·모집 배지. 수치는 fixture 정본 */
@@ -192,8 +196,75 @@ export const CAP_METERS: CapMeter[] = fx.classes.map((c) => {
     note: `${c.enrolled} / ${c.capacity}${v.noteSuffix ?? ""}`,
     tone: v.tone,
     ...(v.recruit ? { recruit: true } : {}),
+    days: c.daysLabel.split("·"),
+    time: c.time,
+    prog: pr?.name ?? c.name,
   };
 });
+export const CAP_DAYS = ["월", "화", "수", "목", "금", "토", "일"] as const;
+
+/* ───── 홈: 수납 배너 명단 시트 (13A — 숫자는 버튼, 클릭 = 명단 + 다음 행동)
+   배너 집계(81/7/5)는 원생 93명 기준 목업 — 시트 명단은 fixture 8명 정본에서
+   파생하고 나머지는 "외 N명"으로 표시(가짜 이름 생성 금지). ───── */
+export interface PayListRow {
+  id: string;
+  nm: string;
+  cls: string;
+  sub: string;   // 행동에 필요한 문맥(마감·열람·리마인드·연락 상태)
+  amt?: string;  // 금액 — 명단을 연 후에만 표시(13A: 홈 첫 화면 금액 제거)
+}
+export interface PaySheet {
+  title: string;
+  count: number;
+  sub: string;
+  rows: PayListRow[];
+  more?: string;
+  actions: string[]; // 행동 버튼(동일 규격) — 목업: toast
+  bulk?: string;     // 하단 일괄 행동
+}
+const amtOf = (k: Kid) => k.payDetail.split(" · ")[0];
+const doneKids = KIDS.filter((k) => k.pay === "완납");
+const waitKids = KIDS.filter((k) => k.pay === "일할 청구");
+const overKids = KIDS.filter((k) => k.pay === "미납");
+export const PAY_SHEETS: Record<"done" | "wait" | "over", PaySheet> = {
+  done: {
+    title: "결제 완료",
+    count: 81,
+    sub: "9월 시작 수납기간 · 원생 기준",
+    rows: doneKids.map((k) => ({
+      id: k.id, nm: k.nm, cls: k.cls,
+      sub: "9/1 카드 결제 · 영수증 발급됨",
+      amt: amtOf(k),
+    })),
+    more: `외 ${81 - doneKids.length}명 — 전체 명단은 실 API 연결 후`,
+    actions: ["결제 상세", "영수증", "대화"],
+  },
+  wait: {
+    title: "결제 대기",
+    count: 7,
+    sub: "청구서 발송됨 · 마감 12/1 전",
+    rows: waitKids.map((k, i) => ({
+      id: k.id, nm: k.nm, cls: k.cls,
+      sub: `${k.parent.split(" ")[0]} · 마감 12/1 · ${i % 2 === 0 ? "청구서 열람함" : "미열람"} · 마지막 알림 어제`,
+      amt: amtOf(k),
+    })),
+    more: `외 ${7 - waitKids.length}명 — 전체 명단은 실 API 연결 후`,
+    actions: ["알림 보내기", "대화", "청구서"],
+    bulk: "선택 대상 일괄 알림",
+  },
+  over: {
+    title: "기한 초과",
+    count: 5,
+    sub: "마감 지남 · 리마인드·대화·입금 확인",
+    rows: overKids.map((k) => ({
+      id: k.id, nm: k.nm, cls: k.cls,
+      sub: k.payDetail.split(" · ").slice(1).join(" · ") + " · 연락 무응답",
+      amt: amtOf(k),
+    })),
+    more: "외 3명 · ₩804,000 — 전체 명단은 실 API 연결 후",
+    actions: ["리마인드", "대화", "입금 확인"],
+  },
+};
 
 /* ───── 홈: 오늘 처리할 일 ─────
    미납 합계 = fixture OVERDUE 청구(민준 330,000 + 수아 531,000 정본)

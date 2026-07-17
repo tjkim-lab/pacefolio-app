@@ -22,6 +22,8 @@ import {
   POLICIES,
   ROOMS,
   BYE_KIDS,
+  DEFAULT_TEMPLATES,
+  TEMPLATE_MAX,
   type AttStatus,
   type PolicyKey,
   type Msg,
@@ -30,7 +32,7 @@ import {
 
 /* ---------------- helpers ---------------- */
 export function attCounts(att: Record<string, AttStatus>) {
-  const c = { p: 0, l: 0, a: 0, none: 0 };
+  const c = { p: 0, l: 0, a: 0, e: 0, none: 0 };
   KIDS.forEach((k) => {
     if (k.paused) return;
     const s = att[k.n] || "";
@@ -103,6 +105,10 @@ interface CoachCtx {
 
   coachSay: string;
   setCoachSay: (v: string) => void;
+  /* C3: 공통 메시지 템플릿 (최대 5) */
+  templates: string[];
+  saveTemplate: (t: string) => "ok" | "full" | "empty" | "dup";
+  removeTemplate: (i: number) => void;
   photoChecked: boolean;
   photoScope: string;
   checkPhoto: () => void;
@@ -379,6 +385,25 @@ export function CoachProvider({ children }: { children: ReactNode }) {
 
   /* STEP3 */
   const [coachSay, setCoachSay] = useState("");
+  /* C3: 코치별 템플릿 최대 5 — 생성·삭제·선택 (저장은 API_REQUIRED) */
+  const [templates, setTemplates] = useState<string[]>([...DEFAULT_TEMPLATES]);
+  const saveTemplate = useCallback(
+    (t: string): "ok" | "full" | "empty" | "dup" => {
+      const val = t.trim();
+      if (!val) return "empty";
+      let result: "ok" | "full" | "dup" = "ok";
+      setTemplates((prev) => {
+        if (prev.includes(val)) { result = "dup"; return prev; }
+        if (prev.length >= TEMPLATE_MAX) { result = "full"; return prev; }
+        return [...prev, val];
+      });
+      return result;
+    },
+    [],
+  );
+  const removeTemplate = useCallback((i: number) => {
+    setTemplates((prev) => prev.filter((_, x) => x !== i));
+  }, []);
   const [photoChecked, setPhotoChecked] = useState(false);
   const [photoScope, setPhotoScope] = useState("individual");
   const checkPhoto = useCallback(() => {
@@ -422,6 +447,9 @@ export function CoachProvider({ children }: { children: ReactNode }) {
   }, [reportSent, attSaved, photoChecked, showToast]);
   const closeReview = useCallback(() => setReviewOpen(false), []);
   const confirmSend = useCallback(() => {
+    /* C2: 완료 요청 멱등 — 중복 클릭으로 수업이 두 번 완료되지 않게
+       (실 API 는 idempotencyKey + 서버 수업 상태 기준) */
+    if (sending || reportSent) return;
     setReviewOpen(false);
     setSending(true);
     setTimeout(() => {
@@ -527,7 +555,8 @@ export function CoachProvider({ children }: { children: ReactNode }) {
     absKid, openAbs, closeAbs, resolveAbs,
     actsDone, actWhy, toggleAct, setWhy, showWhy, requestStep3,
     recordValue, newRecord, saveRecord,
-    coachSay, setCoachSay, photoChecked, photoScope, checkPhoto, setPhotoScope,
+    coachSay, setCoachSay, templates, saveTemplate, removeTemplate,
+    photoChecked, photoScope, checkPhoto, setPhotoScope,
     incOpen, openInc, closeInc, saveInc,
     reviewOpen, requestSend, closeReview, confirmSend, reportSent, sending, elapsedText,
     messages, unread, preview, sendMessage, enterRoom, totalChatUnread,

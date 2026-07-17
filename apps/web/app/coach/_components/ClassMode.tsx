@@ -2,11 +2,13 @@
 
 /* 수업 모드 (풀스크린) — ① 출석 → ② 활동·기록 → ③ 코치 한마디 → 발송 완료 */
 
-import { useState } from "react";
 import Link from "next/link";
 import { useCoach, attCounts, uniqGuardians } from "../_state";
-import { KIDS, CLASS_ACTS, SKIP_WHYS, PHOTO_SCOPE, ATT_TXT, type AttStatus } from "../_data";
-import { Button, Card, cn } from "@/components/ui";
+import {
+  KIDS, CLASS_ACTS, SKIP_WHYS, PHOTO_SCOPE, ATT_TXT, GROWTH_AREAS,
+  TEMPLATE_MAX, TEMPLATE_VARS, type AttStatus,
+} from "../_data";
+import { Button, Card, Tag, cn } from "@/components/ui";
 import { IconCheck, IconClock, IconSpark } from "@/components/ui/icons";
 import { Chip } from "./Bits";
 
@@ -22,12 +24,14 @@ const cellTone: Record<AttStatus, string> = {
   p: "border-accent bg-accent-weak",
   l: "border-warn bg-warn-weak",
   a: "border-danger bg-danger-weak",
+  e: "border-ink3 bg-fill",
 };
 const avatarTone: Record<AttStatus, string> = {
   "": "bg-fill text-ink2",
   p: "bg-accent text-white",
   l: "bg-warn text-white",
   a: "bg-danger text-white",
+  e: "bg-ink3 text-white",
 };
 
 export default function ClassMode() {
@@ -100,11 +104,12 @@ function StepAttendance() {
       <div className="mt-1 px-0.5 text-[11px] font-bold text-ink3">
         실제 출결 — 학부모 접수는 &apos;예정&apos; 정보, 최종 확정은 코치가 해요
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2">
+      <div className="mt-3 grid grid-cols-4 gap-2">
         {[
           { v: counts.p, k: "출석 ○", t: "text-accent-ink" },
           { v: counts.l, k: "지각 △", t: "text-warn-ink" },
           { v: counts.a, k: "결석 ✕", t: "text-danger-ink" },
+          { v: counts.e, k: "조퇴 ◐", t: "text-ink2" },
         ].map((s) => (
           <div key={s.k} className="rounded-xl border border-line bg-surface py-2.5 text-center">
             <div className={cn("text-[18px] font-extrabold", s.t)}>{s.v}</div>
@@ -140,7 +145,7 @@ function StepAttendance() {
                 {k.n[0]}
               </div>
               <div className="mt-1.5 text-[12px] font-bold text-ink">{k.n}</div>
-              <div className={cn("mt-0.5 text-[10px] font-bold", st === "p" ? "text-accent-ink" : st === "l" ? "text-warn-ink" : st === "a" ? "text-danger-ink" : "text-ink3")}>
+              <div className={cn("mt-0.5 text-[10px] font-bold", st === "p" ? "text-accent-ink" : st === "l" ? "text-warn-ink" : st === "a" ? "text-danger-ink" : st === "e" ? "text-ink2" : "text-ink3")}>
                 {stTxt}
               </div>
               {k.safe ? (
@@ -176,7 +181,7 @@ function StepAttendance() {
       )}
 
       <Note>
-        민준이는 학부모가 접수한 <b className="text-ink">결석 예정(아파요)</b> — 아이가 실제로 오면 탭해서 바꿀 수 있어요(사유·이력이 남아요). 도담이는 <b className="text-ink">컨디션 주의</b>로 참석해요. 아이를 탭하면 출석○ → 결석✕ → 지각△ 순환.
+        민준이는 학부모가 접수한 <b className="text-ink">결석 예정(아파요)</b> — 아이가 실제로 오면 탭해서 바꿀 수 있어요(사유·이력이 남아요). 아이를 탭하면 출석○ → 결석✕ → 지각△ → 조퇴◐ 순환 — 한 번의 탭으로 바꿔요. 결석·지각 사유는 선택 입력이에요.
       </Note>
 
       <div className="sticky bottom-0 -mx-4 mt-3 bg-gradient-to-t from-surface via-surface to-transparent px-4 pb-1 pt-3">
@@ -186,7 +191,7 @@ function StepAttendance() {
   );
 }
 
-function SaveAttButton({ counts }: { counts: { p: number; l: number; a: number; none: number } }) {
+function SaveAttButton({ counts }: { counts: { p: number; l: number; a: number; e: number; none: number } }) {
   const c = useCoach();
   if (c.reportSent)
     return <Button full disabled variant="primary" className="bg-accent-ink">최종 확정됨 · 리포트에 반영</Button>;
@@ -195,22 +200,21 @@ function SaveAttButton({ counts }: { counts: { p: number; l: number; a: number; 
   if (counts.none === 0)
     return (
       <Button full variant="primary" onClick={c.saveAtt}>
-        출석 임시 저장 ({counts.p}·{counts.l}·{counts.a})
+        출석 임시 저장 ({counts.p}·{counts.l}·{counts.a}·{counts.e})
       </Button>
     );
+  /* C2 완료 검증: 미지정 원생이 있으면 저장 불가 경고 */
   return <Button full disabled variant="primary">모두 체크하면 저장할 수 있어요 ({counts.none}명 남음)</Button>;
 }
 
-/* ---------- STEP 2 ---------- */
+/* ---------- STEP 2 (C2: 영역+활동명+완료만 — 분·초·측정값 제거) ---------- */
 function StepActivities() {
   const c = useCoach();
-  const [recIn, setRecIn] = useState("");
-  const [recBadge, setRecBadge] = useState<string | null>(null);
 
   return (
     <>
       <div className="px-0.5 pt-2 text-[12.5px] font-semibold text-ink3">
-        오늘 활동 3개 — 완료를 누르고, 기록이 나오면 숫자만 적어주세요 ✍️
+        오늘의 프로그램 — 진행한 활동에 완료만 눌러주세요 (세부 측정은 프로그램 정책 확정 후)
       </div>
 
       {CLASS_ACTS.map((a, i) => {
@@ -227,8 +231,10 @@ function StepActivities() {
             <div className="flex items-center gap-3">
               <div className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-xl bg-fill text-[18px]">{a.e}</div>
               <div className="flex-1">
-                <div className="text-[13.5px] font-bold text-ink">{a.n}</div>
-                <div className="text-[11px] font-medium text-ink3">{a.sub}</div>
+                <div className="text-[13.5px] font-bold text-ink">
+                  {a.area} — {a.n}
+                </div>
+                <div className="text-[11px] font-medium text-ink3">완료하면 원생별 활동 영역 기록에 누적돼요</div>
               </div>
               <button
                 onClick={() => c.toggleAct(i)}
@@ -240,45 +246,6 @@ function StepActivities() {
                 {done ? "완료 ✓" : "완료"}
               </button>
             </div>
-
-            {a.record && (
-              <div className="mt-2.5 rounded-xl border border-line bg-fill px-3 py-2.5">
-                <div className="text-[12px] font-semibold text-ink2">
-                  🏅 {a.record.kid} — {a.record.label} <b className="text-ink">지난 기록 {a.record.last}초</b>{" "}
-                  <span className="text-[10.5px] text-ink3">· {a.record.hint}</span>
-                </div>
-                <div className="mt-2 flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={300}
-                    value={recIn}
-                    onChange={(e) => setRecIn(e.target.value)}
-                    placeholder="18"
-                    aria-label="한발 서기 기록 (초)"
-                    className="w-[74px] rounded-lg border border-line bg-surface px-2.5 py-2 text-center text-[14px] font-bold text-ink focus:outline-none focus:border-accent"
-                  />
-                  <span className="text-[12.5px] font-semibold text-ink3">초 (1~300)</span>
-                  <button
-                    onClick={() => {
-                      const v = parseInt(recIn, 10);
-                      const r = c.saveRecord(v);
-                      if (r === "record") setRecBadge(`신기록! 🎉 ${a.record!.last}초 → ${v}초 · 다시 저장하면 수정돼요`);
-                      else if (r === "coach") setRecBadge(`코치 기록 저장됨 · ${v}초 (지난 기록 ${a.record!.last}초)`);
-                    }}
-                    className="rounded-lg bg-accent-strong px-3.5 py-2 text-[12px] font-bold text-white"
-                  >
-                    기록 저장
-                  </button>
-                </div>
-                {recBadge && (
-                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-warn-weak px-3 py-1.5 text-[12px] font-extrabold text-warn-ink">
-                    {recBadge}
-                  </div>
-                )}
-              </div>
-            )}
 
             {c.showWhy[i] && !done && (
               <div className="mt-2.5 rounded-xl border border-warn bg-warn-weak px-3 py-2.5">
@@ -300,9 +267,23 @@ function StepActivities() {
         진행 못 한 활동은 <b className="text-ink">사유를 직접 선택</b>해요 — &quot;다음 시간에 이어서&quot;는 코치가 고른 경우에만 다음 차시 계획에 연결돼요.
       </Note>
 
-      <Button variant="ghost" full className="mt-2.5" onClick={c.openInc}>
-        ⚠ 특이사항·안전사고 기록
-      </Button>
+      {/* C2: 한 줄 액션 — 버튼 문구 짧게(줄바꿈 금지) · 안전사고는 원장 즉시 알림 */}
+      <div className="mt-2.5 flex gap-2">
+        <Button variant="ghost" full className="whitespace-nowrap text-[13px]" onClick={c.openInc}>
+          ⚠ 기록
+        </Button>
+        <Button
+          variant="primary"
+          full
+          className="whitespace-nowrap text-[13px]"
+          onClick={() => {
+            c.openInc();
+            c.showToast("저장하면 원장에게 즉시 알림 — 원장 홈 확인 필요 영역에 떠요");
+          }}
+        >
+          기록 후 원장 알림
+        </Button>
+      </div>
 
       <div className="sticky bottom-0 -mx-4 mt-3 bg-gradient-to-t from-surface via-surface to-transparent px-4 pb-1 pt-3">
         <Button full variant="primary" onClick={c.requestStep3}>다음 — 코치 한마디</Button>
@@ -323,17 +304,52 @@ function StepReport() {
       <Card className="mt-2.5">
         <h4 className="text-[13.5px] font-bold text-ink">코치 공통 한마디 (선택)</h4>
         <div className="mt-0.5 text-[11.5px] font-medium text-ink3">
-          모든 보호자에게 공통으로 실려요 — 개별 기록(도담 신기록 등)은 해당 보호자에게만 가요
+          모든 보호자에게 공통으로 실려요 — 개별 학생 피드백은 내 정보 › 담당 수업에서 따로 관리해요
         </div>
+        {/* C3: 템플릿 최대 5 — 선택 후 수업에 맞게 수정, 발송 전 검토가 미리보기 */}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {c.templates.map((t, i) => (
+            <Chip
+              key={i}
+              on={c.coachSay === t}
+              onClick={() => {
+                c.setCoachSay(t);
+                c.showToast("템플릿 적용 — 이 수업에 맞게 수정해도 템플릿 원본은 안 바뀌어요");
+              }}
+            >
+              템플릿 {i + 1}
+            </Chip>
+          ))}
+          <Chip
+            on={false}
+            onClick={() => {
+              const r = c.saveTemplate(c.coachSay);
+              c.showToast(
+                r === "ok" ? `현재 문구를 템플릿으로 저장했어요 (${c.templates.length + 1}/${TEMPLATE_MAX})`
+                : r === "full" ? `템플릿은 최대 ${TEMPLATE_MAX}개 — 내 정보 › 코치 설정에서 정리해주세요`
+                : r === "dup" ? "이미 같은 템플릿이 있어요"
+                : "저장할 문구를 먼저 적어주세요",
+              );
+            }}
+          >
+            + 현재 문구 저장
+          </Chip>
+        </div>
+        {c.coachSay && c.templates.includes(c.coachSay) && (
+          <div className="mt-1.5 text-[11px] font-medium text-ink3">“{c.coachSay}”</div>
+        )}
         <textarea
           className="mt-2.5 h-24 w-full resize-none rounded-xl border border-line bg-fill p-3 text-[13.5px] font-medium text-ink focus:outline-none focus:border-accent focus:bg-surface"
           placeholder="오늘은 균형 활동에 다들 잘 집중했어요. 다음 시간에는 리듬 스텝을 이어갑니다 👏"
           value={c.coachSay}
           onChange={(e) => c.setCoachSay(e.target.value)}
         />
+        <div className="mt-1.5 text-[10.5px] font-medium text-ink3">
+          치환 변수(설계): {TEMPLATE_VARS} — 발송 시 원생·수업별 자동 치환 (API_REQUIRED)
+        </div>
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           <Chip on>출석·활동 자동 포함</Chip>
-          {c.newRecord > 0 && <Chip on>🏅 도담 신기록 1건 — 도담 보호자에게만</Chip>}
+          <Chip on>완료 활동 → 영역 기록 누적</Chip>
         </div>
       </Card>
 
@@ -382,12 +398,13 @@ function StepDone() {
   const c = useCoach();
   const counts = attCounts(c.att);
   const doneActs = c.actsDone.filter(Boolean).length;
-  const reports = counts.p + counts.l;
+  const doneAreas = CLASS_ACTS.filter((_, i) => c.actsDone[i]).map((a) => a.area);
+  const reports = counts.p + counts.l + counts.e;
   const guardians = uniqGuardians();
   const stats = [
     { v: `${counts.p}명`, k: "실제 출석", t: "text-accent-ink" },
     { v: `${doneActs}/3`, k: "활동 완료", t: "text-ink" },
-    { v: c.newRecord ? "1건" : "0건", k: "신기록 🏅", t: "text-warn-ink" },
+    { v: `${doneAreas.length}개`, k: "영역 누적 🌱", t: "text-warn-ink" },
   ];
   return (
     <div className="pt-11 text-center">
@@ -413,6 +430,21 @@ function StepDone() {
           </div>
         ))}
       </div>
+      {doneAreas.length > 0 && (
+        <div className="mt-3.5 rounded-xl border border-line bg-fill px-3 py-2.5 text-left text-[12px] font-medium text-ink2">
+          <b className="text-ink">오늘 누적된 활동 영역</b> — 출석 원생 {reports}명의 활동 이력에 기록
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {GROWTH_AREAS.map((ar) => (
+              <Tag key={ar} tone={doneAreas.includes(ar) ? "accent" : "muted"}>
+                {ar} {doneAreas.includes(ar) ? "+1" : "—"}
+              </Tag>
+            ))}
+          </div>
+          <div className="mt-1.5 text-[10.5px] text-ink3">
+            능력 진단·점수가 아니라 &quot;어떤 활동 경험이 쌓였는지&quot; 기록이에요 (저장은 API_REQUIRED)
+          </div>
+        </div>
+      )}
       <div className="mt-3.5 text-[13px] font-medium text-ink2">
         수업 모드 소요 시간 <b className="text-ink">{c.elapsedText || "—"}</b> ⏱️
       </div>

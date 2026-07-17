@@ -13,6 +13,35 @@ import {
 import { cn } from "@/components/ui";
 import { IconCheck } from "@/components/ui/icons";
 
+/* ---------- 바텀시트 (13A — 숫자 카드 클릭 → 명단 + 다음 행동) ---------- */
+export function OwnerSheet({
+  title,
+  sub,
+  onClose,
+  children,
+}: {
+  title: string;
+  sub?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="absolute inset-0 z-[200] flex items-end bg-ink/45" onClick={onClose} role="presentation">
+      <div
+        className="max-h-[76%] w-full overflow-y-auto rounded-t-[24px] bg-surface px-5 pt-4 pb-7"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="mx-auto mb-3.5 h-[5px] w-10 rounded-full bg-line" />
+        <h3 className="text-[18px] font-extrabold text-ink">{title}</h3>
+        {sub && <div className="mt-0.5 text-[12.5px] text-ink3">{sub}</div>}
+        <div className="mt-3">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Spinner ---------- */
 export function Spinner() {
   return (

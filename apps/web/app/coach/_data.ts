@@ -104,8 +104,38 @@ export const POLICIES: Record<PolicyKey, Policy> = {
 };
 export const POLICY_ORDER: PolicyKey[] = ["LOCKED", "SELECT", "FLEX", "APPROVAL"];
 
-/* ---------- 출석 명단 (예정 vs 실제 분리) ---------- */
-export type AttStatus = "" | "p" | "l" | "a";
+/* ---------- 오늘의 수업 (배치 C1 — 시간순 캐러셀) ----------
+   메인 수업 = fixture 플레이2 월수반(월 14:30) 정본. 두 번째는 캐러셀·
+   상태 버튼 시연용 목업 전용(보강). 상태는 서버 수업 상태 기준이 정본 —
+   여기선 코치 상태머신(_state)에서 파생(API_REQUIRED). */
+export type ClassStatus = "SCHEDULED" | "READY" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+export interface TodayClassCard {
+  id: string;
+  time: string;
+  end: string;
+  name: string;
+  place: string;
+  students: number;
+  main?: boolean; // 수업 모드 상태머신과 연결된 메인 수업
+  note?: string;
+}
+export const TODAY_CLASSES: TodayClassCard[] = [
+  { id: "main", time: "14:30", end: "15:30", name: "플레이2 · 월수반", place: "본관 2층", students: 10, main: true, note: '14회차 "균형과 리듬 ②"' },
+  { id: "extra", time: "16:30", end: "17:30", name: "플레이2 보강수업", place: "본관 2층", students: 3, note: "결석 보강 · 목업 전용" },
+];
+export const CLASS_STATUS_BTN: Record<ClassStatus, string> = {
+  SCHEDULED: "수업 준비",
+  READY: "수업 시작",
+  IN_PROGRESS: "수업 계속하기",
+  COMPLETED: "완료됨 · 결과 보기",
+  CANCELLED: "취소됨",
+};
+
+/* ---------- 학부모 전달사항 (C1 — 원생·수업 컨텍스트 표시) ---------- */
+export const PARENT_NOTES: { kid: string; msg: string; ctx: string }[] = [];
+
+/* ---------- 출석 명단 (예정 vs 실제 분리 · C2: 출석/결석/지각/조퇴 4상태) ---------- */
+export type AttStatus = "" | "p" | "l" | "a" | "e";
 export interface Kid {
   n: string;
   a: number;
@@ -150,8 +180,18 @@ const localOnlyKids: Kid[] = [
   { n: "준서", a: 7, paused: true },
 ];
 export const KIDS: Kid[] = [...rosterKids, ...localOnlyKids];
-export const ATT_CYCLE: Record<AttStatus, AttStatus> = { "": "p", p: "a", a: "l", l: "p" };
-export const ATT_TXT: Record<AttStatus, string> = { "": "미체크", p: "출석 ○", l: "지각 △", a: "결석 ✕" };
+export const ATT_CYCLE: Record<AttStatus, AttStatus> = { "": "p", p: "a", a: "l", l: "e", e: "p" };
+export const ATT_TXT: Record<AttStatus, string> = { "": "미체크", p: "출석 ○", l: "지각 △", a: "결석 ✕", e: "조퇴 ◐" };
+
+/* 학부모 전달사항 — fixture 예정결석 + 컨디션(원장 brief 와 동일 건) 파생 */
+PARENT_NOTES.push(
+  ...[...plannedAbsence.entries()].map(([pid, reason]) => ({
+    kid: shortName(play2Participant(pid)?.name ?? ""),
+    msg: `결석 예정 — 사유: "${reason}"`,
+    ctx: "14:30 플레이2 · 학부모 접수",
+  })),
+  { kid: "도담", msg: "어제 병원 다녀왔어요 — 오늘 컨디션 확인해주세요", ctx: "14:30 플레이2 · 보호자 대화" },
+);
 
 /* 결석 예정 → 실제 출결 확정 시트 옵션 */
 export const ABS_WHY = ["아이가 실제로 도착함", "학부모가 현장에서 취소함", "예정대로 결석", "기타"];
@@ -169,23 +209,28 @@ for (const id of P2_ROSTER_ORDER) {
   GUARDIAN_GID[n] = `gd_local_${i + 1}`;
 });
 
-/* ---------- 수업 모드 STEP2 · 오늘 활동 ---------- */
+/* ---------- 수업 모드 STEP2 · 오늘의 프로그램 (C2: 영역+활동명+완료만 —
+   분·초·횟수 등 세부 측정값 제거. 측정은 프로그램 정책 확정 후 후속 단계) ---------- */
+export type GrowthArea = "균형감각" | "협응성" | "인지·집중";
+export const GROWTH_AREAS: GrowthArea[] = ["균형감각", "협응성", "인지·집중"];
 export interface ClassAct {
   e: string;
   n: string;
-  sub: string;
-  record?: { kid: string; label: string; last: number; hint: string };
+  area: GrowthArea; // 완료 시 원생별 성장 영역 기록에 누적 (진단·점수 아님)
 }
 export const CLASS_ACTS: ClassAct[] = [
-  {
-    e: "🤸",
-    n: "한발 서기 밸런스 게임",
-    sub: "10분 · 균형감각",
-    record: { kid: "도담", label: "한발 서기", last: 15, hint: "개별 기록(선택) — 도담 보호자에게만 전달" },
-  },
-  { e: "🥁", n: "리듬 스텝 점프", sub: "12분 · 협응성" },
-  { e: "🧠", n: "색깔 신호 반응 게임", sub: "8분 · 인지·집중" },
+  { e: "🤸", n: "한발 서기 밸런스 게임", area: "균형감각" },
+  { e: "🥁", n: "리듬 스텝 점프", area: "협응성" },
+  { e: "🧠", n: "색깔 신호 반응 게임", area: "인지·집중" },
 ];
+
+/* ---------- 코치 공통 메시지 템플릿 (C3 — 최대 5개 · 치환 변수 설계) ---------- */
+export const TEMPLATE_MAX = 5;
+export const DEFAULT_TEMPLATES: string[] = [
+  "오늘도 수업에 즐겁게 참여했습니다. {오늘활동} 활동을 중심으로 진행했어요.",
+  "{수업명} 잘 마쳤습니다. 다음 시간에 이어서 연습할게요 👏",
+];
+export const TEMPLATE_VARS = "{학생이름} {수업명} {수업날짜} {오늘활동} {코치이름}";
 export const SKIP_WHYS = ["시간 부족", "다른 활동으로 대체", "현장 상황", "다음 시간에 이어서", "기타"];
 
 /* 사진 공개 범위 */
@@ -318,6 +363,17 @@ export const WEEK: WeekDay[] = [
   { dw: "일", dn: 2 },
 ];
 export const weekNote = "월·수 2:30 플레이2 🤸 · 토 10:00 농구 🏀";
+
+/* ---------- 내 인사정보 (C4 — 코치 본인 열람. 급여·계약서는 원장 권한) ---------- */
+export const HR_ROWS: [string, string][] = [
+  ["이름", KSJ?.name ?? "김선재"],
+  ["연락처", "010-****-7712"],
+  ["입사일", "2024-08-01 (14개월째)"],
+  ["담당", "플레이2 월수반 · 농구 토요특강"],
+  ["자격증", "생활스포츠지도사 2급 · 유효기간 ~2027-05"],
+  ["응급처치", "심폐소생술(CPR) 이수 · 2026-03"],
+  ["계약 형태", "정규 — 급여·계약서는 원장 정책·권한 (열람 로그 기록)"],
+];
 
 /* ---------- 인수인계 · 작별 피드백 ---------- */
 export const handoverSafety = {

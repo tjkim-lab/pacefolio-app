@@ -14,10 +14,10 @@ export default function CoachChatList() {
 
   return (
     <>
-      <AppHeader title="채팅" />
+      <AppHeader title="소통" />
       <AppScroll>
         <div className="px-1">
-          <p className="text-[19px] font-extrabold tracking-tight text-ink">채팅</p>
+          <p className="text-[19px] font-extrabold tracking-tight text-ink">소통</p>
           <p className="mt-0.5 text-[12.5px] font-medium text-ink3">내 반 채널 · 자동 개설</p>
         </div>
 

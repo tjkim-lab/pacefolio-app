@@ -14,7 +14,7 @@ import ReviewSheet from "./_components/ReviewSheet";
 const tabs: Tab[] = [
   { href: "/coach", label: "오늘", icon: IconHome },
   { href: "/coach/class", label: "수업", icon: IconWhistle },
-  { href: "/coach/chat", label: "채팅", icon: IconChat },
+  { href: "/coach/chat", label: "소통", icon: IconChat },
   { href: "/coach/me", label: "내 정보", icon: IconUser },
 ];
 

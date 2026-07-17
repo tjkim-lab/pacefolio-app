@@ -20,7 +20,7 @@ function Head({ children }: { children: string }) {
 }
 
 export default function ReviewSheet() {
-  const { reviewOpen, closeReview, confirmSend, att, actsDone, actWhy, newRecord, photoScope, coachSay } =
+  const { reviewOpen, closeReview, confirmSend, att, actsDone, actWhy, photoScope, coachSay } =
     useCoach();
   const c = attCounts(att);
   const doneActs = actsDone.filter(Boolean).length;
@@ -28,7 +28,7 @@ export default function ReviewSheet() {
     .map((d, i) => (!d ? i : -1))
     .filter((i) => i >= 0);
   const whys = partial.map((i) => actWhy[i] || "사유 미선택").join(", ");
-  const reports = c.p + c.l;
+  const reports = c.p + c.l + c.e;
   const guardians = uniqGuardians();
   const scope = PHOTO_SCOPE[photoScope];
 
@@ -41,11 +41,11 @@ export default function ReviewSheet() {
       sub="발송하면 각 보호자 앱에 공식 기록으로 남아요."
     >
       <Head>출결 (실제)</Head>
-      <Row k="실제 출석 · 지각 · 결석" v={`${c.p}명 · ${c.l}명 · ${c.a}명`} />
+      <Row k="출석 · 지각 · 결석 · 조퇴" v={`${c.p}명 · ${c.l}명 · ${c.a}명 · ${c.e}명`} />
       <Head>수업 내용</Head>
       <Row k="완료 활동" v={`${doneActs}개`} />
       {partial.length > 0 && <Row k="미진행 활동" v={`${partial.length}개 (${whys})`} />}
-      <Row k="개별 성장 기록" v={newRecord ? `${CLASS_ACTS[0].record?.kid} 1건 — 보호자에게만` : "없음"} />
+      <Row k="활동 영역 누적" v={doneActs > 0 ? CLASS_ACTS.filter((_, i) => actsDone[i]).map((a) => a.area).join(" · ") : "없음"} />
       <Row k="사진" v={`3장 · ${scope}`} />
       <Row k="코치 공통 한마디" v={coachSay.trim() ? "입력됨" : "미입력(선택)"} />
       <Head>발송</Head>

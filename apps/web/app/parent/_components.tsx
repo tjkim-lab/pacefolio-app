@@ -81,7 +81,7 @@ export function PushHeader({ title, sub }: { title: string; sub?: string }) {
 const TABS: { href: string; label: string; icon: IconKey }[] = [
   { href: "/parent", label: "홈", icon: "home" },
   { href: "/parent/schedule", label: "일정", icon: "cal" },
-  { href: "/parent/chat", label: "채팅", icon: "chat" },
+  { href: "/parent/chat", label: "소통", icon: "chat" },
   { href: "/parent/child", label: "우리 아이", icon: "user" },
 ];
 export function ParentNav() {

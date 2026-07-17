@@ -302,7 +302,7 @@ function BannerCarousel() {
         className="flex gap-2.5 overflow-x-auto snap-x snap-mandatory pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {list.map((b, i) => (
           <button key={i} data-bncard onClick={() => toast(`[${b.label}] ${b.t} — 상세로 이동 (데모)`)}
-            className="relative shrink-0 basis-[84%] snap-center rounded-[17px] overflow-hidden min-h-[138px] flex flex-col justify-end p-[15px] text-white text-left">
+            className="relative shrink-0 basis-[84%] snap-center rounded-[18px] overflow-hidden h-[144px] flex flex-col justify-end p-4 text-white text-left">
             <div className="absolute inset-0 z-0" style={{ background: b.bg }} />
             <span className={cn("relative z-[1] self-start text-[9.5px] font-extrabold px-2.5 py-1 rounded-full mb-auto backdrop-blur-sm", b.ad ? "bg-black/35" : "bg-white/25")}>{b.label}</span>
             <div className="relative z-[1] text-[15.5px] font-extrabold tracking-tight leading-tight mt-2.5">{b.t}</div>
