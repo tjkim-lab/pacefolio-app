@@ -12,6 +12,7 @@ import {
   asId,
 } from "@pacefolio/domain";
 import { sha256Hex, newId } from "../crypto";
+import { recordAudit, recordOutbox } from "../audit";
 import type { Db } from "../sessions/service";
 
 export interface LinkSliceInput {
@@ -120,14 +121,32 @@ export async function requestGuardianLink(
       await tx.insert(s.guardians).values({ id: guardianId, userId: input.actorUserId, createdAt: nowISO });
     }
 
-    /* 7) GuardianLink 생성 — UNIQUE(guardian, participant, academy) 가 중복 차단 */
+    /* 7) GuardianLink 생성 — UNIQUE(guardian, participant, academy) 가 중복 차단.
+       R7 P0-7 권한 정책:
+       - 선등록 연락처 결합(원장이 직접 등록한 보호자) = 전체 권한
+       - 초대코드 결합 = invite.allowedScopes 만(기본: 일정·출결 — 최소 권한)
+       - Primary = 원생당 1명(partial unique) — 기존 primary 있으면 false */
+    const scopes: readonly string[] = usedInvite && inviteRow
+      ? inviteRow.allowedScopes
+      : ["VIEW_SCHEDULE", "VIEW_ATTENDANCE", "VIEW_HEALTH_INFO", "RECEIVE_PHOTOS", "PAY", "REQUEST_REFUND"];
+    const has = (sc: string) => scopes.includes(sc);
+    const existingPrimary = await tx.select().from(s.guardianParticipantLinks)
+      .where(and(
+        eq(s.guardianParticipantLinks.participantId, participantId),
+        eq(s.guardianParticipantLinks.isPrimaryGuardian, true),
+      ));
     const linkId = newId("gl");
     await tx.insert(s.guardianParticipantLinks).values({
       id: linkId, guardianId, participantId, academyId: input.academyId,
       relationshipType: input.relationshipType,
-      isPrimaryGuardian: true, verificationStatus: "VERIFIED",
-      canViewSchedule: true, canViewAttendance: true, canViewHealthInfo: true,
-      canReceivePhotos: true, canPay: true, canRequestRefund: true,
+      isPrimaryGuardian: existingPrimary.length === 0, // 첫 보호자만 primary
+      verificationStatus: "VERIFIED",
+      canViewSchedule: has("VIEW_SCHEDULE"),
+      canViewAttendance: has("VIEW_ATTENDANCE"),
+      canViewHealthInfo: has("VIEW_HEALTH_INFO"),
+      canReceivePhotos: has("RECEIVE_PHOTOS"),
+      canPay: has("PAY"),
+      canRequestRefund: has("REQUEST_REFUND"),
       createdAt: nowISO, updatedAt: nowISO,
     });
 
@@ -153,7 +172,18 @@ export async function requestGuardianLink(
         .where(eq(s.guardianInvites.id, inviteRow.id));
     }
 
-    /* 10) AuditLog·Outbox — 저장 계층 도입 시 이 tx 에 합류(B5) */
+    /* 10) AuditLog·Outbox — 같은 트랜잭션 (R7 §26: 보호자-원생 연결은 필수 감사 대상) */
+    await recordAudit(tx, {
+      academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "GUARDIAN",
+      action: "guardian_link.created", targetType: "GuardianParticipantLink", targetId: linkId,
+      reason: usedInvite ? "INVITE_CODE" : "REGISTERED_CONTACT",
+      detail: { participantId, viaInvite: usedInvite }, // 이름·전화 원문 미포함
+      success: true,
+    }, nowISO);
+    await recordOutbox(tx, {
+      academyId: input.academyId, eventType: "GUARDIAN_LINK_CREATED",
+      payload: { linkId, guardianId, participantId },
+    }, nowISO);
     return { status: "VERIFIED", linkId, participantId };
   });
 }

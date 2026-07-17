@@ -205,7 +205,7 @@ export const AF_GROUPS: { key: string; label: string; opts: string[] }[] = [
   { key: "prog", label: "프로그램", opts: ["플레이2", "플레이3", "유소년 축구", "농구 특강", "인라인 기초"] },
   { key: "cls2", label: "반", opts: CLS_OPTS },
   { key: "day", label: "수업 요일", opts: ["월·수", "화·목", "화·금", "토"] },
-  { key: "coach", label: "담당 코치", opts: ["김선재", "이창진", "이코치", "박코치"] },
+  { key: "coach", label: "담당 코치", opts: ["김선재", "이창진", "이도현", "박정우"] },
   { key: "pay", label: "수납", opts: ["완납", "미납", "일할 청구"] },
   { key: "veh", label: "차량", opts: ["이용", "미이용"] },
   { key: "safe", label: "안전정보", opts: ["있음", "없음"] },
@@ -300,7 +300,7 @@ export const CLASSES_OP: ClsRow[] = fx.classes.map((c) => {
     cap: v.cap(c.enrolled, c.capacity),
   };
 });
-export const COACH_BUSY: Record<string, string> = { 김선재: "월·수", 이창진: "화·금", 이코치: "화·목", 박코치: "화·목·토" };
+export const COACH_BUSY: Record<string, string> = { 김선재: "월·수", 이창진: "화·금", 이도현: "화·목", 박정우: "화·목·토" };
 
 /* 시간표 — 주간. 세션 카드 = fixture 반 정본(이름·시간·코치) + 로컬 장식(강의실·종료시간) */
 export interface WeekSess { name: string; sub: string; tone?: "active" | "off"; }
@@ -358,7 +358,7 @@ const COACH_VIEW: Record<string, { charge: string; status: string; tone: Coach["
   u_coach_ksj: { charge: "플레이2 월수반 · 농구 토요 특강", status: "퇴사 예정 · 11/30", tone: "wait", perm: "담당 반 원생 · 안전 정보", swap: true },
   u_coach_lcj: { charge: "축구 화금반", status: "재직", tone: "ok", perm: "담당 반 원생 · 안전 정보" },
   u_coach_park: { charge: "플레이3 화목반 · 인라인 토요반", status: "재직", tone: "ok", perm: "담당 반 원생 · 안전 정보" },
-  // u_coach_lee(이코치·유아반)는 원본 콘솔 화면에 없음 — 화면 불변 위해 그대로 생략
+  // u_coach_lee(이도현·유아반)는 원본 콘솔 화면에 없음 — 화면 불변 위해 그대로 생략
 };
 export const COACHES: Coach[] = fx.memberships
   .filter((m) => m.roles.includes("COACH"))
@@ -397,7 +397,7 @@ export const NT_CHIPS = [
   { label: "축구만", n: 18, p: 17, sub: "원생 18명" },
   { label: "인라인만", n: 12, p: 12, sub: "원생 12명" },
 ];
-export const COACH_CHIPS = ["김선재 코치", "이창진 코치", "박코치"];
+export const COACH_CHIPS = ["김선재 코치", "이창진 코치", "박정우 코치"];
 export const BANNERS_INIT = [
   { icon: "trophy", title: "가을 대회 참가 안내", sub: "노출 ~11/22 · 대상 전체 · 버튼: 참가 신청하기", pill: "게시 중", tone: "accent" as const },
   { icon: "mega", title: "겨울 캠프 사전 모집", sub: "노출 12/1~12/24 · 대상 축구·인라인 · 버튼: 자세히 보기", pill: "게시 예약", tone: "warn" as const },

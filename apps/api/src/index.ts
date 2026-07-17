@@ -15,7 +15,12 @@ const app = createApp({
   allowedOrigins: (process.env.PACEFOLIO_ALLOWED_ORIGINS ?? "http://localhost:3000").split(","),
   redirectUri: process.env.PACEFOLIO_OAUTH_REDIRECT_URI ?? "http://localhost:3001/auth/callback",
   secureCookies: process.env.NODE_ENV === "production",
-  webhookSecret: process.env.PACEFOLIO_WEBHOOK_SECRET, // 실 PG 서명 검증으로 교체 예정
+  enableDevLogin: process.env.NODE_ENV !== "production",
+  // R7 P0-1 fail-closed: 실 provider verifier 등록 전까지 웹훅은 전부 404.
+  // mockpg 도 dev + 시크릿 설정 시에만 열림.
+  enableMockPg: process.env.NODE_ENV !== "production",
+  mockPgSecret: process.env.PACEFOLIO_MOCKPG_SECRET,
+  webhookVerifiers: {}, // 실 PG adapter 연동 시 provider 별 raw-body 서명 verifier 등록
 });
 
 const port = Number(process.env.PORT ?? 3001);

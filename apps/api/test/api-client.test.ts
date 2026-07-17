@@ -47,7 +47,7 @@ before(async () => {
   app = createApp({
     db, providers: {}, allowedOrigins: [ORIGIN],
     redirectUri: "http://x/cb", now: NOW, secureCookies: false,
-    enableDevLogin: true,
+    enableDevLogin: true, enableMockPg: true, mockPgSecret: "test-secret",
   });
 });
 
@@ -79,7 +79,7 @@ test("전 스택: devLogin(박서연) → me → 청구서 2건 → 결제 준�
 
   // PG 시뮬 webhook 으로 확정 (api-client 밖 — PG 가 서버에 직접 쏘는 경로)
   const w = await app.request("/webhooks/pg/mockpg", {
-    method: "POST", headers: { "content-type": "application/json" },
+    method: "POST", headers: { "content-type": "application/json", "x-webhook-secret": "test-secret" },
     body: JSON.stringify({
       providerEventId: "evt-demo-1", paymentId: prep.paymentId,
       targetStatus: "CAPTURED", occurredAt: NOW(),
@@ -102,9 +102,10 @@ test("dev 로그인 게이트: 비활성 앱에서는 404 (프로덕션 안전)"
   const prodLike = createApp({
     db: drizzle(new PGlite()), providers: {}, allowedOrigins: [ORIGIN],
     redirectUri: "http://x/cb", now: NOW, secureCookies: false,
+    enableMockPg: true, mockPgSecret: "test-secret",
   });
   const res = await prodLike.request("/auth/dev/login", {
-    method: "POST", headers: { "content-type": "application/json" },
+    method: "POST", headers: { "content-type": "application/json", "x-webhook-secret": "test-secret" },
     body: JSON.stringify({ name: "박서연" }),
   });
   assert.equal(res.status, 404);
@@ -114,7 +115,7 @@ test("dev 로그인 게이트: 비활성 앱에서는 404 (프로덕션 안전)"
 test("api-client 응답 검증: 서버가 계약 밖 응답이면 클라이언트가 즉시 실패", async () => {
   // 잘못된 응답을 주는 가짜 서버 — zod 파싱이 조용히 통과시키지 않는지
   const badFetch: FetchLike = async () =>
-    new Response(JSON.stringify({ unexpected: true }), { status: 200, headers: { "content-type": "application/json" } });
+    new Response(JSON.stringify({ unexpected: true }), { status: 200, headers: { "content-type": "application/json", "x-webhook-secret": "test-secret" } });
   const api = createApiClient({ fetchFn: badFetch, getCsrfToken: () => "x" });
   await assert.rejects(api.me()); // ZodError — 계약 위반을 런타임에 탐지
 });

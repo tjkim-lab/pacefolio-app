@@ -260,7 +260,7 @@ export default function PCLessons() {
               <Field label="강의실"><input className={INPUT} value={cf.room} onChange={(e) => setCF("room", e.target.value)} /></Field>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <Field label="담당 코치 (원장/관리자만 배정)"><select className={INPUT} value={cf.coach} onChange={(e) => { setCF("coach", e.target.value); setChecked(false); }}>{["김선재", "이창진", "이코치", "박코치"].map((c) => <option key={c}>{c}</option>)}</select></Field>
+              <Field label="담당 코치 (원장/관리자만 배정)"><select className={INPUT} value={cf.coach} onChange={(e) => { setCF("coach", e.target.value); setChecked(false); }}>{["김선재", "이창진", "이도현", "박정우"].map((c) => <option key={c}>{c}</option>)}</select></Field>
               <Field label="정원"><input className={INPUT} value={cf.cap} onChange={(e) => setCF("cap", e.target.value)} /></Field>
             </div>
             <Button variant="line" full className="mt-3 h-11 text-[12.5px]" onClick={runCheck} disabled={checking}>{checking ? <><Spinner />검증 중...</> : checked ? "재검증" : "저장 전 검증"}</Button>

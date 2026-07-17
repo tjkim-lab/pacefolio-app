@@ -22,6 +22,27 @@
       "when": 1784213941075,
       "tag": "0002_yielding_chronomancer",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784251963356,
+      "tag": "0003_mature_robbie_robertson",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784252531063,
+      "tag": "0004_jittery_star_brand",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784252940770,
+      "tag": "0005_easy_zzzax",
+      "breakpoints": true
     }
   ]
 }

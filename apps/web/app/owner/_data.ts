@@ -358,7 +358,7 @@ export const COACHES: { ini: string; gold?: boolean; name: string; sub: string; 
     return [{
       ini: u.name[0],
       ...(v.gold ? { gold: true } : {}),
-      name: u.name.includes("코치") ? u.name : `${u.name} 코치`, // "박코치"는 그대로
+      name: `${u.name} 코치`, // 실명(정본) + 호칭(화면) 분리 — R8 피드백
       sub: v.sub,
       ...(v.swap ? { swap: true } : {}),
       ...(v.state ? { state: v.state } : {}),

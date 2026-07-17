@@ -23,8 +23,8 @@ const ACA = asId<ID.AcademyId>("a_wondergym");
 const U_OWNER = asId<ID.UserId>("u_owner");
 const U_COACH = asId<ID.UserId>("u_coach_ksj");      // 김선재(퇴사 예정)
 const U_COACH_LCJ = asId<ID.UserId>("u_coach_lcj");  // 이창진(축구)
-const U_COACH_PARK = asId<ID.UserId>("u_coach_park");// 박코치(플레이3·인라인)
-const U_COACH_LEE = asId<ID.UserId>("u_coach_lee");  // 이코치(플레이2 유아반)
+const U_COACH_PARK = asId<ID.UserId>("u_coach_park");// 박정우(플레이3·인라인)
+const U_COACH_LEE = asId<ID.UserId>("u_coach_lee");  // 이도현(플레이2 유아반)
 
 /* 보호자 계정 */
 const U_G_PSY = asId<ID.UserId>("u_guardian_psy");   // 박서연 → 도담·서준
@@ -62,7 +62,7 @@ const PR_BASKET = asId<ID.ProgramId>("pr_basket");
 
 /* 반 */
 const C_PLAY2_MW = asId<ID.ClassId>("c_play2_mw");   // 플레이2 월수반(김선재) — 코치앱 홈
-const C_PLAY2_YA = asId<ID.ClassId>("c_play2_ya");   // 플레이2 유아반(이코치)
+const C_PLAY2_YA = asId<ID.ClassId>("c_play2_ya");   // 플레이2 유아반(이도현)
 const C_SOCCER = asId<ID.ClassId>("c_soccer_tf");    // 축구 화금반(이창진)
 const C_PLAY3 = asId<ID.ClassId>("c_play3_th");
 const C_INLINE = asId<ID.ClassId>("c_inline_sat");
@@ -109,8 +109,8 @@ export const users: E.User[] = [
   { id: U_OWNER, name: "김도윤", phone: "010-1000-0001", email: "owner@wondergym.co.kr" },
   { id: U_COACH, name: "김선재", phone: "010-2000-0002" },
   { id: U_COACH_LCJ, name: "이창진", phone: "010-2000-0003" },
-  { id: U_COACH_PARK, name: "박코치", phone: "010-2000-0004" },
-  { id: U_COACH_LEE, name: "이코치", phone: "010-2000-0005" },
+  { id: U_COACH_PARK, name: "박정우", phone: "010-2000-0004" },
+  { id: U_COACH_LEE, name: "이도현", phone: "010-2000-0005" },
   { id: U_G_PSY, name: "박서연", phone: "010-3000-1234" },
   { id: U_G_PMJ, name: "박민준 어머니", phone: "010-3000-5678" },
   { id: U_G_HY, name: "정하윤 아버지", phone: "010-3000-2345" },

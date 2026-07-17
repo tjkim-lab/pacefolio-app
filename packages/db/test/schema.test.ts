@@ -156,6 +156,88 @@ test("제약: OAuth stateHash UNIQUE (일회성 소비 전제) + 참조 무결�
   );
 });
 
+/* ── R7 P0-6: 교차 테넌트 참조를 DB 가 직접 차단 (서비스 우회 insert) ── */
+
+async function seedTwoAcademies() {
+  await seedUserAcademy(); // a_wg + u_1
+  await db.insert(s.academies).values({
+    id: "a_other", organizationId: "o_other", name: "타학원", themeColor: "#000",
+    themeInk: "#000", logoEmoji: "🏫", ownerName: "남원장", billingCycleDefault: 3,
+  }).onConflictDoNothing();
+  await db.insert(s.participants).values({
+    id: "p_b", academyId: "a_other", name: "B학원원생", birth: "2018-01-01", ageLabel: "7세",
+  }).onConflictDoNothing();
+  await db.insert(s.billingPeriods).values({
+    id: "bp_a", academyId: "a_wg", periodStart: "2025-09-01", periodEnd: "2025-11-30", cycleMonths: 3,
+  }).onConflictDoNothing();
+}
+
+test("R7: A학원 Invoice + B학원 Participant → DB 복합 FK 가 거부", async () => {
+  await seedTwoAcademies();
+  await rejectsWith(
+    db.insert(s.invoices).values({
+      id: "inv_cross", academyId: "a_wg", participantId: "p_b", // B학원 원생!
+      enrollmentId: "e_x", billingPeriodId: "bp_a", status: "ISSUED", total: 100000, dueDate: "2025-09-10",
+    }),
+    /foreign key|violat/i,
+  );
+});
+
+test("R7: A학원 Payment + B학원 Invoice 배분 → DB 복합 FK 가 거부", async () => {
+  await seedTwoAcademies();
+  await db.insert(s.participants).values({
+    id: "p_a2", academyId: "a_wg", name: "A학원원생", birth: "2018-01-01", ageLabel: "7세",
+  }).onConflictDoNothing();
+  await db.insert(s.billingPeriods).values({
+    id: "bp_b", academyId: "a_other", periodStart: "2025-09-01", periodEnd: "2025-11-30", cycleMonths: 3,
+  }).onConflictDoNothing();
+  await db.insert(s.participants).values({
+    id: "p_b2", academyId: "a_other", name: "B원생2", birth: "2018-01-01", ageLabel: "7세",
+  }).onConflictDoNothing();
+  await db.insert(s.invoices).values({
+    id: "inv_b", academyId: "a_other", participantId: "p_b2",
+    enrollmentId: "e_b", billingPeriodId: "bp_b", status: "ISSUED", total: 50000, dueDate: "2025-09-10",
+  }).onConflictDoNothing();
+  await db.insert(s.users).values({ id: "u_pay", name: "결제자", phone: "010-9" }).onConflictDoNothing();
+  await db.insert(s.guardians).values({ id: "gd_pay", userId: "u_pay" }).onConflictDoNothing();
+  await db.insert(s.payments).values({
+    id: "pay_a", academyId: "a_wg", guardianId: "gd_pay", amount: 50000,
+    status: "PENDING", idempotencyKey: "cross-k",
+  }).onConflictDoNothing();
+  // A학원 결제에 B학원 청구서 배분 — academyId 를 a_wg 로 위장해도 invoice 복합 FK 가 잡음
+  await rejectsWith(
+    db.insert(s.paymentAllocations).values({
+      id: "pa_cross", paymentId: "pay_a", invoiceId: "inv_b", academyId: "a_wg", amount: 50000,
+    }),
+    /foreign key|violat/i,
+  );
+});
+
+test("R7 P0-7: 원생당 Primary 보호자 1명 — 두 번째 primary insert 거부(partial unique)", async () => {
+  await seedTwoAcademies();
+  await db.insert(s.users).values({ id: "u_2", name: "아버지", phone: "010-2" }).onConflictDoNothing();
+  await db.insert(s.participants).values({
+    id: "p_prim", academyId: "a_wg", name: "프라이머리", birth: "2018-01-01", ageLabel: "7세",
+  }).onConflictDoNothing();
+  await db.insert(s.users).values({ id: "u_m", name: "어머니2", phone: "010-m" }).onConflictDoNothing();
+  await db.insert(s.guardians).values([
+    { id: "gd_m", userId: "u_m" }, { id: "gd_f", userId: "u_2" },
+  ]).onConflictDoNothing();
+  const base = {
+    academyId: "a_wg", participantId: "p_prim",
+    relationshipType: "MOTHER" as const, verificationStatus: "VERIFIED" as const,
+    canViewSchedule: true, canViewAttendance: true, canViewHealthInfo: false,
+    canReceivePhotos: false, canPay: false, canRequestRefund: false,
+  };
+  await db.insert(s.guardianParticipantLinks).values({ id: "gl_m", guardianId: "gd_m", isPrimaryGuardian: true, ...base });
+  await rejectsWith(
+    db.insert(s.guardianParticipantLinks).values({ id: "gl_f", guardianId: "gd_f", isPrimaryGuardian: true, ...base }),
+    /unique|duplicate/i,
+  );
+  // primary 아닌 두 번째 보호자는 허용
+  await db.insert(s.guardianParticipantLinks).values({ id: "gl_f2", guardianId: "gd_f", isPrimaryGuardian: false, ...base });
+});
+
 test("트랜잭션: 실패 시 전체 rollback (Phase 0 완료 기준)", async () => {
   await seedUserAcademy();
   await assert.rejects(

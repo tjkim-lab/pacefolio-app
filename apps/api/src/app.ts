@@ -22,10 +22,16 @@ export interface ApiConfig {
   now?: () => string;
   /** true 면 Secure 쿠키(프로덕션). 테스트/로컬 http 는 false */
   secureCookies?: boolean;
-  /** PG 웹훅 공유 시크릿 — 실 provider 서명 검증으로 교체 예정(미설정=검증 생략, dev 전용) */
-  webhookSecret?: string;
   /** 개발용 로그인 활성화 — 카카오 키 없이 세션 발급. 프로덕션 강제 비활성 */
   enableDevLogin?: boolean;
+  /* ── Webhook 인증 (R7 P0-1: fail-closed) ──
+     등록된 provider 만 수신 — verifier 미등록 provider 는 404.
+     verifier 는 raw body 기준 서명 검증(실 PG adapter 가 구현). */
+  webhookVerifiers?: Record<string, (rawBody: string, header: (name: string) => string | undefined) => boolean | Promise<boolean>>;
+  /** mockpg(개발 시뮬) 활성화 — 프로덕션 강제 비활성 + 시크릿 필수 */
+  enableMockPg?: boolean;
+  /** mockpg 전용 공유 시크릿 — enableMockPg 시 필수(없으면 mockpg 도 404) */
+  mockPgSecret?: string;
 }
 
 const PROVIDER_NAMES: readonly OAuthProviderName[] = ["kakao", "naver", "google", "apple"];
@@ -173,6 +179,8 @@ export function createApp(cfg: ApiConfig) {
       case "REPLAY": return c.json({ paymentId: r.paymentId, amount: r.amount, status: r.status }, 200);
       case "IN_PROGRESS": return c.json({ error: "IN_PROGRESS" }, 409);
       case "CONFLICT": return c.json({ error: "IDEMPOTENCY_KEY_REUSED" }, 409);
+      case "ACTIVE_ATTEMPT_EXISTS": // R7 P0-3 — 진행 중 결제가 있으면 새 attempt 금지
+        return c.json({ error: "ACTIVE_PAYMENT_ATTEMPT_EXISTS", paymentId: r.paymentId }, 409);
       case "DENIED": return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
     }
   });
@@ -193,16 +201,37 @@ export function createApp(cfg: ApiConfig) {
   }).strict();
 
   app.post("/webhooks/pg/:provider", async (c) => {
-    // TODO(실 PG 연동): provider 서명 검증으로 교체. 그 전까지 공유 시크릿 헤더.
-    if (cfg.webhookSecret && c.req.header("x-webhook-secret") !== cfg.webhookSecret) {
-      return c.json({ error: "SIGNATURE_INVALID" }, 401);
-    }
+    /* R7 P0-1: fail-closed —
+       (1) mockpg 는 enableMockPg && !production && 시크릿 일치일 때만(아니면 404)
+       (2) 그 외 provider 는 등록된 verifier 가 raw body 서명을 통과시켜야만
+       (3) 미등록 provider = 404. 환경변수 누락 = 전부 404(수신 자체 불가) */
+    const providerName = c.req.param("provider")!;
     const raw = await c.req.text();
+
+    if (providerName === "mockpg") {
+      const mockAllowed =
+        cfg.enableMockPg === true &&
+        process.env.NODE_ENV !== "production" &&
+        !!cfg.mockPgSecret; // 시크릿 미설정이면 dev 라도 열지 않음
+      if (!mockAllowed) return c.json({ error: "NOT_FOUND" }, 404);
+      if (c.req.header("x-webhook-secret") !== cfg.mockPgSecret) {
+        return c.json({ error: "SIGNATURE_INVALID" }, 401);
+      }
+    } else {
+      const verifier = cfg.webhookVerifiers?.[providerName];
+      if (!verifier) return c.json({ error: "NOT_FOUND" }, 404); // allowlist — 미등록 거부
+      const ok = await verifier(raw, (n) => c.req.header(n));
+      if (!ok) return c.json({ error: "SIGNATURE_INVALID" }, 401);
+    }
+
     let parsedJson: unknown;
     try { parsedJson = JSON.parse(raw); } catch { return c.json({ error: "INVALID_BODY" }, 422); }
     const parsed = WebhookBody.safeParse(parsedJson);
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
-    const decision = await processPgWebhook(cfg.db, c.req.param("provider")!, {
+    // ⚠️ 이 body 형식(paymentId·targetStatus 직접 지정)은 mockpg 전용.
+    //    실 provider 는 adapter 가 (provider, providerPaymentId)로 내부 결제를
+    //    찾고 event type 을 내부 상태로 매핑한다(R7 P0-4 — provider 연동 시).
+    const decision = await processPgWebhook(cfg.db, providerName, {
       ...parsed.data, rawPayload: raw,
     }, now());
     // 중복·stale 포함 항상 200 — 내부 판단은 inbox (openapi 계약)

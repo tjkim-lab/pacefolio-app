@@ -16,14 +16,19 @@ import {
   type GuardianId,
 } from "@pacefolio/domain";
 import { newId } from "../crypto";
+import { recordAudit, recordOutbox } from "../audit";
 import type { Db } from "../sessions/service";
 
 const IDEM_TTL_MS = 24 * 3600_000; // 멱등 보관 24h
 const OP_PREPARE = "payment.prepare";
+/* R7 P0-3: PENDING attempt 유효기간 — 이 안에서는 같은 Invoice 에
+   새 attempt 를 만들 수 없다(다른 멱등키여도). 만료 후 재시도 허용. */
+export const PAYMENT_ATTEMPT_TTL_MS = 15 * 60_000;
 
 export type PrepareResult =
   | { kind: "CREATED" | "REPLAY"; paymentId: string; amount: number; status: string }
   | { kind: "CONFLICT" | "IN_PROGRESS" }
+  | { kind: "ACTIVE_ATTEMPT_EXISTS"; paymentId: string } // R7 P0-3 — 진행 중 결제 존재
   | { kind: "DENIED"; reason: string };
 
 export async function preparePayment(
@@ -117,6 +122,17 @@ export async function preparePayment(
     const payRows = payIds.length
       ? await tx.select().from(s.payments).where(inArray(s.payments.id, payIds))
       : [];
+
+    /* 5-b) R7 P0-3: 같은 Invoice 에 활성 attempt 가 있으면 새 Payment 금지 —
+       다른 멱등키로 와도 차단(이중 결제 방어 1층. 2층 = webhook 이중 CAPTURE guard).
+       활성 = AUTHORIZED(웹훅/재조회로만 해소) + 미만료 PENDING. */
+    const nowMs = Date.parse(nowISO);
+    const activeAttempt = payRows.find((p) =>
+      (p.status === "AUTHORIZED" ||
+       (p.status === "PENDING" && (!p.attemptExpiresAt || Date.parse(p.attemptExpiresAt) > nowMs))));
+    if (activeAttempt) {
+      return { kind: "ACTIVE_ATTEMPT_EXISTS", paymentId: activeAttempt.id };
+    }
     const settlement: SettlementInput = {
       payments: payRows.map((p): DPayment => ({
         id: asId(p.id), academyId: asId(p.academyId), guardianId: asId(p.guardianId),
@@ -138,10 +154,13 @@ export async function preparePayment(
     await tx.insert(s.payments).values({
       id: paymentId, academyId: input.academyId, guardianId: guardian.id,
       amount, status: "PENDING", idempotencyKey: input.idempotencyKey,
+      attemptExpiresAt: new Date(nowMs + PAYMENT_ATTEMPT_TTL_MS).toISOString(), // R7 P0-3
       createdAt: nowISO, updatedAt: nowISO,
     });
     await tx.insert(s.paymentAllocations).values(parts.map((p) => ({
-      id: newId("pa"), paymentId, invoiceId: p.inv.id as string, amount: p.due,
+      id: newId("pa"), paymentId, invoiceId: p.inv.id as string,
+      academyId: input.academyId, // R7 P0-6 — 복합 FK 가 교차 테넌트 배분을 DB 에서 차단
+      amount: p.due,
     })));
 
     /* 7) 멱등 기록 COMPLETED — 같은 key+body 재시도는 REPLAY 로 수렴 */
@@ -151,6 +170,17 @@ export async function preparePayment(
       status: "COMPLETED", resourceId: paymentId, responseStatus: 201,
       createdAt: nowISO, expiresAt: new Date(Date.parse(nowISO) + IDEM_TTL_MS).toISOString(),
     });
+    /* 8) AuditLog·Outbox — 같은 트랜잭션 (R7 §26: 결제 요청은 필수 감사 대상) */
+    await recordAudit(tx, {
+      academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "GUARDIAN",
+      action: "payment.prepared", targetType: "Payment", targetId: paymentId,
+      detail: { amount, invoiceCount: parts.length }, // 금액은 감사 목적 필수 — 원문 개인정보 아님
+      success: true,
+    }, nowISO);
+    await recordOutbox(tx, {
+      academyId: input.academyId, eventType: "PAYMENT_PREPARED",
+      payload: { paymentId, amount, invoiceIds: input.invoiceIds },
+    }, nowISO);
     return { kind: "CREATED", paymentId, amount, status: "PENDING" };
   });
 }
@@ -192,6 +222,21 @@ export async function processPgWebhook(
         { provider, providerEventId: evt.providerEventId, targetStatus: evt.targetStatus, occurredAt: evt.occurredAt },
         new Set(), // 같은 event ID 재수신은 inbox unique 가 이미 차단
       );
+    }
+
+    /* 2-b) R7 P0-3 이중 CAPTURE 방어(2층): CAPTURED 적용 전에 대상 Invoice 가
+       이미 PAID/REFUNDED 면 이 결제를 무조건 반영하지 않는다 — RECONCILE 로
+       (활성 attempt 차단(1층)의 경계 케이스: attempt 만료 후 재결제 + 늦은 웹훅). */
+    if (decision.action === "APPLY" && decision.to === "CAPTURED" && pay) {
+      const allocPre = await tx.select().from(s.paymentAllocations)
+        .where(eq(s.paymentAllocations.paymentId, pay.id));
+      const invPre = allocPre.length
+        ? await tx.select().from(s.invoices)
+            .where(inArray(s.invoices.id, allocPre.map((a) => a.invoiceId)))
+        : [];
+      if (invPre.some((i) => i.status === "PAID" || i.status === "REFUNDED")) {
+        decision = { action: "RECONCILE", reason: "대상 청구서가 이미 종결(PAID/REFUNDED) — 이중 결제 의심, PG 재조회·취소/환불 절차 필요" };
+      }
     }
 
     /* 3) APPLY — Payment 갱신 + 영향 Invoice 재계산(도메인 도출) */
@@ -240,10 +285,44 @@ export async function processPgWebhook(
       }
     }
 
-    /* 4) inbox 에 판단 기록 — RECONCILE/REJECT 는 보존 후 재처리 대상 */
+    /* 4) inbox 상태 모델 기록 (R7 P0-2: RECONCILE = "처리됨"이 아니라 재조회 대기 큐)
+       RECEIVED → APPLIED | IGNORED | RECONCILE_REQUIRED(+nextRetryAt) | DEAD_LETTER */
+    const inboxStatus =
+      decision.action === "APPLY" ? "APPLIED" :
+      decision.action === "RECONCILE" ? "RECONCILE_REQUIRED" :
+      decision.action === "REJECT_INVALID" ? "DEAD_LETTER" :
+      "IGNORED";
     await tx.update(s.webhookInbox)
-      .set({ processedAt: nowISO, decision: decision.action })
+      .set({
+        processedAt: nowISO, decision: decision.action, status: inboxStatus,
+        // RECONCILE worker(실 PG 연동 후)가 이 큐를 폴링 — 5분 backoff 시작점
+        nextRetryAt: inboxStatus === "RECONCILE_REQUIRED"
+          ? new Date(Date.parse(nowISO) + 5 * 60_000).toISOString()
+          : null,
+      })
       .where(eq(s.webhookInbox.id, inserted[0].id));
+
+    /* 5) AuditLog·Outbox — 상태 전이·RECONCILE 요구는 감사 대상 (같은 tx) */
+    if (decision.action === "APPLY" && pay) {
+      await recordAudit(tx, {
+        academyId: pay.academyId, action: "payment.status_changed",
+        targetType: "Payment", targetId: pay.id,
+        detail: { from: pay.status, to: decision.to, providerEventId: evt.providerEventId },
+        success: true,
+      }, nowISO);
+      if (decision.to === "CAPTURED") {
+        await recordOutbox(tx, {
+          academyId: pay.academyId, eventType: "PAYMENT_CAPTURED", // domain DOMAIN_EVENT_TYPE
+          payload: { paymentId: pay.id, providerEventId: evt.providerEventId },
+        }, nowISO);
+      }
+    } else if (decision.action === "RECONCILE" && pay) {
+      await recordAudit(tx, {
+        academyId: pay.academyId, action: "payment.reconcile_required",
+        targetType: "Payment", targetId: pay.id,
+        reason: decision.reason, success: true,
+      }, nowISO);
+    }
     return decision;
   });
 }

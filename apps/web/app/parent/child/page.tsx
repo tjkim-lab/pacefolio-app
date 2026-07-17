@@ -103,7 +103,7 @@ function GrowPane() {
     return (
       <div className="space-y-4">
         <GrowCard title="마일스톤" more="코치가 기록">
-          <MilestoneRow icon="clock" dim title="제자리 균형 5초" sub="이코치 기록 · 10/23(목)" prog={40} next={<>다음 목표까지 <b className="text-ink">3회</b> 남았어요</>} />
+          <MilestoneRow icon="clock" dim title="제자리 균형 5초" sub="이도현 선생님 기록 · 10/23(목)" prog={40} next={<>다음 목표까지 <b className="text-ink">3회</b> 남았어요</>} />
         </GrowCard>
         <GrowCard title="이번 기간 참여">
           <Rec value="96%">정규 수업 출석률 96% · 결석 0회<br />2주째 꾸준히 나오고 있어요 🌱</Rec>
@@ -113,8 +113,8 @@ function GrowPane() {
   }
   return (
     <div className="space-y-4">
-      <GrowCard title="수영 진도" more="박코치 기록">
-        <MilestoneRow icon="award" title="자유형 발차기 완료 🎉" sub="박코치 기록 · 10/25(토)" prog={70} next={<>다음 단계 <b className="text-ink">호흡 연결</b></>} />
+      <GrowCard title="수영 진도" more="박수진 선생님 기록">
+        <MilestoneRow icon="award" title="자유형 발차기 완료 🎉" sub="박수진 선생님 기록 · 10/25(토)" prog={70} next={<>다음 단계 <b className="text-ink">호흡 연결</b></>} />
       </GrowCard>
       <GrowCard title="이번 기간 참여">
         <Rec value="100%">6주째 개근 중 · 결석 0회<br />물 무서움이 많이 줄었어요 🌱</Rec>

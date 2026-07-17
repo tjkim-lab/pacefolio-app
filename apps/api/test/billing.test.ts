@@ -46,7 +46,7 @@ async function grantGuardian(userId: string, suffix: string, opts?: { status?: "
   await db.insert(s.guardians).values({ id: gdId, userId });
   await db.insert(s.guardianParticipantLinks).values({
     id: `gl_${suffix}`, guardianId: gdId, participantId: "p_dodam", academyId: "a_wg",
-    relationshipType: "MOTHER", isPrimaryGuardian: true, verificationStatus: "VERIFIED",
+    relationshipType: "MOTHER", isPrimaryGuardian: false, verificationStatus: "VERIFIED",
     canViewSchedule: true, canViewAttendance: true, canViewHealthInfo: true,
     canReceivePhotos: true, canPay: true, canRequestRefund: true,
   });
@@ -65,7 +65,7 @@ const prepare = (cookie: string, csrf: string, idemKey: string, invoiceIds: stri
 
 const webhook = (body: Record<string, unknown>) =>
   app.request("/webhooks/pg/mockpg", {
-    method: "POST", headers: { "content-type": "application/json" },
+    method: "POST", headers: { "content-type": "application/json", "x-webhook-secret": "test-secret" },
     body: JSON.stringify(body),
   });
 
@@ -76,6 +76,7 @@ before(async () => {
   app = createApp({
     db, providers: { kakao: fake }, allowedOrigins: [ORIGIN],
     redirectUri: "http://x/cb", now: NOW, secureCookies: false,
+    enableMockPg: true, mockPgSecret: "test-secret",
   });
   await db.insert(s.academies).values({
     id: "a_wg", organizationId: "o_wg", name: "원더짐 아카데미", themeColor: "#12B5A5",
@@ -186,7 +187,7 @@ test("webhook CAPTURED → Payment 확정 + Invoice PAID 도출 + 목록 반영"
   await db.insert(s.guardians).values({ id: gdId, userId });
   await db.insert(s.guardianParticipantLinks).values({
     id: "gl_mom2", guardianId: gdId, participantId: "p_seojun", academyId: "a_wg",
-    relationshipType: "MOTHER", isPrimaryGuardian: true, verificationStatus: "VERIFIED",
+    relationshipType: "MOTHER", isPrimaryGuardian: false, verificationStatus: "VERIFIED",
     canViewSchedule: true, canViewAttendance: true, canViewHealthInfo: true,
     canReceivePhotos: true, canPay: true, canRequestRefund: true,
   });
@@ -220,6 +221,113 @@ test("webhook CAPTURED → Payment 확정 + Invoice PAID 도출 + 목록 반영"
   // 이미 결제된 청구서 재결제 시도 → 422
   const again = await prepare(cookie, csrf, "k-mom2-2", ["inv_seojun"]);
   assert.equal(again.status, 422);
+});
+
+/* ── R7 P0-1: Webhook fail-closed ── */
+
+test("R7: 시크릿 불일치 401 · 미등록 provider 404 · mockpg 게이트 없으면 404", async () => {
+  // 시크릿 불일치 — 미인증 웹훅은 결제를 변경할 수 없음
+  const bad = await app.request("/webhooks/pg/mockpg", {
+    method: "POST", headers: { "content-type": "application/json", "x-webhook-secret": "wrong" },
+    body: JSON.stringify({ providerEventId: "evt-forge", paymentId: "pay_x", targetStatus: "CAPTURED", occurredAt: NOW() }),
+  });
+  assert.equal(bad.status, 401);
+  // 미등록 provider = 404 (allowlist)
+  const unknown = await app.request("/webhooks/pg/tosspay", {
+    method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+  });
+  assert.equal(unknown.status, 404);
+  // mockpg 게이트(enableMockPg·secret) 없는 앱 = 404 — 환경변수 누락 시 fail-closed
+  const gateless = createApp({
+    db, providers: {}, allowedOrigins: [ORIGIN],
+    redirectUri: "http://x/cb", now: NOW, secureCookies: false,
+  });
+  const closed = await gateless.request("/webhooks/pg/mockpg", {
+    method: "POST", headers: { "content-type": "application/json", "x-webhook-secret": "test-secret" },
+    body: JSON.stringify({ providerEventId: "e", paymentId: "p", targetStatus: "CAPTURED", occurredAt: NOW() }),
+  });
+  assert.equal(closed.status, 404);
+});
+
+/* ── R7 P0-3: 동일 Invoice 활성 attempt 차단 + 이중 CAPTURE 방어 ── */
+
+test("R7: 다른 멱등키라도 활성 PENDING attempt 가 있으면 409 (이중 결제 1층 방어)", async () => {
+  await db.insert(s.participants).values({
+    id: "p_att", academyId: "a_wg", name: "활성테스트", birth: "2018-01-01", ageLabel: "7세",
+  });
+  await db.insert(s.invoices).values({
+    id: "inv_att", academyId: "a_wg", participantId: "p_att", enrollmentId: "e_att",
+    billingPeriodId: "bp_q4", status: "ISSUED", total: 100000, dueDate: "2025-09-10",
+  });
+  const { cookie, csrf, userId } = await login("attmom");
+  await grantGuardian(userId, "att");
+  await db.insert(s.guardianParticipantLinks).values({
+    id: "gl_att_p", guardianId: "gd_att", participantId: "p_att", academyId: "a_wg",
+    relationshipType: "MOTHER", isPrimaryGuardian: false, verificationStatus: "VERIFIED",
+    canViewSchedule: true, canViewAttendance: true, canViewHealthInfo: true,
+    canReceivePhotos: true, canPay: true, canRequestRefund: true,
+  });
+  const first = await prepare(cookie, csrf, "att-key-1", ["inv_att"]);
+  assert.equal(first.status, 201);
+  const { paymentId } = await first.json() as { paymentId: string };
+  // 같은 Invoice + 다른 멱등키 → 409 + 기존 paymentId 반환
+  const second = await prepare(cookie, csrf, "att-key-2", ["inv_att"]);
+  assert.equal(second.status, 409);
+  const body = await second.json() as { error: string; paymentId: string };
+  assert.equal(body.error, "ACTIVE_PAYMENT_ATTEMPT_EXISTS");
+  assert.equal(body.paymentId, paymentId);
+  // 같은 키 재시도는 여전히 REPLAY 200
+  const replay = await prepare(cookie, csrf, "att-key-1", ["inv_att"]);
+  assert.equal(replay.status, 200);
+});
+
+test("R7: 이중 CAPTURE — 이미 PAID 인 청구서의 늦은 CAPTURED webhook 은 RECONCILE (2층 방어)", async () => {
+  // 위 테스트의 pay 를 CAPTURED 로 확정 → inv_att = PAID
+  const payRow = await db.select().from(s.payments).where(eq(s.payments.idempotencyKey, "att-key-1"));
+  const payId = payRow[0].id;
+  const w1 = await webhook({ providerEventId: "evt-att-1", paymentId: payId, targetStatus: "CAPTURED", occurredAt: NOW() });
+  assert.equal(((await w1.json()) as { decision: string }).decision, "APPLY");
+  const inv = await db.select().from(s.invoices).where(eq(s.invoices.id, "inv_att"));
+  assert.equal(inv[0].status, "PAID");
+
+  // attempt 만료 후 새 attempt 가 생겼다고 가정 — 두 번째 PENDING payment 직접 삽입
+  await db.insert(s.payments).values({
+    id: "pay_att_2", academyId: "a_wg", guardianId: "gd_att", amount: 100000,
+    status: "PENDING", idempotencyKey: "att-key-late",
+  });
+  await db.insert(s.paymentAllocations).values({
+    id: "pa_att_2", paymentId: "pay_att_2", invoiceId: "inv_att", academyId: "a_wg", amount: 100000,
+  });
+  // 두 번째 CAPTURED 도착 — 무조건 APPLY 하지 않고 RECONCILE
+  const w2 = await webhook({ providerEventId: "evt-att-2", paymentId: "pay_att_2", targetStatus: "CAPTURED", occurredAt: NOW() });
+  assert.equal(((await w2.json()) as { decision: string }).decision, "RECONCILE");
+  const pay2 = await db.select().from(s.payments).where(eq(s.payments.id, "pay_att_2"));
+  assert.equal(pay2[0].status, "PENDING"); // 상태 미변경 — 200,000원 이중 결제 차단
+});
+
+/* ── R7 배치 3: AuditLog·Outbox tx 합류 + Inbox 상태 모델 ── */
+
+test("R7: 결제 준비·웹훅이 AuditLog·Outbox 를 같은 tx 에 기록", async () => {
+  const audits = await db.select().from(s.auditLogs);
+  // 앞선 테스트들에서 쌓인 감사 기록 검증
+  assert.ok(audits.some((a) => a.action === "payment.prepared" && a.success));
+  assert.ok(audits.some((a) => a.action === "payment.status_changed"));
+  assert.ok(audits.some((a) => a.action === "payment.reconcile_required")); // 이중 CAPTURE 건
+  const outbox = await db.select().from(s.outboxEvents);
+  assert.ok(outbox.some((o) => o.eventType === "PAYMENT_PREPARED"));
+  assert.ok(outbox.some((o) => o.eventType === "PAYMENT_CAPTURED"));
+  assert.ok(outbox.every((o) => o.publishedAt === null)); // publisher worker 는 후속
+});
+
+test("R7 P0-2: inbox 상태 모델 — APPLY=APPLIED · 중복=IGNORED · RECONCILE=대기 큐(nextRetryAt)", async () => {
+  const inbox = await db.select().from(s.webhookInbox);
+  const applied = inbox.find((i) => i.providerEventId === "evt-att-1");
+  assert.equal(applied?.status, "APPLIED");
+  const reconcile = inbox.find((i) => i.providerEventId === "evt-att-2"); // 이중 CAPTURE
+  assert.equal(reconcile?.status, "RECONCILE_REQUIRED");
+  assert.ok(reconcile?.nextRetryAt); // worker 폴링 대상 — "처리 완료" 아님
+  const stale = inbox.find((i) => i.providerEventId === "evt-0");
+  assert.equal(stale?.status, "IGNORED");
 });
 
 test("webhook: 존재하지 않는 Payment → REJECT_INVALID (inbox 보존)", async () => {

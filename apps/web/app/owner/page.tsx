@@ -74,7 +74,7 @@ export default function OwnerHome() {
   };
 
   // 코치 전달사항
-  const COACH_CHIPS = ["김선재", "이창진", "박코치"];
+  const COACH_CHIPS = ["김선재", "이창진", "박정우"];
   const [coach, setCoach] = useState("김선재");
   const [coachMsg, setCoachMsg] = useState("도담이 오늘 컨디션 확인해주세요 — 어제 병원 다녀왔대요");
   const [coachStage, setCoachStage] = useState<0 | 1 | 2 | 3 | 4>(0); // 0 idle,1 sending,2 sent,3 read,4 result

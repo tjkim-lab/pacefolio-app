@@ -14,7 +14,7 @@
 import { sql } from "drizzle-orm";
 import {
   pgTable, pgEnum, text, timestamp, boolean, integer, date,
-  uniqueIndex, index, check,
+  uniqueIndex, index, check, foreignKey,
 } from "drizzle-orm/pg-core";
 
 /* ── enum (packages/domain/enums.ts 와 drift 검증 대상) ── */
@@ -145,6 +145,8 @@ export const participants = pgTable("participants", {
   version: version(),
 }, (t) => [
   index("ix_participant_academy").on(t.academyId),
+  // R7 P0-6: 자식 테이블의 (participantId, academyId) 복합 FK 대상
+  uniqueIndex("uq_participant_id_academy").on(t.id, t.academyId),
 ]);
 
 /* ── Phase 4: 보호자 연결 vertical slice (docs/11 §C·§D) ── */
@@ -159,6 +161,7 @@ export const registeredGuardianContacts = pgTable("registered_guardian_contacts"
   createdAt: createdAt(),
 }, (t) => [
   index("ix_rgc_participant").on(t.participantId),
+  foreignKey({ name: "fk_rgc_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
   index("ix_rgc_phone").on(t.academyId, t.phone),
 ]);
 
@@ -184,6 +187,9 @@ export const guardianInvites = pgTable("guardian_invites", {
   academyId: text("academy_id").notNull().references(() => academies.id),
   participantId: text("participant_id").notNull().references(() => participants.id),
   intendedPhone: text("intended_phone"),
+  /* R7 P0-7: 초대로 부여할 권한 scope — 미지정 시 최소(일정·출결).
+     건강정보·사진·결제·환불은 발급자(원장)가 명시적으로 부여해야 함. */
+  allowedScopes: text("allowed_scopes").array().notNull().default(sql`ARRAY['VIEW_SCHEDULE','VIEW_ATTENDANCE']::text[]`),
   expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
   maxUses: integer("max_uses").notNull(),
   usedCount: integer("used_count").default(0).notNull(), // ⚠️ 캐시 — 정본은 redemptions COUNT
@@ -192,8 +198,11 @@ export const guardianInvites = pgTable("guardian_invites", {
   version: version(),
 }, (t) => [
   uniqueIndex("uq_invite_code_hash").on(t.codeHash),
+  uniqueIndex("uq_invite_id_academy").on(t.id, t.academyId), // R7 P0-6 복합 FK 대상
   index("ix_invite_participant").on(t.participantId),
   check("ck_invite_max_uses", sql`${t.maxUses} >= 1`),
+  // R7 P0-6: A학원 invite + B학원 원생 차단
+  foreignKey({ name: "fk_invite_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
 ]);
 
 /* 소비 기록 = 사용 횟수의 정본. UNIQUE(invite, guardian, participant) = 중복 소비 차단(R5) */
@@ -208,6 +217,9 @@ export const guardianInviteRedemptions = pgTable("guardian_invite_redemptions", 
 }, (t) => [
   uniqueIndex("uq_redemption").on(t.inviteId, t.guardianId, t.participantId), // R5 필수
   index("ix_redemption_invite").on(t.inviteId),
+  // R7 P0-6: A학원 redemption + B학원 invite/원생 차단
+  foreignKey({ name: "fk_redemption_invite_academy", columns: [t.inviteId, t.academyId], foreignColumns: [guardianInvites.id, guardianInvites.academyId] }),
+  foreignKey({ name: "fk_redemption_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
 ]);
 
 /* 보호자↔자녀 — 검증 상태·세부 권한 flag = domain GuardianParticipantLink 그대로 */
@@ -232,6 +244,11 @@ export const guardianParticipantLinks = pgTable("guardian_participant_links", {
   uniqueIndex("uq_guardian_link").on(t.guardianId, t.participantId, t.academyId), // 중복 링크 방지 (R5)
   index("ix_link_participant").on(t.participantId),
   index("ix_link_guardian").on(t.guardianId),
+  // R7 P0-6: A학원 링크 + B학원 원생 차단
+  foreignKey({ name: "fk_link_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+  // R7 P0-7: 원생당 Primary 보호자 1명 (partial unique)
+  uniqueIndex("uq_primary_guardian_per_participant").on(t.participantId)
+    .where(sql`${t.isPrimaryGuardian} = true`),
 ]);
 
 /* ── Phase 5: 청구 · 결제 (docs/06 · R5 §7 Phase 5) ──
@@ -248,6 +265,7 @@ export const billingPeriods = pgTable("billing_periods", {
   createdAt: createdAt(),
 }, (t) => [
   check("ck_cycle_months", sql`${t.cycleMonths} IN (1, 3)`), // 헌법
+  uniqueIndex("uq_bp_id_academy").on(t.id, t.academyId), // R7 P0-6 복합 FK 대상
 ]);
 
 export const invoices = pgTable("invoices", {
@@ -266,7 +284,11 @@ export const invoices = pgTable("invoices", {
 }, (t) => [
   index("ix_invoice_participant").on(t.participantId),
   index("ix_invoice_academy_status").on(t.academyId, t.status),
+  uniqueIndex("uq_invoice_id_academy").on(t.id, t.academyId), // R7 P0-6 복합 FK 대상
   check("ck_invoice_total_positive", sql`${t.total} > 0`),
+  // R7 P0-6: A학원 Invoice + B학원 Participant/BillingPeriod 를 DB 가 직접 차단
+  foreignKey({ name: "fk_invoice_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+  foreignKey({ name: "fk_invoice_bp_academy", columns: [t.billingPeriodId, t.academyId], foreignColumns: [billingPeriods.id, billingPeriods.academyId] }),
 ]);
 
 export const invoiceLines = pgTable("invoice_lines", {
@@ -287,12 +309,18 @@ export const payments = pgTable("payments", {
   status: paymentStatusEnum("status").notNull(),
   idempotencyKey: text("idempotency_key").notNull(),
   providerPaymentId: text("provider_payment_id"),
+  provider: text("provider"),                     // PG 식별(R7 P0-4) — (provider, providerPaymentId) UNIQUE
   lastEventAt: timestamp("last_event_at", { withTimezone: true, mode: "string" }), // webhook 역순 guard
+  /* R7 P0-3: PENDING attempt 의 유효기간 — 만료 후엔 활성 attempt 로 세지 않음
+     (사용자 이탈로 영구 블록되는 것 방지). AUTHORIZED/UNKNOWN 은 webhook/재조회로만 해소. */
+  attemptExpiresAt: timestamp("attempt_expires_at", { withTimezone: true, mode: "string" }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
   version: version(),
 }, (t) => [
   uniqueIndex("uq_payment_idem").on(t.academyId, t.guardianId, t.idempotencyKey),
+  uniqueIndex("uq_payment_provider_id").on(t.provider, t.providerPaymentId), // R7 P0-4: PG 거래 중복 차단
+  uniqueIndex("uq_payment_id_academy").on(t.id, t.academyId), // R7 P0-6 복합 FK 대상
   index("ix_payment_provider").on(t.providerPaymentId),
   check("ck_payment_amount_positive", sql`${t.amount} > 0`),
 ]);
@@ -301,11 +329,15 @@ export const paymentAllocations = pgTable("payment_allocations", {
   id: text("id").primaryKey(),                    // pa_xxx
   paymentId: text("payment_id").notNull().references(() => payments.id),
   invoiceId: text("invoice_id").notNull().references(() => invoices.id),
+  academyId: text("academy_id").notNull().references(() => academies.id), // R7 P0-6: 테넌트 축
   amount: integer("amount").notNull(),
 }, (t) => [
   uniqueIndex("uq_alloc_payment_invoice").on(t.paymentId, t.invoiceId), // 같은 결제가 같은 청구 이중 배분 금지
   index("ix_alloc_invoice").on(t.invoiceId),
   check("ck_alloc_amount_positive", sql`${t.amount} > 0`),
+  // R7 P0-6 핵심: A학원 결제에 B학원 청구서 배분을 DB 가 직접 차단
+  foreignKey({ name: "fk_alloc_payment_academy", columns: [t.paymentId, t.academyId], foreignColumns: [payments.id, payments.academyId] }),
+  foreignKey({ name: "fk_alloc_invoice_academy", columns: [t.invoiceId, t.academyId], foreignColumns: [invoices.id, invoices.academyId] }),
 ]);
 
 /* 멱등 레코드 — scope = (academy, actor, operation, key) (R3 P1-4 · domain idempotency.ts) */
@@ -335,6 +367,49 @@ export const webhookInbox = pgTable("webhook_inbox", {
   receivedAt: timestamp("received_at", { withTimezone: true, mode: "string" }).notNull(),
   processedAt: timestamp("processed_at", { withTimezone: true, mode: "string" }),
   decision: text("decision"),                     // APPLY | IGNORE_* | RECONCILE | REJECT_INVALID
+  /* R7 P0-2 상태 모델: RECONCILE 은 "처리됨"이 아니라 재조회 대기 큐 —
+     RECEIVED → APPLIED | IGNORED | RECONCILE_REQUIRED(→RETRY_WAITING→…) | DEAD_LETTER */
+  status: text("status").default("RECEIVED").notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  nextRetryAt: timestamp("next_retry_at", { withTimezone: true, mode: "string" }),
 }, (t) => [
   uniqueIndex("uq_webhook_event").on(t.provider, t.providerEventId),
+  index("ix_inbox_reconcile_queue").on(t.status, t.nextRetryAt), // RECONCILE worker 폴링
+]);
+
+/* ── R7 배치 3: AuditLog · Outbox · Inbox 상태 모델 ── */
+
+/* 감사 로그 — append-only(수정·삭제 금지는 운영 정책+권한으로).
+   민감정보 원문 미포함(diff 는 마스킹 후) — R7 §27. */
+export const auditLogs = pgTable("audit_logs", {
+  id: text("id").primaryKey(),                    // aud_xxx
+  academyId: text("academy_id"),                  // 플랫폼 레벨 행위는 null
+  actorUserId: text("actor_user_id"),             // 시스템 행위는 null
+  actorRole: text("actor_role"),
+  action: text("action").notNull(),               // 예: guardian_link.created
+  targetType: text("target_type").notNull(),
+  targetId: text("target_id").notNull(),
+  reason: text("reason"),
+  requestId: text("request_id"),
+  detail: text("detail"),                         // 마스킹된 JSON 문자열
+  success: boolean("success").notNull(),
+  at: timestamp("at", { withTimezone: true, mode: "string" }).notNull(),
+}, (t) => [
+  index("ix_audit_academy_at").on(t.academyId, t.at),
+  index("ix_audit_target").on(t.targetType, t.targetId),
+]);
+
+/* Outbox — 업무 데이터와 같은 트랜잭션에 저장, publisher 가 at-least-once 발행.
+   소비자는 멱등 전제(R7 §18). */
+export const outboxEvents = pgTable("outbox_events", {
+  id: text("id").primaryKey(),                    // obx_xxx
+  academyId: text("academy_id"),
+  eventType: text("event_type").notNull(),        // domain enums DOMAIN_EVENT_TYPE
+  schemaVersion: integer("schema_version").default(1).notNull(),
+  payload: text("payload").notNull(),             // JSON — PII 최소(R7 §18)
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" }),
+  attempts: integer("attempts").default(0).notNull(),
+}, (t) => [
+  index("ix_outbox_unpublished").on(t.publishedAt, t.createdAt), // publisher 폴링
 ]);

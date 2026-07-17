@@ -177,6 +177,52 @@ test("runtime validation(R5 P0): 형식 오류·예상 밖 필드 = 422", async 
   assert.equal(notJson.status, 422);
 });
 
+/* ── R7 P0-7: 최소 권한 + Primary 정책 ── */
+
+test("R7: 초대코드 연결 = invite.allowedScopes 만(기본: 일정·출결) — 건강·결제 권한 없음", async () => {
+  await db.insert(s.participants).values({
+    id: "p_scope", academyId: "a_wg", name: "권한테스트", birth: "2018-01-01", ageLabel: "7세",
+  });
+  await db.insert(s.guardianInvites).values({
+    id: "gi_scope", codeHash: sha256Hex("INV-SCOPE"), academyId: "a_wg", participantId: "p_scope",
+    expiresAt: "2026-07-18T00:00:00Z", maxUses: 2, // allowedScopes 미지정 = 기본 최소
+  });
+  const { cookie, csrf, otpId } = await loginAndOtp("scopedad", "010-5555-0001");
+  const res = await postLink(cookie, csrf, linkBody(otpId, {
+    childName: "권한테스트", childBirth: "2018-01-01", relationshipType: "FATHER",
+    academyInviteCode: "INV-SCOPE",
+  }));
+  assert.equal(res.status, 201);
+  const { linkId } = await res.json() as { linkId: string };
+  const link = (await db.select().from(s.guardianParticipantLinks)
+    .where(eq(s.guardianParticipantLinks.id, linkId)))[0];
+  // 최소 권한: 일정·출결만 — 민감 권한은 명시 부여 전까지 false
+  assert.equal(link.canViewSchedule, true);
+  assert.equal(link.canViewAttendance, true);
+  assert.equal(link.canViewHealthInfo, false);
+  assert.equal(link.canReceivePhotos, false);
+  assert.equal(link.canPay, false);
+  assert.equal(link.canRequestRefund, false);
+  assert.equal(link.isPrimaryGuardian, true); // 첫 보호자 = primary
+});
+
+test("R7: 두 번째 보호자는 primary 아님(원생당 1명) + 선등록 결합은 전체 권한", async () => {
+  await db.insert(s.registeredGuardianContacts).values({
+    id: "rgc_scope", academyId: "a_wg", participantId: "p_scope", phone: "01055550002",
+  });
+  const { cookie, csrf, otpId } = await loginAndOtp("scopemom", "010-5555-0002");
+  const res = await postLink(cookie, csrf, linkBody(otpId, {
+    childName: "권한테스트", childBirth: "2018-01-01", relationshipType: "MOTHER",
+  }));
+  assert.equal(res.status, 201);
+  const { linkId } = await res.json() as { linkId: string };
+  const link = (await db.select().from(s.guardianParticipantLinks)
+    .where(eq(s.guardianParticipantLinks.id, linkId)))[0];
+  assert.equal(link.isPrimaryGuardian, false);   // 이미 primary 존재 → false
+  assert.equal(link.canViewHealthInfo, true);    // 선등록(원장 등록) = 전체 권한
+  assert.equal(link.canPay, true);
+});
+
 test("guard 체인: 미인증 401 · CSRF 없음 403 — 연결 API 도 동일 경계", async () => {
   assert.equal((await app.request("/academies/a_wg/guardian-links", { method: "POST" })).status, 401);
   const { cookie, otpId } = await loginAndOtp("mom4");
