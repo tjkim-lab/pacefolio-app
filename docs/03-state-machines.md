@@ -1,7 +1,7 @@
 # 03 · 상태머신 (State Machines)
 
 엔티티가 어떤 상태를 거치고, **누가** 전이시키며, 어떤 **조건(guard)**이 필요한가.
-상태값 = `lib/domain/enums.ts`. 엔티티 = [02-entity-model.md](./02-entity-model.md).
+상태값 = `packages/domain/enums.ts`. 엔티티 = [02-entity-model.md](./02-entity-model.md).
 ⚠️ 실서비스에선 **전이 권한·guard를 서버가 검증**(클라 신뢰 금지, 리뷰 P0-5·6).
 
 표기: `상태 --[행동 / 주체 · 조건]--> 상태`

@@ -15,15 +15,29 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pacefolio
+          POSTGRES_PASSWORD: pacefolio
+          POSTGRES_DB: pacefolio_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pacefolio"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # 실 PG 동시성 테스트(R5 Phase 4 완료 기준) — 로컬에선 미설정 시 skip
+      DATABASE_URL_TEST: postgres://pacefolio:pacefolio@localhost:5432/pacefolio_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm ci
-      - name: Domain typecheck
+      - name: Typecheck (전 워크스페이스)
         run: npm run typecheck
-      - name: Domain tests (정산 불변식·상태전이·권한 actor-binding·웹훅·멱등·동의·OpenAPI drift)
+      - name: Tests (domain 불변식·db 제약·api 인증/연결 통합·PG 동시성 경쟁·web 시뮬 게이트)
         run: npm test
       - name: OpenAPI lint (R4 — YAML 파서 검증 + Redocly 규칙, drift test 가 못 잡는 문법 오류 차단)
         run: npx --yes @redocly/cli@1.34.2 lint api/openapi.yaml

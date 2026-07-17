@@ -1,19 +1,50 @@
-# PACEFOLIO — 진행 현황 (2026-07-16 저녁, R4 반영)
+# PACEFOLIO — 진행 현황 (2026-07-16 밤, R5 GO → 백엔드 착공)
 
 > 유소년 스포츠·교육 아카데미 운영 플랫폼. 원더짐 = 고객 0번, 멀티테넌트 day 1.
-> **헌법: 목업 확정 전 DB 착공 금지.** 현재 = 백엔드 착공 前 **계약 닫기 스프린트**.
+> **DB 착공 금지 헌법 해제(2026-07-16 유저 확정)** — 5차 리뷰 **8.7·GO 판정** 근거.
+> 법률 체크(학원법 반환기준·체육시설 분류)는 병행 — 환불 수치 확정 전 완료.
 > 완료 표기는 저장소 증거(테스트·타입·CI) 기준으로만 ✅.
 
 ## 한 줄
-4차 리뷰 백엔드 준비도 **8.0** (4.5 → 6.2 → 7.5 → **8.0, "일반 백엔드 개발 착수 가능"**).
-R4 §19 완료 조건 **15/15 마감** — 테스트 **131/131** (domain 123 + event-contracts 8).
+5차 리뷰 **8.7·GO** → **백엔드 착공, R5 §7 Phase 0~6 기반 완주** (2026-07-17).
+`packages/db`(12+7테이블·제약 강제·seed) + `apps/api`(OAuth·세션·guard·보호자
+연결·결제·웹훅) + `packages/api-client`(runtime validation). 6차 리뷰(5직무)
+유효 지적 반영(환불 웹훅 처리기·동시각 RECONCILE). 테스트 **183**.
 
 ## 검증 방법 (재현 가능)
 ```bash
-npm install && npm test   # 131 tests (전 워크스페이스)
+npm install && npm test   # 183 tests (api 29+3CI전용 + web 4 + db 9 + domain 130 + contracts 8)
 npm run typecheck && npm run lint && npm run build
 npx @redocly/cli lint api/openapi.yaml   # OpenAPI lint (CI 포함)
+# 동시성 경쟁 테스트(동일 invite 20요청→1성공 등)는 CI postgres service 에서 실행
 ```
+
+### ✅ 백엔드 Phase 4~6 기반 + R6 대응 (2026-07-17)
+| 항목 | 내용 |
+|---|---|
+| Phase 4 완결 | 보호자 연결 10단계 원자 tx(OTP 1회 소비·redemption 정본 COUNT·invite FOR UPDATE 잠금 — 동시성 결함 발견·수정) + CI postgres 동시성 테스트 3종 |
+| Phase 3 확장 | requireAcademyContext — 소속없음 403·SUSPENDED=403+전 세션 폐기·PLATFORM_ADMIN 일반앱 금지 |
+| Phase 5 | 결제 준비(멱등 REPLAY/409·Invoice lock·도메인 권한/정산) + PG 웹훅(inbox unique·중복/역순/**동시각 RECONCILE**·Invoice 상태 도출) + 청구서 API |
+| Phase 6 기반 | `packages/api-client`(zod 응답 검증·CSRF 자동) + dev 로그인(프로덕션 404 게이트) + `db/seed`(원더짐 정본 캐스트) — **카카오 키 없이 전 플로우 시연 가능** |
+| R6 대응 | `decideRefundWebhook` 신설(P0-3) · 동시각/불량 lastEventAt=RECONCILE(P0-4) · 문서 드리프트 6곳(P0-5) · fixture selector 정책 정합(4.6) · Payment PG 추적 필드(5.6) |
+
+**다음(준비물 필요)**: 카카오 개발자 키(실 로그인) · PG sandbox(정산 방식 결정과 연동) ·
+main branch protection(GitHub 설정) · 법률 검토(환불 수치).
+**다음(준비물 불요, 대형)**: 웹 화면 api-client 스위칭 · OpenAPI 생성타입 CI ·
+Playwright E2E · Admin console-admin 물리분리(B5) · 대사(reconciliation) 모델.
+
+### ✅ 백엔드 착공 — R5 §7 Phase 0~3 (2026-07-16 밤)
+| Phase | 내용 | 근거 |
+|---|---|---|
+| 0 기반 결정 | PostgreSQL 16 · Drizzle+drizzle-kit · 테스트=PGlite(진짜 Postgres WASM, Docker 불필요) · timestamptz UTC · 금액 int4 KRW 정수 · 낙관잠금 version · ID=도메인 Brand text PK | `packages/db` |
+| 1 스키마 | 8테이블(users·external_identities·sessions·oauth_authorization_requests·academies·academy_memberships·guardians·participants·guardian_participant_links) + R5 필수 제약 전부(UNIQUE·CHECK·FK·index·토큰/state hash 만 저장). 빈 DB migration 적용·제약 강제 9종·tx rollback 테스트 | `packages/db` 테스트 9 |
+| 2 Auth API | `apps/api`(Hono, 별도 서버 = 아키텍처 B 정합): start(state hash·PKCE S256·nonce) → callback(**state 원자적 일회성 소비** → code 교환 tx 밖 → nonce 대조 → 짧은 tx) → 세션(원문=쿠키만·HttpOnly·SameSite=Lax) → me·logout·logout-all | `apps/api` 테스트 11 |
+| 3 Route Guard | requireSession 체인(fail-closed) + CSRF(Origin allowlist + double-submit). R5 §3.7 부정 케이스 전부: state 재사용·만료·위조 / nonce 불일치 / logout-all 즉시 무효 | 〃 |
+
+**R5 즉답 P0**: PG 시뮬레이터 게이트 실연결(차단 테스트 4종) · 초대코드 정본=Redemption COUNT 확정.
+**남은 것(R5)**: 실 provider 키 연동(카카오 앵커) · membership/academy context guard 확장 ·
+runtime validation · 초대코드 redemption 실 트랜잭션(Phase 4) · CI postgres service(동시성) ·
+Playwright E2E · Admin console-admin 물리분리(B5).
 
 ### ✅ R4 반영 (§19 완료 기준 15/15 — 2026-07-16 저녁)
 | 영역 | 내용 | 근거 |

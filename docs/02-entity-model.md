@@ -1,7 +1,7 @@
 # 02 · 엔티티 모델 (도메인 설계도)
 
 두 리뷰(2026-07-16) + 헌법(CLAUDE.md)을 합친 PACEFOLIO 도메인 엔티티.
-코드: `lib/domain/ids.ts`(식별자)·`enums.ts`(상태). 상태 전이는 [03-state-machines.md](./03-state-machines.md).
+코드: `packages/domain/ids.ts`(식별자)·`enums.ts`(상태). 상태 전이는 [03-state-machines.md](./03-state-machines.md).
 ⚠️ **DB 스키마가 아니라 "모델 계약"** — 프론트 mock과 미래 API가 공유. 헌법: 착공 前 정의.
 
 ## 관계 한눈에
@@ -34,7 +34,7 @@ DomainEvent (앱 간 흐름) · Onboarding{Checklist,Step} · {Membership Exit, 
 ### User
 `id` · name · UserProfile(사진·bio) · UserContact(인증된 phone/email) · UserIdentity(카카오/네이버/구글/애플 로그인) · UserSession[]. **프로필과 학원역할을 한 테이블에 합치지 않는다**(리뷰#2) → 역할은 아래.
 ### AcademyMembership  *(User × Academy × Role)*
-`id` · userId · academyId · **role** · status(INVITED/ACTIVE/SUSPENDED/ENDED) · joinedAt · endedAt · invitedBy · approvedBy · permissionOverrides. 한 User가 여러 학원·여러 역할 가능(코치가 두 학원 근무 등).
+`id` · userId · academyId · **roles[]**(멀티역할 모델 A — 유저 확정, 예: 원장 코치 겸직 `["OWNER","COACH"]`) · status(INVITED/ACTIVE/SUSPENDED/ENDED) · joinedAt · endedAt · invitedBy · approvedBy · permissionOverrides. 한 User가 여러 학원 가능(코치가 두 학원 근무 등) — 사용자×학원 = membership 1건.
 
 ## B. 사람 · 관계
 ### Participant  *(원생 — 계정 없음)*

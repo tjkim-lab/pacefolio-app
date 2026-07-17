@@ -173,6 +173,11 @@ export interface Payment {           // 보호자 합산 결제 1건
   status: PaymentStatus;
   idempotencyKey: string;
   createdAt: string;
+  /* PG 거래 추적 식별자(R6 5.6 — 대사·분쟁 대응의 축. 카드 원문은 절대 저장 금지) */
+  provider?: string;                 // 예: "tosspay"
+  providerPaymentId?: string;        // PG 측 거래 ID — 내부↔PG 대사 결합축
+  providerRawStatus?: string;        // PG 원문 상태(참고용 — 정본은 status)
+  approvedAt?: string;               // PG 승인 확정 시각(ISO)
 }
 export interface PaymentAllocation { // 결제 → 원생별 배분
   id: ID.PaymentAllocationId;

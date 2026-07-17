@@ -1,6 +1,6 @@
 # 08 · 개인정보 · 사진 동의 (F12)
 
-코드: `lib/domain/consent.ts`. 리뷰 P0-7 · 4-1 · 4-2. 권한은 docs/04와 결합.
+코드: `packages/domain/consent.ts`. 리뷰 P0-7 · 4-1 · 4-2. 권한은 docs/04와 결합.
 
 ## 1. 사진 동의 (리뷰 P0-7)
 `photoChecked: boolean` **금지.** 목적·대상·버전·만료·철회를 가진 모델.

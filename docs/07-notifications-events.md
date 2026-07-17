@@ -1,6 +1,6 @@
 # 07 · 알림 · 이벤트 카탈로그 (F11 · F13)
 
-코드: `lib/domain/notifications.ts` · `events.ts`. 리뷰#2 P0-3 · 리뷰 P0-3.
+코드: `packages/domain/notifications.ts` · `events.ts`. 리뷰#2 P0-3 · 리뷰 P0-3.
 
 ## 1. 알림 (F11)
 ### 카테고리 × 채널

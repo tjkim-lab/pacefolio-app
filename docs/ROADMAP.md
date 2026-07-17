@@ -20,7 +20,7 @@
 ## 2. 목표 아키텍처 (B)
 ```
 packages/
-  domain/       ← ids·enums·entities·state-machines·calculations (지금 lib/domain 이 씨앗)
+  domain/       ← ids·enums·entities·state-machines·calculations (✅ packages/domain 으로 승격 완료)
   ui/  tokens/   ← 디자인 시스템 1벌
   api-client/    ← API 호출 1벌
 apps/

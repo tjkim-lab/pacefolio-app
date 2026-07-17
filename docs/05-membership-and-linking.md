@@ -1,6 +1,6 @@
 # 05 · 학원 멤버십 · 보호자-자녀 연결 (F7·F8)
 
-계정이 학원·역할·자녀와 어떻게 연결되나. 코드: `lib/domain/membership.ts` · `guardian-linking.ts`.
+계정이 학원·역할·자녀와 어떻게 연결되나. 코드: `packages/domain/membership.ts` · `guardian-linking.ts`.
 리뷰#2 P0-1(멤버십)·P0-2(자녀 연결).
 
 ## 1. 학원 멤버십 (F7)

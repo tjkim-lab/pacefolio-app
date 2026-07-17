@@ -1,6 +1,6 @@
 # 04 · 권한 매트릭스 · 멀티테넌트 격리 (리뷰 P0-6)
 
-누가 무엇을 할 수 있고, 어떤 데이터를 볼 수 있나. 코드: `lib/domain/permissions.ts`.
+누가 무엇을 할 수 있고, 어떤 데이터를 볼 수 있나. 코드: `packages/domain/permissions.ts`.
 > **2단계 검증(서버):** ① 역할이 능력을 가지는가 `can()` **AND** ② 대상이 같은 학원·본인 소유인가(scope). 역할 통과는 **필요조건일 뿐.**
 > **클라이언트가 준 `role`·`academyId`·`ownerId`·`participantId`·`permission`·`supportViewEnabled` 은 절대 신뢰하지 않는다.** 서버가 세션에서 도출.
 
@@ -71,7 +71,7 @@
 
 ## 5. 코드 사용 예
 ```ts
-import { can, inTenantScope } from "@/lib/domain/permissions";
+import { can, inTenantScope } from "@pacefolio/domain";
 
 // 코치가 금액 보기? → false
 can("COACH", "VIEW_PAYMENT_AMOUNT"); // false

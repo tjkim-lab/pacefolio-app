@@ -37,10 +37,15 @@ export function ownerTasks(academyId: ID.AcademyId) {
   return db.operationalTasks.filter((t) => t.academyId === academyId);
 }
 
-/* ── 학부모 관점: 내 자녀들의 청구서 + 결제 상태 (합산결제 배분 반영) ── */
+/* ── 학부모 관점: 내 자녀들의 청구서 + 결제 상태 (합산결제 배분 반영) ──
+   R6 4.6: 데모 선택자도 실제 권한 정책과 같은 조건 — VERIFIED 링크 +
+   canPay flag 만. 링크 존재만으로 노출하면 실 패턴으로 복사될 때 위험. */
 export function invoicesForGuardian(guardianId: ID.GuardianId) {
   const childIds = db.guardianLinks
-    .filter((l) => l.guardianId === guardianId)
+    .filter((l) =>
+      l.guardianId === guardianId &&
+      l.verificationStatus === "VERIFIED" &&
+      l.canPay)
     .map((l) => l.participantId);
   return db.invoices
     .filter((inv) => childIds.includes(inv.participantId))

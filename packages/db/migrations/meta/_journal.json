@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1784212478536,
+      "tag": "0000_flawless_hex",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784213220239,
+      "tag": "0001_absent_swarm",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784213941075,
+      "tag": "0002_yielding_chronomancer",
+      "breakpoints": true
+    }
+  ]
+}
