@@ -124,7 +124,13 @@ export function createApp(cfg: ApiConfig) {
   const LinkBody = z.object({
     verificationSessionId: z.string().min(1).max(64),
     childName: z.string().min(1).max(50),
-    childBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD"),
+    // 시나리오 17.2: 형식만이 아니라 실제 달력 유효성 + 합리 범위(1900~오늘)
+    childBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD").refine((v) => {
+      const d = new Date(`${v}T00:00:00Z`);
+      return !Number.isNaN(d.getTime()) &&
+        d.toISOString().slice(0, 10) === v &&    // 2월 30일 등 달력 위반 거부
+        v >= "1900-01-01" && d.getTime() <= Date.now(); // 미래 생년 거부
+    }, "유효하지 않은 생년월일"),
     relationshipType: z.enum(["MOTHER", "FATHER", "GRANDPARENT", "LEGAL_GUARDIAN", "OTHER"]),
     consentPolicyVersion: z.string().min(1).max(20),
     consentAgreed: z.boolean(),
@@ -150,6 +156,9 @@ export function createApp(cfg: ApiConfig) {
     });
     if (!result) return c.json({ error: "CONFLICT" }, 409);
     if (result.status === "VERIFIED") return c.json(result, 201);
+    if (result.status === "CONSUMED") {
+      return c.json({ error: "OTP_SESSION_ALREADY_USED" }, 409); // LCV1 6.5 — 수동심사 아님
+    }
     return c.json(result, 202); // PENDING(수동 심사)·REJECTED — 본문에 status
   });
 

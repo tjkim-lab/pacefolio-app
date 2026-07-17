@@ -43,8 +43,12 @@ ChatMessage     id · roomId · senderUserId · body · attachments?(PhotoAsset 
 1. P0(데이터 정합) — ✅ 완료: 임시 이름 제거·이름/호칭 분리·정합성 자동 테스트
 2. P1 설계 확정: 이 문서 검토 → domain 엔티티·state 추가
 3. P1 백엔드: chat 테이블(migration) + API(방 생성·메시지·읽음) + 권한 guard
-4. P1 화면: **owner 앱에 소통 탭 신설**(← 목업 필요, 디자인 터미널 협업) + coach/parent 기존 화면을 실 API 로
+4. P1 화면: **owner 앱에 소통 탭 신설** — ✅ 구동 목업 완료 (2026-07-17, `apps/web/app/owner/chat/`):
+   하단탭 진입(안읽음 뱃지) · 대화 목록(코치 전체/반 담당/1:1 + 학부모 1:1 원생 컨텍스트 +
+   코치↔학부모 관리 열람) · 대화방(업무 전달 카드 완료 전이 · 열람→참여/이관 confirm ·
+   금액 전송 차단) — 전부 fixture 정본 파생. 실 API 연결은 3번(백엔드) 이후
+5. coach/parent 기존 화면을 실 API 로
 
 ## 미결(디자인 터미널 협의)
 - 호칭 표기 통일: 학부모 화면 "김코치" → "김선재 선생님" 전환 여부(카피 결정)
-- owner 소통 탭 목업(warm/clean 표준)
+- ~~owner 소통 탭 목업~~ → 구동 목업으로 대체(clean 표준). 디자인 터미널은 톤·카피 검수만

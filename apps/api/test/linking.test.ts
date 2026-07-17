@@ -104,11 +104,11 @@ test("정상: 선등록 연락처 결합 → 201 VERIFIED + 링크 생성 + OTP 
 test("R5: 소비된 OTP 세션 재사용 → 거부(1회 소비)", async () => {
   const { cookie, csrf, otpId } = await loginAndOtp("mom2");
   assert.equal((await postLink(cookie, csrf, linkBody(otpId))).status, 201);
-  // 같은 OTP 로 두 번째 시도 — 도메인이 consumedAt 을 보고 PENDING
+  // LCV1 6.5: 같은 OTP 재사용 = 명시적 409(수동심사 항목 생성 안 함)
   const replay = await postLink(cookie, csrf, linkBody(otpId));
-  assert.equal(replay.status, 202);
-  const body = await replay.json() as { status: string };
-  assert.equal(body.status, "PENDING");
+  assert.equal(replay.status, 409);
+  const body = await replay.json() as { error: string };
+  assert.equal(body.error, "OTP_SESSION_ALREADY_USED");
 });
 
 test("공격: 미등록 전화 OTP → 자동 VERIFIED 금지(PENDING) — 링크·소비 없음(rollback 무결성)", async () => {
@@ -221,6 +221,14 @@ test("R7: 두 번째 보호자는 primary 아님(원생당 1명) + 선등록 결
   assert.equal(link.isPrimaryGuardian, false);   // 이미 primary 존재 → false
   assert.equal(link.canViewHealthInfo, true);    // 선등록(원장 등록) = 전체 권한
   assert.equal(link.canPay, true);
+});
+
+test("QA 17.2: 미래 생년(2126)·달력 위반(2월 30일) → 422", async () => {
+  const { cookie, csrf, otpId } = await loginAndOtp("futuremom");
+  const future = await postLink(cookie, csrf, linkBody(otpId, { childBirth: "2126-01-01" }));
+  assert.equal(future.status, 422);
+  const badCal = await postLink(cookie, csrf, linkBody(otpId, { childBirth: "2020-02-30" }));
+  assert.equal(badCal.status, 422);
 });
 
 test("guard 체인: 미인증 401 · CSRF 없음 403 — 연결 API 도 동일 경계", async () => {

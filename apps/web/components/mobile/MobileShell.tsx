@@ -13,6 +13,7 @@ export interface Tab {
   href: string;
   label: string;
   icon: ComponentType<{ size?: number; className?: string }>;
+  badge?: number; // 안읽음 수 — 0이면 미표시
 }
 
 export function PhoneFrame({ children }: { children: ReactNode }) {
@@ -82,7 +83,14 @@ export function BottomNav({ tabs }: { tabs: Tab[] }) {
               active ? "text-accent" : "text-ink3",
             )}
           >
-            <Icon size={24} />
+            <span className="relative">
+              <Icon size={24} />
+              {(t.badge ?? 0) > 0 && (
+                <span className="absolute -right-2 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-bold leading-none text-white">
+                  {t.badge}
+                </span>
+              )}
+            </span>
             <span className="text-[11px] font-semibold">{t.label}</span>
           </Link>
         );

@@ -156,15 +156,21 @@ export function evaluateLink(req: LinkRequest, ctx: LinkContext): LinkResult {
     return { status: "PENDING", reason: "필수 동의 필요" };
   }
   // 3) 후보 원생 탐색(이름+생년) — 같은 학원 안에서만. (단독 결합 근거 아님)
-  const candidate = ctx.participants.find(
+  const candidates = ctx.participants.filter(
     (p) =>
       p.academyId === req.academyId &&
       p.name === req.childName &&
       p.birth === req.childBirth,
   );
-  if (!candidate) {
+  if (candidates.length === 0) {
     return { status: "REJECTED", reason: "학원 등록 원생과 일치하지 않음" };
   }
+  // 시나리오 6.7(쌍둥이): 동명·동생년 원생이 복수면 자동으로 한 명을
+  // 선택하지 않는다 — 추가 식별(학원 확인) 필요. 첫 매칭 자동 연결 금지.
+  if (candidates.length > 1) {
+    return { status: "PENDING", reason: "동명·동생년 원생이 복수 — 학원 확인 필요(자동 연결 금지)" };
+  }
+  const candidate = candidates[0];
   // 4) 결합 근거 — OTP 전화번호가 이 원생의 선등록 보호자 연락처와 일치?
   const contactMatch = ctx.registeredContacts.find(
     (c) =>

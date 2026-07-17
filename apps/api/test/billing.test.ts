@@ -330,6 +330,18 @@ test("R7 P0-2: inbox 상태 모델 — APPLY=APPLIED · 중복=IGNORED · RECONC
   assert.equal(stale?.status, "IGNORED");
 });
 
+test("QA 11.6: DRAFT 청구서는 보호자 목록에 비노출", async () => {
+  await db.insert(s.invoices).values({
+    id: "inv_draft", academyId: "a_wg", participantId: "p_dodam", enrollmentId: "e_dr",
+    billingPeriodId: "bp_q4", status: "DRAFT", total: 999999, dueDate: "2026-01-10",
+  });
+  const { cookie, userId } = await login("draftmom");
+  await grantGuardian(userId, "draft");
+  const res = await app.request("/academies/a_wg/invoices", { headers: { cookie } });
+  const { invoices } = await res.json() as { invoices: { invoiceId: string }[] };
+  assert.ok(!invoices.some((i) => i.invoiceId === "inv_draft"), "DRAFT 가 노출됨");
+});
+
 test("webhook: 존재하지 않는 Payment → REJECT_INVALID (inbox 보존)", async () => {
   const w = await webhook({ providerEventId: "evt-ghost", paymentId: "pay_ghost", targetStatus: "CAPTURED", occurredAt: "2026-07-17T01:00:00Z" });
   assert.equal(((await w.json()) as { decision: string }).decision, "REJECT_INVALID");

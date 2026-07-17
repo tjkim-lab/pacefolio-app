@@ -28,7 +28,7 @@ export interface LinkSliceInput {
 }
 
 export interface LinkSliceResult {
-  status: "VERIFIED" | "PENDING" | "REJECTED";
+  status: "VERIFIED" | "PENDING" | "REJECTED" | "CONSUMED";
   linkId?: string;
   participantId?: string;
   reason?: string;
@@ -44,6 +44,12 @@ export async function requestGuardianLink(
     const sesRows = await tx.select().from(s.guardianVerificationSessions)
       .where(eq(s.guardianVerificationSessions.id, input.verificationSessionId));
     const sesRow = sesRows[0];
+    /* LCV1 6.5: 이미 소비된 OTP 재사용은 "수동심사(PENDING)"가 아니라
+       명시적 재사용 오류(409) — 불필요한 운영 심사 항목 생성 방지.
+       (본인 세션일 때만 — 타인 세션 정보는 노출하지 않음) */
+    if (sesRow?.consumedAt && sesRow.issuedToUserId === input.actorUserId) {
+      return { status: "CONSUMED", reason: "이미 사용된 인증 세션 — 재인증 필요" };
+    }
 
     const participantRows = await tx.select().from(s.participants)
       .where(eq(s.participants.academyId, input.academyId));

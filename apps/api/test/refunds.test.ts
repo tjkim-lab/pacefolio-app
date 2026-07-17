@@ -313,6 +313,32 @@ test("R10(R9-P0-02 마지막 경계): Invoice·RA participant 는 일치, Refund
   );
 });
 
+test("LCV1-P0-03: 요청 후 링크 철회된 결제자의 승인 거부(승인 시점 링크 재검증)", async () => {
+  // 도담 세 번째 청구·결제·환불 요청
+  await db.insert(s.invoices).values({
+    id: "inv_d3", academyId: "a_wg", participantId: "p_dodam", enrollmentId: "e_d3",
+    billingPeriodId: "bp_q4", status: "ISSUED", total: 30000, dueDate: "2025-12-20",
+  });
+  const prep = await post(mom.cookie, mom.csrf, "/academies/a_wg/payments/prepare",
+    { invoiceIds: ["inv_d3"] }, "pay-key-3");
+  const { paymentId: pay3 } = await prep.json() as { paymentId: string };
+  await webhook({ providerEventId: "cap-3", paymentId: pay3, targetStatus: "CAPTURED", occurredAt: NOW() });
+  const req = await post(mom.cookie, mom.csrf, "/academies/a_wg/refunds",
+    { paymentId: pay3, participantId: "p_dodam", reasonCode: "PARENT_REQUEST" }, "rk-3");
+  const { refundId: ref3 } = await req.json() as { refundId: string };
+  // 요청 후 어머니-도담 링크 철회(REJECTED 전환)
+  await db.update(s.guardianParticipantLinks)
+    .set({ verificationStatus: "REJECTED" })
+    .where(eq(s.guardianParticipantLinks.id, "gl_mom"));
+  const approve = await post(mom.cookie, mom.csrf, `/academies/a_wg/refunds/${ref3}/approvals`);
+  assert.equal(approve.status, 409);
+  assert.match(((await approve.json()) as { reason: string }).reason, /유효하지 않음/);
+  // 복원(후속 테스트 영향 방지)
+  await db.update(s.guardianParticipantLinks)
+    .set({ verificationStatus: "VERIFIED" })
+    .where(eq(s.guardianParticipantLinks.id, "gl_mom"));
+});
+
 test("종결 후: 중복 COMPLETED 웹훅 = 상태 불변 · 재환불 요청 거부", async () => {
   const w = await webhook({ kind: "refund", providerEventId: "rf-3", refundId, targetStatus: "FAILED", occurredAt: new Date(Date.now() + 3000).toISOString() });
   assert.equal(((await w.json()) as { decision: string }).decision, "RECONCILE"); // 종결 되돌리기 금지

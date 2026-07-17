@@ -1,5 +1,5 @@
 /* 조회 전용 — 보호자 관점 청구서 목록 (fixture invoicesForGuardian 의 DB 판) */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import type { Db } from "../sessions/service";
 
@@ -32,6 +32,7 @@ export async function listGuardianInvoices(
   const invs = await db.select().from(s.invoices).where(and(
     inArray(s.invoices.participantId, childIds),
     eq(s.invoices.academyId, academyId),
+    ne(s.invoices.status, "DRAFT"), // 시나리오 11.6: 확정(ISSUED) 전 청구서는 보호자 비노출
   ));
   if (invs.length === 0) return [];
   const kids = await db.select().from(s.participants).where(inArray(s.participants.id, childIds));

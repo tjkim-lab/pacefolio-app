@@ -184,6 +184,17 @@ export async function approveRefund(
       if (!payRows[0] || !gd[0] || payRows[0].guardianId !== gd[0].id) {
         return { kind: "DENIED", reason: "보호자 측 승인은 실제 결제자만 가능" };
       }
+      /* LCV1-P0-03: 요청 후 승인 전에 보호자-원생 링크가 철회·미검증 상태가
+         됐을 수 있음 — 승인 시점에 링크 유효성(VERIFIED + canRequestRefund)을
+         재검증. 철회됐으면 승인 거부(운영 심사 경로). */
+      const link = await tx.select().from(s.guardianParticipantLinks).where(and(
+        eq(s.guardianParticipantLinks.guardianId, gd[0].id),
+        eq(s.guardianParticipantLinks.participantId, row.participantId),
+        eq(s.guardianParticipantLinks.academyId, input.academyId),
+      ));
+      if (!link[0] || link[0].verificationStatus !== "VERIFIED" || !link[0].canRequestRefund) {
+        return { kind: "DENIED", reason: "보호자-원생 연결이 유효하지 않음(철회·미검증) — 운영 심사 필요" };
+      }
     }
 
     const patch: Partial<typeof s.refunds.$inferInsert> =

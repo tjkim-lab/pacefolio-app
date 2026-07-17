@@ -137,3 +137,12 @@ test("전화번호 정규화(+82 / 하이픈)", () => {
   assert.equal(normalizePhone("+82 10-1234-5678"), "01012345678");
   assert.equal(normalizePhone("010-1234-5678"), "01012345678");
 });
+
+/* ── 시나리오 6.7(쌍둥이): 동명·동생년 복수 원생 자동 연결 금지 ── */
+
+test("QA 6.7: 같은 이름·같은 생년 원생 2명 → 자동 선택 없이 PENDING", () => {
+  const twin: Participant = { ...child, id: asId<Participant["id"]>("p_twin") };
+  const r = evaluateLink(baseReq, baseCtx({ participants: [child, twin] }));
+  assert.equal(r.status, "PENDING"); // 첫 매칭 자동 연결 금지 — 학원 확인 필요
+  assert.equal(r.participantId, undefined);
+});

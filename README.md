@@ -32,7 +32,7 @@
 ## 현재 미구현
 
 - 실 PG 서명 검증·provider event 매핑(adapter) · RECONCILE worker(재조회 큐 폴링)
-- 환불 persistence(도메인 규칙은 완료) · 대사(reconciliation) 모델
+- 실 PG 환불 실행(persistence 는 구현됨)(도메인 규칙은 완료) · 대사(reconciliation) 모델
 - Admin `apps/console-admin` 물리 분리(현재 같은 웹 앱의 `/admin`)
 - UI ↔ API 연결(웹 화면의 fixture → api-client 스위칭)
 - OTP 발송/검증 API(현재는 seed 검증세션) — `openapi.yaml` 의 "(계약 초안 — 미구현)" 표기 경로 전부

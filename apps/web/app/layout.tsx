@@ -3,6 +3,9 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "PACEFOLIO",
+  // LCV1-P0-02: 프로토타입 전체 noindex(개인정보 화면 색인 방지 —
+  // 마케팅 랜딩은 별도 파일). 응답 헤더 강제는 middleware.ts.
+  robots: { index: false, follow: false, noarchive: true },
   description: "유소년 스포츠·교육 아카데미 운영 플랫폼",
   manifest: "/manifest.json",
   applicationName: "PACEFOLIO",
