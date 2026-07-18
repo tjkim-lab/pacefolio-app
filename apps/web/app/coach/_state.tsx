@@ -31,9 +31,9 @@ import {
 } from "./_data";
 
 /* ---------------- helpers ---------------- */
-export function attCounts(att: Record<string, AttStatus>) {
+export function attCounts(att: Record<string, AttStatus>, kids: readonly { n: string; paused?: boolean }[] = KIDS) {
   const c = { p: 0, l: 0, a: 0, e: 0, none: 0 };
-  KIDS.forEach((k) => {
+  kids.forEach((k) => {
     if (k.paused) return;
     const s = att[k.n] || "";
     if (s) c[s]++;

@@ -11,7 +11,7 @@ import { requireSession, requireCsrf, requireAcademyContext, SESSION_COOKIE, CSR
 import { requestGuardianLink } from "./linking/service";
 import { revokeGuardianLink } from "./linking/revoke";
 import {
-  createClass, generateSessions, cancelSession, listClasses, listSessions,
+  createClass, generateSessions, cancelSession, listClasses, listSessions, listClassRoster,
 } from "./classes/service";
 import {
   createParticipant, changeParticipantStatus, enrollParticipant, endEnrollment,
@@ -250,6 +250,15 @@ export function createApp(cfg: ApiConfig) {
     if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
     if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
     return c.json({ created: r.created, keptCanceled: r.keptCanceled }, 201);
+  });
+  app.get("/academies/:academyId/classes/:classId/roster", guard, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    const rows = await listClassRoster(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, classId: c.req.param("classId")!,
+    });
+    if (!rows) return c.json({ error: "FORBIDDEN" }, 403); // 담당 아님
+    return c.json({ roster: rows });
   });
   app.get("/academies/:academyId/classes/:classId/sessions", guard, academyCtx, async (c) => {
     const rows = await listSessions(cfg.db, {

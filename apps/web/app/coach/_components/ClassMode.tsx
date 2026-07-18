@@ -4,10 +4,18 @@
 
 import Link from "next/link";
 import { useCoach, attCounts, uniqGuardians } from "../_state";
+import { useCoachLive, CoachLiveBadge } from "../_live";
 import {
   KIDS, CLASS_ACTS, SKIP_WHYS, PHOTO_SCOPE, ATT_TXT, GROWTH_AREAS,
-  TEMPLATE_MAX, TEMPLATE_VARS, type AttStatus,
+  TEMPLATE_MAX, TEMPLATE_VARS, type AttStatus, type Kid,
 } from "../_data";
+
+/* #25: 실연결 시 명단 = 서버 정본(enrollments) — fixture 는 데모 폴백 */
+function useActiveKids(): Kid[] {
+  const live = useCoachLive();
+  if (live.state !== "READY") return KIDS;
+  return live.roster.map((r) => ({ n: r.short, a: parseInt(r.ageLabel, 10) || 0 }));
+}
 import { Button, Card, Tag, cn } from "@/components/ui";
 import { IconCheck, IconClock, IconSpark } from "@/components/ui/icons";
 import { Chip } from "./Bits";
@@ -97,7 +105,8 @@ export default function ClassMode() {
 /* ---------- STEP 1 ---------- */
 function StepAttendance() {
   const c = useCoach();
-  const counts = attCounts(c.att);
+  const kids = useActiveKids();
+  const counts = attCounts(c.att, kids);
 
   return (
     <>

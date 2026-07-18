@@ -49,6 +49,35 @@ export type RefundCreate = z.infer<typeof RefundCreate>;
 const RefundApprove = z.object({ refundId: z.string(), status: z.string() });
 export type RefundApprove = z.infer<typeof RefundApprove>;
 
+const ClassList = z.object({
+  classes: z.array(z.object({
+    classId: z.string(), name: z.string(), scheduleType: z.string(),
+    capacity: z.number().int(), room: z.string().nullable(), status: z.string(),
+    slots: z.array(z.object({
+      weekday: z.number().int(), startTime: z.string(), endTime: z.string(),
+      participantId: z.string().optional(),
+    })),
+    coachUserIds: z.array(z.string()),
+  })),
+});
+export type ClassList = z.infer<typeof ClassList>;
+const Roster = z.object({
+  roster: z.array(z.object({
+    participantId: z.string(), name: z.string(), birth: z.string(),
+    ageLabel: z.string(), status: z.string(),
+  })),
+});
+export type Roster = z.infer<typeof Roster>;
+const SessionList = z.object({
+  sessions: z.array(z.object({
+    sessionId: z.string(), date: z.string(), startTime: z.string(), endTime: z.string(),
+    status: z.string(), participantId: z.string().optional(), canceledReason: z.string().optional(),
+  })),
+});
+export type SessionList = z.infer<typeof SessionList>;
+const AttendanceSave = z.object({ recorded: z.number().int(), updated: z.number().int() });
+const SessionComplete = z.object({ sessionId: z.string(), status: z.string() });
+
 /* ── 에러 — status 와 서버 error 코드 보존 ── */
 export class ApiError extends Error {
   constructor(
@@ -131,6 +160,21 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       }),
     approveRefund: (academyId: string, refundId: string) =>
       call(RefundApprove, `/academies/${academyId}/refunds/${refundId}/approvals`, {
+        method: "POST", csrf: true,
+      }),
+    /* 기본선 화면 실연결(#25) — 반·명단·세션·출결 */
+    listClasses: (academyId: string) =>
+      call(ClassList, `/academies/${academyId}/classes`),
+    listClassRoster: (academyId: string, classId: string) =>
+      call(Roster, `/academies/${academyId}/classes/${classId}/roster`),
+    listClassSessions: (academyId: string, classId: string, range?: { from?: string; to?: string }) =>
+      call(SessionList, `/academies/${academyId}/classes/${classId}/sessions${range?.from || range?.to ? `?${new URLSearchParams({ ...(range.from ? { from: range.from } : {}), ...(range.to ? { to: range.to } : {}) })}` : ""}`),
+    recordAttendance: (academyId: string, sessionId: string, records: { participantId: string; status: string; reason?: string }[]) =>
+      call(AttendanceSave, `/academies/${academyId}/sessions/${sessionId}/attendance`, {
+        method: "POST", csrf: true, body: JSON.stringify({ records }),
+      }),
+    completeSession: (academyId: string, sessionId: string) =>
+      call(SessionComplete, `/academies/${academyId}/sessions/${sessionId}/complete`, {
         method: "POST", csrf: true,
       }),
   };

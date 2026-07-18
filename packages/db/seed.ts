@@ -59,4 +59,36 @@ export async function seedWondergym(db: Db, nowISO: string): Promise<void> {
     { id: "il_seojun_sib", invoiceId: "inv_seojun_q4", type: "DISCOUNT", label: "형제 할인 20%", amount: -72000 },
     { id: "il_seojun_vehicle", invoiceId: "inv_seojun_q4", type: "VEHICLE", label: "차량비", amount: 45000 },
   ]);
+
+  /* ── 기본선 화면 실연결(코치 출결) 데모 — 김선재 코치·플레이2 월수반·오늘 세션 ── */
+  await db.insert(s.users).values({
+    id: "u_coach_ksj", name: "김선재", phone: "010-7000-7712", createdAt: nowISO, updatedAt: nowISO,
+  });
+  await db.insert(s.academyMemberships).values({
+    id: "m_coach_ksj", userId: "u_coach_ksj", academyId: "a_wondergym",
+    roles: ["COACH"], status: "ACTIVE", joinedAt: "2024-08-01",
+  });
+  await db.insert(s.dbClasses).values({
+    id: "cls_play2_mw", academyId: "a_wondergym", name: "플레이2 월수반",
+    scheduleType: "FIXED_WEEKLY", capacity: 12, room: "본관 2층",
+    createdAt: nowISO, updatedAt: nowISO,
+  });
+  await db.insert(s.classScheduleSlots).values([
+    { id: "slot_mw_mon", classId: "cls_play2_mw", academyId: "a_wondergym", weekday: 1, startTime: "14:30", endTime: "15:30" },
+    { id: "slot_mw_wed", classId: "cls_play2_mw", academyId: "a_wondergym", weekday: 3, startTime: "14:30", endTime: "15:30" },
+  ]);
+  await db.insert(s.classAssignments).values({
+    id: "ca_ksj_play2", classId: "cls_play2_mw", academyId: "a_wondergym",
+    coachUserId: "u_coach_ksj", status: "ACTIVE", startDate: "2024-08-01", createdAt: nowISO,
+  });
+  await db.insert(s.dbEnrollments).values([
+    { id: "en_dodam", academyId: "a_wondergym", classId: "cls_play2_mw", participantId: "p_dodam", status: "ACTIVE", startDate: "2025-03-02", createdAt: nowISO },
+    { id: "en_seojun", academyId: "a_wondergym", classId: "cls_play2_mw", participantId: "p_seojun", status: "ACTIVE", startDate: "2025-03-02", createdAt: nowISO },
+  ]);
+  // 오늘 세션 — 코치 앱 실연결 데모가 바로 찾도록 seed 시각 기준 오늘 날짜
+  await db.insert(s.classSessions).values({
+    id: "sess_today", classId: "cls_play2_mw", academyId: "a_wondergym",
+    date: nowISO.slice(0, 10), startTime: "14:30", endTime: "15:30",
+    createdAt: nowISO, updatedAt: nowISO,
+  });
 }

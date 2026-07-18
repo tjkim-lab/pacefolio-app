@@ -217,3 +217,31 @@ export async function listSessions(db: Db, input: {
     canceledReason: r.canceledReason ?? undefined,
   }));
 }
+
+/** 반 명단 — 담당 코치(ACTIVE assignment) 또는 staff. 화면 실연결(#22~24 후속)용 */
+export async function listClassRoster(db: Db, input: {
+  actorUserId: string; actorRoles: readonly string[]; academyId: string; classId: string;
+}) {
+  const staff = isStaff(input.actorRoles);
+  if (!staff) {
+    const assign = (await db.select().from(s.classAssignments).where(and(
+      eq(s.classAssignments.classId, input.classId),
+      eq(s.classAssignments.academyId, input.academyId),
+      eq(s.classAssignments.coachUserId, input.actorUserId),
+      eq(s.classAssignments.status, "ACTIVE"),
+    )))[0];
+    if (!assign) return null;
+  }
+  const enrolls = await db.select().from(s.dbEnrollments).where(and(
+    eq(s.dbEnrollments.classId, input.classId),
+    eq(s.dbEnrollments.academyId, input.academyId),
+    eq(s.dbEnrollments.status, "ACTIVE"),
+  ));
+  const pids = enrolls.map((e) => e.participantId);
+  const kids = pids.length
+    ? await db.select().from(s.participants).where(inArray(s.participants.id, pids))
+    : [];
+  return kids.map((p) => ({
+    participantId: p.id, name: p.name, birth: p.birth, ageLabel: p.ageLabel, status: p.status,
+  }));
+}

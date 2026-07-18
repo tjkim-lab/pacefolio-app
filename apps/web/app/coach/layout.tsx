@@ -4,6 +4,7 @@ import { TenantProvider } from "@/lib/mock/tenant";
 import { PhoneFrame, BottomNav, type Tab } from "@/components/mobile/MobileShell";
 import { IconHome, IconWhistle, IconChat, IconUser } from "@/components/ui/icons";
 import { CoachProvider } from "./_state";
+import { CoachLiveProvider } from "./_live";
 import { Toast } from "./_components/Bits";
 import ClassMode from "./_components/ClassMode";
 import LibrarySheet from "./_components/LibrarySheet";
@@ -22,6 +23,7 @@ export default function CoachLayout({ children }: { children: React.ReactNode })
   return (
     <TenantProvider>
       <CoachProvider>
+       <CoachLiveProvider>
         {/* theme-coach: 헤더·강조 딥그린 역할 토큰 (의미 불변 — accent 는 항상 밝은 틸) */}
         <div className="theme-coach contents">
           <PhoneFrame>
@@ -36,6 +38,7 @@ export default function CoachLayout({ children }: { children: React.ReactNode })
             <Toast />
           </PhoneFrame>
         </div>
+       </CoachLiveProvider>
       </CoachProvider>
     </TenantProvider>
   );

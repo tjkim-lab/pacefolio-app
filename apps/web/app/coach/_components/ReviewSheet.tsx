@@ -3,6 +3,7 @@
 /* 리포트 발송 전 검토 시트 */
 
 import { useCoach, attCounts, uniqGuardians } from "../_state";
+import { useCoachLive } from "../_live";
 import { PHOTO_SCOPE, CLASS_ACTS } from "../_data";
 import { Sheet } from "./Bits";
 import { Button } from "@/components/ui";
@@ -20,8 +21,17 @@ function Head({ children }: { children: string }) {
 }
 
 export default function ReviewSheet() {
-  const { reviewOpen, closeReview, confirmSend, att, actsDone, actWhy, photoScope, coachSay } =
+  const { reviewOpen, closeReview, confirmSend, showToast, att, actsDone, actWhy, photoScope, coachSay } =
     useCoach();
+  const live = useCoachLive();
+  const onConfirm = async () => {
+    if (live.state === "READY") {
+      const res = await live.complete(); // #25: 서버 완료(전원 출결 검증·멱등)
+      showToast(res.message);
+      if (!res.ok) return; // 서버가 미체크를 알려주면 발송 중단
+    }
+    confirmSend();
+  };
   const c = attCounts(att);
   const doneActs = actsDone.filter(Boolean).length;
   const partial = actsDone
@@ -56,7 +66,7 @@ export default function ReviewSheet() {
 
       <div className="grid grid-cols-2 gap-2 mt-3">
         <Button variant="ghost" onClick={closeReview}>취소</Button>
-        <Button variant="primary" onClick={confirmSend}>확인하고 발송</Button>
+        <Button variant="primary" onClick={onConfirm}>확인하고 발송</Button>
       </div>
     </Sheet>
   );
