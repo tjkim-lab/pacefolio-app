@@ -214,8 +214,8 @@ export async function postMessage(db: Db, input: {
           eq(s.guardianParticipantLinks.participantId, related),
           eq(s.guardianParticipantLinks.academyId, input.academyId),
         )))[0];
-        if (!link?.canViewHealthInfo) {
-          return { kind: "INVALID" as const, reason: "건강정보 열람 권한(canViewHealthInfo) 없는 보호자가 있는 방 — 전송 불가" };
+        if (!link || link.verificationStatus !== "VERIFIED" || !link.canViewHealthInfo) {
+          return { kind: "INVALID" as const, reason: "건강정보 열람 권한(VERIFIED+canViewHealthInfo) 없는 보호자가 있는 방 — 전송 불가" };
         }
       }
     }
@@ -428,7 +428,7 @@ export async function listMessages(db: Db, input: {
         eq(s.guardianParticipantLinks.participantId, pid),
         eq(s.guardianParticipantLinks.academyId, input.academyId),
       )))[0] : undefined;
-      healthAllowed = !!link?.canViewHealthInfo;
+      healthAllowed = !!link && link.verificationStatus === "VERIFIED" && link.canViewHealthInfo;
     }
 
     /* 13차 C P0-4: 민감(BILLING·HEALTH) 메시지 열람 = 서버 감사 행

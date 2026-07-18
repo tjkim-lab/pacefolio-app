@@ -274,6 +274,25 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: 'APPROVAL_REJECTED — 동일인 양측 승인·결제자 아님·링크 철회(운영 심사) 등', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /academies/{academyId}/guardian-links/{linkId}/revocation:
+    post:
+      tags: [linking]
+      summary: >
+        보호자-원생 연결 철회 (13차 D P0-1 구현) — 학원(OWNER·DESK) 또는 링크 당사자 보호자만.
+        REVOKED 상태(REJECTED=신청 거절과 구분) + 전 권한 flag 회수 + revokedAt/By/reason 이력 +
+        AuditLog + Outbox(GUARDIAN_LINK_REVOKED — pendingRefunds 운영 심사 신호). 멱등(재철회 200).
+        잠금 계약: Link 행만 FOR UPDATE(전역 순서 Refund→Link — 승인과 같은 행에서 직렬화).
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: linkId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reasonCode], additionalProperties: false, properties: { reasonCode: { type: string, maxLength: 40 }, reasonText: { type: string, maxLength: 500 } } } } }
+      responses:
+        '200': { description: '{ linkId, status: REVOKED, pendingRefunds? } — 멱등' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   # ── 소통(채팅) — 배치 14 (docs/12 개정 계약 · 13차 C P1-6 등재) ──────
   /academies/{academyId}/chat/dms:
     post:
@@ -600,7 +619,7 @@ components:
         PENDING·REJECTED(202) 는 reason 포함. UNVERIFIED 는 응답으로 쓰이지 않음(도메인 enum 전체 대조용).
       required: [status]
       properties:
-        status: { type: string, x-domain-enum: VERIFICATION_STATUS, enum: [UNVERIFIED, PENDING, VERIFIED, REJECTED] }
+        status: { type: string, x-domain-enum: VERIFICATION_STATUS, enum: [UNVERIFIED, PENDING, VERIFIED, REJECTED, REVOKED] }
         linkId: { type: string }
         participantId: { type: string }
         reason: { type: string }

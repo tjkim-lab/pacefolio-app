@@ -62,7 +62,7 @@ export type RelationshipType = (typeof RELATIONSHIP_TYPE)[number];
 export const VERIFICATION_METHOD = ["PHONE_OTP", "ACADEMY_INVITE_CODE", "ACADEMY_MANUAL"] as const;
 export type VerificationMethod = (typeof VERIFICATION_METHOD)[number];
 
-export const VERIFICATION_STATUS = ["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED"] as const;
+export const VERIFICATION_STATUS = ["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED", "REVOKED"] as const; // REVOKED = 검증됐던 관계의 사후 철회(REJECTED=신청 거절과 구분 · 13차 D P0-2)
 export type VerificationStatus = (typeof VERIFICATION_STATUS)[number];
 
 /* --- 개인정보 공개 범위 (리뷰#2 4-2: SNS식 Everyone 금지, 시스템 정책으로 제한) --- */

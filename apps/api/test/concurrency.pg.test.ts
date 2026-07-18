@@ -148,7 +148,7 @@ test("동일 OTP session 20개 동시 요청 → 정확히 1개만 성공", { sk
 /* ── R8 C8-02: 결제 경쟁 테스트 (C8-01 수정의 P0 종료 증거) ── */
 import { processPgWebhook, preparePayment } from "../src/billing/service";
 import { schema as s2 } from "@pacefolio/db";
-import { eq as eq2, inArray as inArray2 } from "drizzle-orm";
+import { eq as eq2, inArray as inArray2, and as and2 } from "drizzle-orm";
 
 /** 결제 경쟁용 seed — invoice 100,000 + 보호자·링크·멤버십 */
 async function setupBilling(w: World) {
@@ -298,7 +298,10 @@ test("hardening: 링크 철회 tx 커밋 전 도착한 승인 → 잠금 대기 
     const approval = approveRefund(w.db, {
       actorUserId: uid, academyId: w.academyId, refundId: refId, side: "GUARDIAN",
     }, NOW());
+    let settled = false;
+    void approval.finally(() => { settled = true; });
     await new Promise((r) => setTimeout(r, 400)); // 승인이 잠금 대기에 진입할 시간
+    assert.equal(settled, false); // 13차 D: 철회 커밋 전 승인이 완료되면 안 됨 — 잠금 대기 직접 확인
     await client.query(
       "UPDATE guardian_participant_links SET verification_status = 'REJECTED' WHERE id = $1", [linkId],
     );
@@ -359,4 +362,100 @@ test("13차 C: 수신자 2명 동시 ACK → 정확히 ACKNOWLEDGED + 양쪽 시
   assert.equal(msg.status, "ACKNOWLEDGED");
   const acks = await w.db.select().from(s2.chatMessageAcks).where(eq2(s2.chatMessageAcks.messageId, msgId));
   assert.equal(acks.filter((a) => a.acknowledgedAt).length, 2);
+});
+
+/* ═══ 13차 D: 실제 철회 서비스 + 승인 경쟁 확장 ═══ */
+import { revokeGuardianLink } from "../src/linking/revoke";
+
+/** 환불 승인 경쟁용 world — 보호자·링크·CAPTURED 결제·REQUESTED 환불 */
+async function seedRefundWorld(w: World) {
+  const uid = rid("u"), gid = rid("gd"), ownerUid = rid("uo");
+  await w.db.insert(s2.users).values([
+    { id: uid, name: "경쟁보호자", phone: "010-0" },
+    { id: ownerUid, name: "경쟁원장", phone: "010-1" },
+  ]);
+  await w.db.insert(s2.guardians).values({ id: gid, userId: uid });
+  const linkId = rid("gl");
+  await w.db.insert(s2.guardianParticipantLinks).values({
+    id: linkId, guardianId: gid, participantId: w.participantId, academyId: w.academyId,
+    relationshipType: "MOTHER", isPrimaryGuardian: true, verificationStatus: "VERIFIED",
+    canViewSchedule: true, canViewAttendance: true, canViewHealthInfo: true,
+    canReceivePhotos: true, canPay: true, canRequestRefund: true,
+  });
+  const payId = rid("pay");
+  await w.db.insert(s2.payments).values({
+    id: payId, academyId: w.academyId, guardianId: gid, amount: 100000,
+    status: "CAPTURED", idempotencyKey: rid("k"),
+  });
+  const refId = rid("ref");
+  await w.db.insert(s2.refunds).values({
+    id: refId, academyId: w.academyId, paymentId: payId, participantId: w.participantId,
+    status: "REQUESTED", reasonCode: "PERSONAL", requestedAmount: 100000,
+    requestedByUserId: uid, requestedAt: NOW(), idempotencyKey: rid("rk"),
+  });
+  return { uid, gid, ownerUid, linkId, payId, refId };
+}
+
+test("13차 D P0-3: 실제 철회 서비스 vs 승인 — 동시 실행 불변식(어느 순서든 일관)", { skip }, async () => {
+  const w = await setup();
+  const { uid, ownerUid, linkId, refId } = await seedRefundWorld(w);
+  const [revoke, approval] = await Promise.all([
+    revokeGuardianLink(w.db, {
+      actorUserId: ownerUid, actorRoles: ["OWNER"], academyId: w.academyId,
+      linkId, reasonCode: "SECURITY",
+    }, NOW()),
+    approveRefund(w.db, {
+      actorUserId: uid, academyId: w.academyId, refundId: refId, side: "GUARDIAN",
+    }, NOW()),
+  ]);
+  assert.equal(revoke.kind, "REVOKED"); // 철회는 항상 성공
+  const link = (await w.db.select().from(s2.guardianParticipantLinks)
+    .where(eq2(s2.guardianParticipantLinks.id, linkId)))[0];
+  assert.equal(link.verificationStatus, "REVOKED");
+  assert.equal(link.canRequestRefund, false);
+  assert.ok(link.revokedAt && link.revokedByUserId === ownerUid);
+  const ref = (await w.db.select().from(s2.refunds).where(eq2(s2.refunds.id, refId)))[0];
+  // 직렬화 불변식: 승인 성공 ⟺ 승인 흔적 존재 (어느 쪽이 먼저든 일관된 최종 상태)
+  if (approval.kind === "APPROVED") {
+    assert.ok(ref.guardianApprovedAt); // 승인이 철회보다 먼저 직렬화됨 — 합법
+  } else {
+    assert.equal(ref.guardianApprovedAt, null); // 철회 선행 — 승인 흔적 제로
+    assert.equal(ref.status, "REQUESTED");
+  }
+});
+
+test("13차 D P1-1: 보호자·원장 동시 승인 → MUTUALLY_APPROVED · 승인자 정확 · version +2", { skip }, async () => {
+  const w = await setup();
+  const { uid, ownerUid, refId } = await seedRefundWorld(w);
+  await w.db.insert(s2.academyMemberships).values({
+    id: rid("m"), userId: ownerUid, academyId: w.academyId, roles: ["OWNER"], status: "ACTIVE", joinedAt: "2024-03-01",
+  });
+  const results = await Promise.all([
+    approveRefund(w.db, { actorUserId: uid, academyId: w.academyId, refundId: refId, side: "GUARDIAN" }, NOW()),
+    approveRefund(w.db, { actorUserId: ownerUid, academyId: w.academyId, refundId: refId, side: "ACADEMY" }, NOW()),
+  ]);
+  assert.ok(results.every((r) => r.kind === "APPROVED"), JSON.stringify(results));
+  const ref = (await w.db.select().from(s2.refunds).where(eq2(s2.refunds.id, refId)))[0];
+  assert.equal(ref.status, "MUTUALLY_APPROVED");
+  assert.equal(ref.approvedAmount, ref.requestedAmount);
+  assert.equal(ref.guardianApprovedByUserId, uid);
+  assert.equal(ref.academyApprovedByUserId, ownerUid);
+  assert.equal(ref.version, 3); // 초기 1 + 승인 2회
+});
+
+test("13차 D P1-2: 같은 보호자 승인 ×20 동시 → 성공 정확히 1 · version +1 · 감사 1건", { skip }, async () => {
+  const w = await setup();
+  const { uid, refId } = await seedRefundWorld(w);
+  const results = await Promise.all(Array.from({ length: 20 }, () =>
+    approveRefund(w.db, { actorUserId: uid, academyId: w.academyId, refundId: refId, side: "GUARDIAN" }, NOW())
+      .then((r) => r.kind, () => "ERROR")));
+  assert.equal(results.filter((k) => k === "APPROVED").length, 1);
+  assert.equal(results.filter((k) => k === "DENIED").length, 19);
+  const ref = (await w.db.select().from(s2.refunds).where(eq2(s2.refunds.id, refId)))[0];
+  assert.equal(ref.version, 2); // 정확히 1회 갱신
+  const audits = await w.db.select().from(s2.auditLogs).where(and2(
+    eq2(s2.auditLogs.action, "refund.approved_guardian"),
+    eq2(s2.auditLogs.targetId, refId),
+  ));
+  assert.equal(audits.length, 1);
 });

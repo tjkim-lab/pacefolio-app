@@ -203,6 +203,19 @@ export async function approveRefund(
         eq(s.guardianParticipantLinks.academyId, input.academyId),
       )).for("update");
       if (!link[0] || link[0].verificationStatus !== "VERIFIED" || !link[0].canRequestRefund) {
+        /* 13차 D P2: 거부 승인도 감사 — "철회된 보호자의 승인 시도"는 보안 이벤트.
+           반환 문구가 "운영 심사 필요"이므로 운영자가 볼 기록을 같은 tx 에 남긴다. */
+        await recordAudit(tx, {
+          academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "GUARDIAN",
+          action: "refund.approval_denied", targetType: "Refund", targetId: row.id,
+          reason: "LINK_INVALID",
+          detail: {
+            side: input.side, participantId: row.participantId,
+            linkStatus: link[0]?.verificationStatus ?? "MISSING",
+            canRequestRefund: link[0]?.canRequestRefund ?? false,
+          },
+          success: false,
+        }, nowISO);
         return { kind: "DENIED", reason: "보호자-원생 연결이 유효하지 않음(철회·미검증) — 운영 심사 필요" };
       }
     }

@@ -380,3 +380,89 @@ test("13차 A P0: 전액 환불 COMPLETED 후 같은 결제 재환불 요청 →
   const refs = await db.select().from(s.refunds).where(eq(s.refunds.paymentId, payCum));
   assert.equal(refs.length, 1);
 });
+
+/* ═══ 13차 D: 실제 링크 철회 서비스(P0-1) — API·멱등·변형 시나리오 ═══ */
+test("13차 D: 철회 API — 원장 철회 200 + REVOKED·flag 회수·이력·감사·Outbox + 멱등 재호출", async () => {
+  // 새 결제·환불(REQUESTED)로 pendingRefunds 신호 검증
+  await db.insert(s.invoices).values({
+    id: "inv_rev", academyId: "a_wg", participantId: "p_dodam", enrollmentId: "e_rev",
+    billingPeriodId: "bp_q4", status: "ISSUED", total: 90000, dueDate: "2025-09-10",
+  });
+  const prep = await post(mom.cookie, mom.csrf, "/academies/a_wg/payments/prepare",
+    { invoiceIds: ["inv_rev"] }, "pay-rev");
+  const payRev = (await prep.json() as { paymentId: string }).paymentId;
+  await webhook({ kind: "payment", providerEventId: "ev-rev-cap", paymentId: payRev, targetStatus: "CAPTURED", occurredAt: NOW() });
+  const req = await post(mom.cookie, mom.csrf, "/academies/a_wg/refunds",
+    { paymentId: payRev, participantId: "p_dodam", reasonCode: "PERSONAL" }, "rev-1");
+  assert.equal(req.status, 201);
+
+  // 원장이 mom 링크 철회
+  const r1 = await post(owner.cookie, owner.csrf, "/academies/a_wg/guardian-links/gl_mom/revocation",
+    { reasonCode: "SECURITY", reasonText: "13차 D 검증" });
+  assert.equal(r1.status, 200);
+  const body1 = await r1.json() as { status: string; pendingRefunds: number };
+  assert.equal(body1.status, "REVOKED");
+  assert.ok(body1.pendingRefunds >= 1); // 진행 중 환불 = 운영 심사 신호
+  const link = (await db.select().from(s.guardianParticipantLinks)
+    .where(eq(s.guardianParticipantLinks.id, "gl_mom")))[0];
+  assert.equal(link.verificationStatus, "REVOKED"); // REJECTED 아님 — 사후 철회 구분
+  assert.equal(link.canRequestRefund, false);       // flag 전부 회수
+  assert.equal(link.canViewHealthInfo, false);
+  assert.ok(link.revokedAt);
+  assert.equal(link.revokedByUserId, owner.userId);
+  assert.equal(link.revocationReasonCode, "SECURITY");
+  const audit = await db.select().from(s.auditLogs)
+    .where(eq(s.auditLogs.action, "guardian_link.revoked"));
+  assert.equal(audit.length, 1);
+  const outbox = await db.select().from(s.outboxEvents)
+    .where(eq(s.outboxEvents.eventType, "GUARDIAN_LINK_REVOKED"));
+  assert.equal(outbox.length, 1);
+  // 멱등 재호출 = 200 (재시도 안전)
+  const r2 = await post(owner.cookie, owner.csrf, "/academies/a_wg/guardian-links/gl_mom/revocation",
+    { reasonCode: "SECURITY" });
+  assert.equal(r2.status, 200);
+  assert.equal((await r2.json() as { status: string }).status, "REVOKED");
+});
+
+test("13차 D P1-3 변형: 원장 선승인 후 철회 — 보호자 승인 422·academyApprovedAt 유지·거부 감사", async () => {
+  // 위 테스트의 환불(rev-1)에 원장 선승인
+  const refs = await db.select().from(s.refunds).where(eq(s.refunds.idempotencyKey, "rev-1"));
+  const refRev = refs[0].id;
+  const ownerAppr = await post(owner.cookie, owner.csrf, `/academies/a_wg/refunds/${refRev}/approvals`);
+  assert.equal(ownerAppr.status, 200); // ACADEMY 측은 링크와 무관 — 승인 기록됨
+  // 철회된 mom 이 승인 시도 → 409 + 거부 감사 + 상호 승인 전환 금지
+  const momAppr = await post(mom.cookie, mom.csrf, `/academies/a_wg/refunds/${refRev}/approvals`);
+  assert.equal(momAppr.status, 409);
+  const row = (await db.select().from(s.refunds).where(eq(s.refunds.id, refRev)))[0];
+  assert.equal(row.status, "REQUESTED");          // MUTUALLY_APPROVED 전환 금지
+  assert.ok(row.academyApprovedAt);               // 원장 승인은 유지
+  assert.equal(row.guardianApprovedAt, null);     // 보호자 흔적 제로
+  assert.equal(row.approvedAmount, null);
+  const denied = await db.select().from(s.auditLogs)
+    .where(eq(s.auditLogs.action, "refund.approval_denied"));
+  assert.ok(denied.length >= 1);                  // 13차 D P2: 보안 이벤트 감사
+});
+
+test("13차 D P1-4 변형: VERIFIED 유지 + canRequestRefund 만 회수 → 승인 409", async () => {
+  // 링크 복원(VERIFIED) 후 flag 만 회수
+  await db.update(s.guardianParticipantLinks).set({
+    verificationStatus: "VERIFIED", canRequestRefund: false, canPay: true,
+  }).where(eq(s.guardianParticipantLinks.id, "gl_mom"));
+  const refs = await db.select().from(s.refunds).where(eq(s.refunds.idempotencyKey, "rev-1"));
+  const momAppr = await post(mom.cookie, mom.csrf, `/academies/a_wg/refunds/${refs[0].id}/approvals`);
+  assert.equal(momAppr.status, 409); // 상태 철회 없이 권한만 꺼도 거부
+  // 정리: 이후 테스트 없음 — 원복
+  await db.update(s.guardianParticipantLinks).set({ canRequestRefund: true })
+    .where(eq(s.guardianParticipantLinks.id, "gl_mom"));
+});
+
+test("13차 D: 보호자 본인 철회 가능 · 무관한 보호자 403", async () => {
+  // dad 가 mom 의 링크 철회 시도 → 403 (당사자도 학원도 아님)
+  const bad = await post(dad.cookie, dad.csrf, "/academies/a_wg/guardian-links/gl_mom/revocation",
+    { reasonCode: "PERSONAL" });
+  assert.equal(bad.status, 403);
+  // dad 본인 링크는 스스로 철회 가능
+  const self = await post(dad.cookie, dad.csrf, "/academies/a_wg/guardian-links/gl_dad/revocation",
+    { reasonCode: "PERSONAL" });
+  assert.equal(self.status, 200);
+});

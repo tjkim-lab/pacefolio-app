@@ -9,6 +9,7 @@ import { startOAuth, handleOAuthCallback } from "./auth/service";
 import type { ProviderRegistry, OAuthProviderName } from "./auth/provider";
 import { requireSession, requireCsrf, requireAcademyContext, SESSION_COOKIE, CSRF_COOKIE, type GuardEnv } from "./guard";
 import { requestGuardianLink } from "./linking/service";
+import { revokeGuardianLink } from "./linking/revoke";
 import { preparePayment, processPgWebhook } from "./billing/service";
 import { requestRefund, approveRefund, processRefundWebhook } from "./billing/refunds";
 import { listGuardianInvoices, getPaymentStatus } from "./billing/queries";
@@ -163,6 +164,28 @@ export function createApp(cfg: ApiConfig) {
       return c.json({ error: "OTP_SESSION_ALREADY_USED" }, 409); // LCV1 6.5 — 수동심사 아님
     }
     return c.json(result, 202); // PENDING(수동 심사)·REJECTED — 본문에 status
+  });
+
+  /* 13차 D P0-1: 링크 철회 — 실제 제품 기능(raw SQL 테스트 대체).
+     Link 행만 잠근다(잠금 순서 계약: Refund → Link — revoke.ts 참조). */
+  const RevokeBody = z.object({
+    reasonCode: z.string().min(1).max(40),
+    reasonText: z.string().max(500).optional(),
+  }).strict();
+  app.post("/academies/:academyId/guardian-links/:linkId/revocation", guard, csrf, academyCtx, async (c) => {
+    const parsed = RevokeBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth");
+    const m = c.get("membership");
+    const r = await revokeGuardianLink(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, linkId: c.req.param("linkId")!,
+      ...parsed.data,
+    }, now());
+    if (r.kind === "NOT_FOUND") return c.json({ error: "NOT_FOUND" }, 404);
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "ALREADY_REVOKED") return c.json({ linkId: r.linkId, status: "REVOKED" }, 200); // 멱등
+    return c.json({ linkId: r.linkId, status: "REVOKED", pendingRefunds: r.pendingRefunds }, 200);
   });
 
   /* ── 결제 준비 (R5 Phase 5) — membership guard 첫 실전 적용 ── */

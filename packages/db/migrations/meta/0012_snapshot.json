@@ -1,0 +1,4395 @@
+{
+  "id": "4f5f0d1f-a722-4186-9361-75ac8bf43b64",
+  "prevId": "7c8abe34-be8d-4933-8ad5-935464cbd5a4",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.academies": {
+      "name": "academies",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "theme_color": {
+          "name": "theme_color",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "theme_ink": {
+          "name": "theme_ink",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "logo_emoji": {
+          "name": "logo_emoji",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_name": {
+          "name": "owner_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "billing_cycle_default": {
+          "name": "billing_cycle_default",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_billing_cycle": {
+          "name": "ck_billing_cycle",
+          "value": "\"academies\".\"billing_cycle_default\" IN (1, 3)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.academy_memberships": {
+      "name": "academy_memberships",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "roles": {
+          "name": "roles",
+          "type": "role[]",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "membership_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "joined_at": {
+          "name": "joined_at",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "uq_membership_user_academy": {
+          "name": "uq_membership_user_academy",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_membership_academy_status": {
+          "name": "ix_membership_academy_status",
+          "columns": [
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "academy_memberships_user_id_users_id_fk": {
+          "name": "academy_memberships_user_id_users_id_fk",
+          "tableFrom": "academy_memberships",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "academy_memberships_academy_id_academies_id_fk": {
+          "name": "academy_memberships_academy_id_academies_id_fk",
+          "tableFrom": "academy_memberships",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_membership_roles_nonempty": {
+          "name": "ck_membership_roles_nonempty",
+          "value": "array_length(\"academy_memberships\".\"roles\", 1) >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.audit_logs": {
+      "name": "audit_logs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actor_role": {
+          "name": "actor_role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_type": {
+          "name": "target_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "detail": {
+          "name": "detail",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "success": {
+          "name": "success",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "at": {
+          "name": "at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "ix_audit_academy_at": {
+          "name": "ix_audit_academy_at",
+          "columns": [
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_audit_target": {
+          "name": "ix_audit_target",
+          "columns": [
+            {
+              "expression": "target_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "target_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.billing_periods": {
+      "name": "billing_periods",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_start": {
+          "name": "period_start",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_end": {
+          "name": "period_end",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cycle_months": {
+          "name": "cycle_months",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "uq_bp_id_academy": {
+          "name": "uq_bp_id_academy",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "billing_periods_academy_id_academies_id_fk": {
+          "name": "billing_periods_academy_id_academies_id_fk",
+          "tableFrom": "billing_periods",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_cycle_months": {
+          "name": "ck_cycle_months",
+          "value": "\"billing_periods\".\"cycle_months\" IN (1, 3)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.chat_message_acks": {
+      "name": "chat_message_acks",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "read_at": {
+          "name": "read_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "acknowledged_at": {
+          "name": "acknowledged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "uq_chatack_message_user": {
+          "name": "uq_chatack_message_user",
+          "columns": [
+            {
+              "expression": "message_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_chatack_user": {
+          "name": "ix_chatack_user",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "chat_message_acks_academy_id_academies_id_fk": {
+          "name": "chat_message_acks_academy_id_academies_id_fk",
+          "tableFrom": "chat_message_acks",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "chat_message_acks_user_id_users_id_fk": {
+          "name": "chat_message_acks_user_id_users_id_fk",
+          "tableFrom": "chat_message_acks",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_chatack_message_academy": {
+          "name": "fk_chatack_message_academy",
+          "tableFrom": "chat_message_acks",
+          "tableTo": "chat_messages",
+          "columnsFrom": [
+            "message_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.chat_messages": {
+      "name": "chat_messages",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "room_id": {
+          "name": "room_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sender_user_id": {
+          "name": "sender_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "chat_message_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category": {
+          "name": "category",
+          "type": "chat_category",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'GENERAL'"
+        },
+        "status": {
+          "name": "status",
+          "type": "chat_message_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "context_card": {
+          "name": "context_card",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "client_message_id": {
+          "name": "client_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "related_participant_id": {
+          "name": "related_participant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_note": {
+          "name": "resolved_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "edited_at": {
+          "name": "edited_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ix_chatmsg_room_created": {
+          "name": "ix_chatmsg_room_created",
+          "columns": [
+            {
+              "expression": "room_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_chatmsg_id_academy": {
+          "name": "uq_chatmsg_id_academy",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_chatmsg_client_id": {
+          "name": "uq_chatmsg_client_id",
+          "columns": [
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sender_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "client_message_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "chat_messages_academy_id_academies_id_fk": {
+          "name": "chat_messages_academy_id_academies_id_fk",
+          "tableFrom": "chat_messages",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "chat_messages_sender_user_id_users_id_fk": {
+          "name": "chat_messages_sender_user_id_users_id_fk",
+          "tableFrom": "chat_messages",
+          "tableTo": "users",
+          "columnsFrom": [
+            "sender_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_chatmsg_room_academy": {
+          "name": "fk_chatmsg_room_academy",
+          "tableFrom": "chat_messages",
+          "tableTo": "chat_rooms",
+          "columnsFrom": [
+            "room_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_chatmsg_participant_academy": {
+          "name": "fk_chatmsg_participant_academy",
+          "tableFrom": "chat_messages",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "related_participant_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_chatmsg_health_participant": {
+          "name": "ck_chatmsg_health_participant",
+          "value": "\"chat_messages\".\"category\" <> 'HEALTH' OR \"chat_messages\".\"related_participant_id\" IS NOT NULL"
+        },
+        "ck_chatmsg_billing_card": {
+          "name": "ck_chatmsg_billing_card",
+          "value": "\"chat_messages\".\"category\" <> 'BILLING' OR \"chat_messages\".\"context_card\" IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.chat_room_members": {
+      "name": "chat_room_members",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "room_id": {
+          "name": "room_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "joined_at": {
+          "name": "joined_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "left_at": {
+          "name": "left_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_read_at": {
+          "name": "last_read_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "uq_chatmember_room_user": {
+          "name": "uq_chatmember_room_user",
+          "columns": [
+            {
+              "expression": "room_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_chatmember_user": {
+          "name": "ix_chatmember_user",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "chat_room_members_academy_id_academies_id_fk": {
+          "name": "chat_room_members_academy_id_academies_id_fk",
+          "tableFrom": "chat_room_members",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "chat_room_members_user_id_users_id_fk": {
+          "name": "chat_room_members_user_id_users_id_fk",
+          "tableFrom": "chat_room_members",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_chatmember_room_academy": {
+          "name": "fk_chatmember_room_academy",
+          "tableFrom": "chat_room_members",
+          "tableTo": "chat_rooms",
+          "columnsFrom": [
+            "room_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.chat_rooms": {
+      "name": "chat_rooms",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "chat_room_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dm_key": {
+          "name": "dm_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "related_participant_id": {
+          "name": "related_participant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "uq_chatroom_id_academy": {
+          "name": "uq_chatroom_id_academy",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_chatroom_dmkey": {
+          "name": "uq_chatroom_dmkey",
+          "columns": [
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "dm_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "chat_rooms_academy_id_academies_id_fk": {
+          "name": "chat_rooms_academy_id_academies_id_fk",
+          "tableFrom": "chat_rooms",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "chat_rooms_created_by_user_id_users_id_fk": {
+          "name": "chat_rooms_created_by_user_id_users_id_fk",
+          "tableFrom": "chat_rooms",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_chatroom_participant_academy": {
+          "name": "fk_chatroom_participant_academy",
+          "tableFrom": "chat_rooms",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "related_participant_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.external_identities": {
+      "name": "external_identities",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "oauth_provider",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_subject": {
+          "name": "provider_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verified_email": {
+          "name": "verified_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verified_phone": {
+          "name": "verified_phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "uq_external_identity": {
+          "name": "uq_external_identity",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_subject",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_external_identity_user": {
+          "name": "ix_external_identity_user",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "external_identities_user_id_users_id_fk": {
+          "name": "external_identities_user_id_users_id_fk",
+          "tableFrom": "external_identities",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.guardian_invite_redemptions": {
+      "name": "guardian_invite_redemptions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "invite_id": {
+          "name": "invite_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "guardian_id": {
+          "name": "guardian_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "participant_id": {
+          "name": "participant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verification_session_id": {
+          "name": "verification_session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "redeemed_at": {
+          "name": "redeemed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "uq_redemption": {
+          "name": "uq_redemption",
+          "columns": [
+            {
+              "expression": "invite_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "guardian_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "participant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_redemption_invite": {
+          "name": "ix_redemption_invite",
+          "columns": [
+            {
+              "expression": "invite_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "guardian_invite_redemptions_invite_id_guardian_invites_id_fk": {
+          "name": "guardian_invite_redemptions_invite_id_guardian_invites_id_fk",
+          "tableFrom": "guardian_invite_redemptions",
+          "tableTo": "guardian_invites",
+          "columnsFrom": [
+            "invite_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "guardian_invite_redemptions_academy_id_academies_id_fk": {
+          "name": "guardian_invite_redemptions_academy_id_academies_id_fk",
+          "tableFrom": "guardian_invite_redemptions",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "guardian_invite_redemptions_guardian_id_guardians_id_fk": {
+          "name": "guardian_invite_redemptions_guardian_id_guardians_id_fk",
+          "tableFrom": "guardian_invite_redemptions",
+          "tableTo": "guardians",
+          "columnsFrom": [
+            "guardian_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "guardian_invite_redemptions_participant_id_participants_id_fk": {
+          "name": "guardian_invite_redemptions_participant_id_participants_id_fk",
+          "tableFrom": "guardian_invite_redemptions",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "participant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "guardian_invite_redemptions_verification_session_id_guardian_verification_sessions_id_fk": {
+          "name": "guardian_invite_redemptions_verification_session_id_guardian_verification_sessions_id_fk",
+          "tableFrom": "guardian_invite_redemptions",
+          "tableTo": "guardian_verification_sessions",
+          "columnsFrom": [
+            "verification_session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_redemption_invite_academy": {
+          "name": "fk_redemption_invite_academy",
+          "tableFrom": "guardian_invite_redemptions",
+          "tableTo": "guardian_invites",
+          "columnsFrom": [
+            "invite_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_redemption_participant_academy": {
+          "name": "fk_redemption_participant_academy",
+          "tableFrom": "guardian_invite_redemptions",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "participant_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.guardian_invites": {
+      "name": "guardian_invites",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "participant_id": {
+          "name": "participant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "intended_phone": {
+          "name": "intended_phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "allowed_scopes": {
+          "name": "allowed_scopes",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "ARRAY['VIEW_SCHEDULE','VIEW_ATTENDANCE']::text[]"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "max_uses": {
+          "name": "max_uses",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "used_count": {
+          "name": "used_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "uq_invite_code_hash": {
+          "name": "uq_invite_code_hash",
+          "columns": [
+            {
+              "expression": "code_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_invite_id_academy": {
+          "name": "uq_invite_id_academy",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_invite_participant": {
+          "name": "ix_invite_participant",
+          "columns": [
+            {
+              "expression": "participant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "guardian_invites_academy_id_academies_id_fk": {
+          "name": "guardian_invites_academy_id_academies_id_fk",
+          "tableFrom": "guardian_invites",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "guardian_invites_participant_id_participants_id_fk": {
+          "name": "guardian_invites_participant_id_participants_id_fk",
+          "tableFrom": "guardian_invites",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "participant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_invite_participant_academy": {
+          "name": "fk_invite_participant_academy",
+          "tableFrom": "guardian_invites",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "participant_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_invite_max_uses": {
+          "name": "ck_invite_max_uses",
+          "value": "\"guardian_invites\".\"max_uses\" >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.guardian_participant_links": {
+      "name": "guardian_participant_links",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guardian_id": {
+          "name": "guardian_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "participant_id": {
+          "name": "participant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "relationship_type": {
+          "name": "relationship_type",
+          "type": "relationship_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_primary_guardian": {
+          "name": "is_primary_guardian",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verification_status": {
+          "name": "verification_status",
+          "type": "verification_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "can_view_schedule": {
+          "name": "can_view_schedule",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "can_view_attendance": {
+          "name": "can_view_attendance",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "can_view_health_info": {
+          "name": "can_view_health_info",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "can_receive_photos": {
+          "name": "can_receive_photos",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "can_pay": {
+          "name": "can_pay",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "can_request_refund": {
+          "name": "can_request_refund",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_by_user_id": {
+          "name": "revoked_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revocation_reason_code": {
+          "name": "revocation_reason_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "uq_guardian_link": {
+          "name": "uq_guardian_link",
+          "columns": [
+            {
+              "expression": "guardian_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "participant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_link_participant": {
+          "name": "ix_link_participant",
+          "columns": [
+            {
+              "expression": "participant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_link_guardian": {
+          "name": "ix_link_guardian",
+          "columns": [
+            {
+              "expression": "guardian_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_primary_guardian_per_participant": {
+          "name": "uq_primary_guardian_per_participant",
+          "columns": [
+            {
+              "expression": "participant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"guardian_participant_links\".\"is_primary_guardian\" = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "guardian_participant_links_guardian_id_guardians_id_fk": {
+          "name": "guardian_participant_links_guardian_id_guardians_id_fk",
+          "tableFrom": "guardian_participant_links",
+          "tableTo": "guardians",
+          "columnsFrom": [
+            "guardian_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "guardian_participant_links_participant_id_participants_id_fk": {
+          "name": "guardian_participant_links_participant_id_participants_id_fk",
+          "tableFrom": "guardian_participant_links",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "participant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "guardian_participant_links_academy_id_academies_id_fk": {
+          "name": "guardian_participant_links_academy_id_academies_id_fk",
+          "tableFrom": "guardian_participant_links",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_link_participant_academy": {
+          "name": "fk_link_participant_academy",
+          "tableFrom": "guardian_participant_links",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "participant_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.guardian_verification_sessions": {
+      "name": "guardian_verification_sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "issued_to_user_id": {
+          "name": "issued_to_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verified_phone": {
+          "name": "verified_phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_at": {
+          "name": "consumed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "consumed_by_link_id": {
+          "name": "consumed_by_link_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ix_gvs_user": {
+          "name": "ix_gvs_user",
+          "columns": [
+            {
+              "expression": "issued_to_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_gvs_expiry": {
+          "name": "ix_gvs_expiry",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "guardian_verification_sessions_issued_to_user_id_users_id_fk": {
+          "name": "guardian_verification_sessions_issued_to_user_id_users_id_fk",
+          "tableFrom": "guardian_verification_sessions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "issued_to_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.guardians": {
+      "name": "guardians",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "uq_guardian_user": {
+          "name": "uq_guardian_user",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "guardians_user_id_users_id_fk": {
+          "name": "guardians_user_id_users_id_fk",
+          "tableFrom": "guardians",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.idempotency_records": {
+      "name": "idempotency_records",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operation": {
+          "name": "operation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource_id": {
+          "name": "resource_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response_status": {
+          "name": "response_status",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "uq_idem_scope": {
+          "name": "uq_idem_scope",
+          "columns": [
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "actor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "operation",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_idem_expiry": {
+          "name": "ix_idem_expiry",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.invoice_lines": {
+      "name": "invoice_lines",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "invoice_id": {
+          "name": "invoice_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "invoice_line_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "ix_line_invoice": {
+          "name": "ix_line_invoice",
+          "columns": [
+            {
+              "expression": "invoice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "invoice_lines_invoice_id_invoices_id_fk": {
+          "name": "invoice_lines_invoice_id_invoices_id_fk",
+          "tableFrom": "invoice_lines",
+          "tableTo": "invoices",
+          "columnsFrom": [
+            "invoice_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_line_amount_range": {
+          "name": "ck_line_amount_range",
+          "value": "\"invoice_lines\".\"amount\" BETWEEN -100000000 AND 100000000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.invoices": {
+      "name": "invoices",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "participant_id": {
+          "name": "participant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "billing_period_id": {
+          "name": "billing_period_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "invoice_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total": {
+          "name": "total",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "due_date": {
+          "name": "due_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "ix_invoice_participant": {
+          "name": "ix_invoice_participant",
+          "columns": [
+            {
+              "expression": "participant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_invoice_academy_status": {
+          "name": "ix_invoice_academy_status",
+          "columns": [
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_invoice_id_academy": {
+          "name": "uq_invoice_id_academy",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_invoice_id_participant": {
+          "name": "uq_invoice_id_participant",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "participant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "invoices_academy_id_academies_id_fk": {
+          "name": "invoices_academy_id_academies_id_fk",
+          "tableFrom": "invoices",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "invoices_participant_id_participants_id_fk": {
+          "name": "invoices_participant_id_participants_id_fk",
+          "tableFrom": "invoices",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "participant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "invoices_billing_period_id_billing_periods_id_fk": {
+          "name": "invoices_billing_period_id_billing_periods_id_fk",
+          "tableFrom": "invoices",
+          "tableTo": "billing_periods",
+          "columnsFrom": [
+            "billing_period_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_invoice_participant_academy": {
+          "name": "fk_invoice_participant_academy",
+          "tableFrom": "invoices",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "participant_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_invoice_bp_academy": {
+          "name": "fk_invoice_bp_academy",
+          "tableFrom": "invoices",
+          "tableTo": "billing_periods",
+          "columnsFrom": [
+            "billing_period_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_invoice_total_positive": {
+          "name": "ck_invoice_total_positive",
+          "value": "\"invoices\".\"total\" > 0"
+        },
+        "ck_invoice_total_max": {
+          "name": "ck_invoice_total_max",
+          "value": "\"invoices\".\"total\" <= 100000000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.oauth_authorization_requests": {
+      "name": "oauth_authorization_requests",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "oauth_provider",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state_hash": {
+          "name": "state_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code_verifier": {
+          "name": "code_verifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nonce": {
+          "name": "nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "redirect_uri": {
+          "name": "redirect_uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_at": {
+          "name": "consumed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "uq_oauth_state": {
+          "name": "uq_oauth_state",
+          "columns": [
+            {
+              "expression": "state_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_oauth_expiry": {
+          "name": "ix_oauth_expiry",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.outbox_events": {
+      "name": "outbox_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "schema_version": {
+          "name": "schema_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {
+        "ix_outbox_unpublished": {
+          "name": "ix_outbox_unpublished",
+          "columns": [
+            {
+              "expression": "published_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.participants": {
+      "name": "participants",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "birth": {
+          "name": "birth",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "age_label": {
+          "name": "age_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "ix_participant_academy": {
+          "name": "ix_participant_academy",
+          "columns": [
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_participant_id_academy": {
+          "name": "uq_participant_id_academy",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "participants_academy_id_academies_id_fk": {
+          "name": "participants_academy_id_academies_id_fk",
+          "tableFrom": "participants",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.payment_allocations": {
+      "name": "payment_allocations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "payment_id": {
+          "name": "payment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invoice_id": {
+          "name": "invoice_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "uq_alloc_payment_invoice": {
+          "name": "uq_alloc_payment_invoice",
+          "columns": [
+            {
+              "expression": "payment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "invoice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_alloc_invoice": {
+          "name": "ix_alloc_invoice",
+          "columns": [
+            {
+              "expression": "invoice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_alloc_id_invoice": {
+          "name": "uq_alloc_id_invoice",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "invoice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_alloc_id_payment": {
+          "name": "uq_alloc_id_payment",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "payment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "payment_allocations_payment_id_payments_id_fk": {
+          "name": "payment_allocations_payment_id_payments_id_fk",
+          "tableFrom": "payment_allocations",
+          "tableTo": "payments",
+          "columnsFrom": [
+            "payment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "payment_allocations_invoice_id_invoices_id_fk": {
+          "name": "payment_allocations_invoice_id_invoices_id_fk",
+          "tableFrom": "payment_allocations",
+          "tableTo": "invoices",
+          "columnsFrom": [
+            "invoice_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "payment_allocations_academy_id_academies_id_fk": {
+          "name": "payment_allocations_academy_id_academies_id_fk",
+          "tableFrom": "payment_allocations",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_alloc_payment_academy": {
+          "name": "fk_alloc_payment_academy",
+          "tableFrom": "payment_allocations",
+          "tableTo": "payments",
+          "columnsFrom": [
+            "payment_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_alloc_invoice_academy": {
+          "name": "fk_alloc_invoice_academy",
+          "tableFrom": "payment_allocations",
+          "tableTo": "invoices",
+          "columnsFrom": [
+            "invoice_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_alloc_amount_positive": {
+          "name": "ck_alloc_amount_positive",
+          "value": "\"payment_allocations\".\"amount\" > 0"
+        },
+        "ck_alloc_amount_max": {
+          "name": "ck_alloc_amount_max",
+          "value": "\"payment_allocations\".\"amount\" <= 100000000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payments": {
+      "name": "payments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "guardian_id": {
+          "name": "guardian_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "payment_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_payment_id": {
+          "name": "provider_payment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_event_at": {
+          "name": "last_event_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempt_expires_at": {
+          "name": "attempt_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "uq_payment_idem": {
+          "name": "uq_payment_idem",
+          "columns": [
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "guardian_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_payment_provider_id": {
+          "name": "uq_payment_provider_id",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_payment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_payment_id_academy": {
+          "name": "uq_payment_id_academy",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_payment_provider": {
+          "name": "ix_payment_provider",
+          "columns": [
+            {
+              "expression": "provider_payment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "payments_academy_id_academies_id_fk": {
+          "name": "payments_academy_id_academies_id_fk",
+          "tableFrom": "payments",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "payments_guardian_id_guardians_id_fk": {
+          "name": "payments_guardian_id_guardians_id_fk",
+          "tableFrom": "payments",
+          "tableTo": "guardians",
+          "columnsFrom": [
+            "guardian_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_payment_amount_positive": {
+          "name": "ck_payment_amount_positive",
+          "value": "\"payments\".\"amount\" > 0"
+        },
+        "ck_payment_amount_max": {
+          "name": "ck_payment_amount_max",
+          "value": "\"payments\".\"amount\" <= 100000000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.refund_allocations": {
+      "name": "refund_allocations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "refund_id": {
+          "name": "refund_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_allocation_id": {
+          "name": "payment_allocation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_id": {
+          "name": "payment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invoice_id": {
+          "name": "invoice_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "participant_id": {
+          "name": "participant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "uq_refund_alloc": {
+          "name": "uq_refund_alloc",
+          "columns": [
+            {
+              "expression": "refund_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "payment_allocation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_ra_payment_allocation": {
+          "name": "ix_ra_payment_allocation",
+          "columns": [
+            {
+              "expression": "payment_allocation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "refund_allocations_refund_id_refunds_id_fk": {
+          "name": "refund_allocations_refund_id_refunds_id_fk",
+          "tableFrom": "refund_allocations",
+          "tableTo": "refunds",
+          "columnsFrom": [
+            "refund_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "refund_allocations_payment_allocation_id_payment_allocations_id_fk": {
+          "name": "refund_allocations_payment_allocation_id_payment_allocations_id_fk",
+          "tableFrom": "refund_allocations",
+          "tableTo": "payment_allocations",
+          "columnsFrom": [
+            "payment_allocation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "refund_allocations_academy_id_academies_id_fk": {
+          "name": "refund_allocations_academy_id_academies_id_fk",
+          "tableFrom": "refund_allocations",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_ra_invoice_academy": {
+          "name": "fk_ra_invoice_academy",
+          "tableFrom": "refund_allocations",
+          "tableTo": "invoices",
+          "columnsFrom": [
+            "invoice_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_ra_pa_invoice": {
+          "name": "fk_ra_pa_invoice",
+          "tableFrom": "refund_allocations",
+          "tableTo": "payment_allocations",
+          "columnsFrom": [
+            "payment_allocation_id",
+            "invoice_id"
+          ],
+          "columnsTo": [
+            "id",
+            "invoice_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_ra_pa_payment": {
+          "name": "fk_ra_pa_payment",
+          "tableFrom": "refund_allocations",
+          "tableTo": "payment_allocations",
+          "columnsFrom": [
+            "payment_allocation_id",
+            "payment_id"
+          ],
+          "columnsTo": [
+            "id",
+            "payment_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_ra_refund_payment": {
+          "name": "fk_ra_refund_payment",
+          "tableFrom": "refund_allocations",
+          "tableTo": "refunds",
+          "columnsFrom": [
+            "refund_id",
+            "payment_id"
+          ],
+          "columnsTo": [
+            "id",
+            "payment_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_ra_invoice_participant": {
+          "name": "fk_ra_invoice_participant",
+          "tableFrom": "refund_allocations",
+          "tableTo": "invoices",
+          "columnsFrom": [
+            "invoice_id",
+            "participant_id"
+          ],
+          "columnsTo": [
+            "id",
+            "participant_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_ra_refund_participant_academy": {
+          "name": "fk_ra_refund_participant_academy",
+          "tableFrom": "refund_allocations",
+          "tableTo": "refunds",
+          "columnsFrom": [
+            "refund_id",
+            "participant_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "participant_id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_ra_amount_positive": {
+          "name": "ck_ra_amount_positive",
+          "value": "\"refund_allocations\".\"amount\" > 0"
+        },
+        "ck_ra_amount_max": {
+          "name": "ck_ra_amount_max",
+          "value": "\"refund_allocations\".\"amount\" <= 100000000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.refunds": {
+      "name": "refunds",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_id": {
+          "name": "payment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "participant_id": {
+          "name": "participant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "refund_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason_code": {
+          "name": "reason_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason_text": {
+          "name": "reason_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requested_amount": {
+          "name": "requested_amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "approved_amount": {
+          "name": "approved_amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_amount": {
+          "name": "completed_amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requested_by_user_id": {
+          "name": "requested_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requested_at": {
+          "name": "requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "guardian_approved_by_user_id": {
+          "name": "guardian_approved_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "guardian_approved_at": {
+          "name": "guardian_approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "academy_approved_by_user_id": {
+          "name": "academy_approved_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "academy_approved_at": {
+          "name": "academy_approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_refund_id": {
+          "name": "provider_refund_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_event_at": {
+          "name": "last_event_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "uq_refund_idem": {
+          "name": "uq_refund_idem",
+          "columns": [
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "requested_by_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_refund_id_academy": {
+          "name": "uq_refund_id_academy",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_refund_id_payment": {
+          "name": "uq_refund_id_payment",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "payment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_refund_id_participant_academy": {
+          "name": "uq_refund_id_participant_academy",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "participant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_refund_payment": {
+          "name": "ix_refund_payment",
+          "columns": [
+            {
+              "expression": "payment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "refunds_academy_id_academies_id_fk": {
+          "name": "refunds_academy_id_academies_id_fk",
+          "tableFrom": "refunds",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "refunds_requested_by_user_id_users_id_fk": {
+          "name": "refunds_requested_by_user_id_users_id_fk",
+          "tableFrom": "refunds",
+          "tableTo": "users",
+          "columnsFrom": [
+            "requested_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_refund_payment_academy": {
+          "name": "fk_refund_payment_academy",
+          "tableFrom": "refunds",
+          "tableTo": "payments",
+          "columnsFrom": [
+            "payment_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_refund_participant_academy": {
+          "name": "fk_refund_participant_academy",
+          "tableFrom": "refunds",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "participant_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_refund_requested_positive": {
+          "name": "ck_refund_requested_positive",
+          "value": "\"refunds\".\"requested_amount\" > 0"
+        },
+        "ck_refund_requested_max": {
+          "name": "ck_refund_requested_max",
+          "value": "\"refunds\".\"requested_amount\" <= 100000000"
+        },
+        "ck_refund_no_partial_approval": {
+          "name": "ck_refund_no_partial_approval",
+          "value": "\"refunds\".\"approved_amount\" IS NULL OR \"refunds\".\"approved_amount\" = \"refunds\".\"requested_amount\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.registered_guardian_contacts": {
+      "name": "registered_guardian_contacts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "academy_id": {
+          "name": "academy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "participant_id": {
+          "name": "participant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "relationship_type": {
+          "name": "relationship_type",
+          "type": "relationship_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "ix_rgc_participant": {
+          "name": "ix_rgc_participant",
+          "columns": [
+            {
+              "expression": "participant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_rgc_phone": {
+          "name": "ix_rgc_phone",
+          "columns": [
+            {
+              "expression": "academy_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "phone",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "registered_guardian_contacts_academy_id_academies_id_fk": {
+          "name": "registered_guardian_contacts_academy_id_academies_id_fk",
+          "tableFrom": "registered_guardian_contacts",
+          "tableTo": "academies",
+          "columnsFrom": [
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "registered_guardian_contacts_participant_id_participants_id_fk": {
+          "name": "registered_guardian_contacts_participant_id_participants_id_fk",
+          "tableFrom": "registered_guardian_contacts",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "participant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "fk_rgc_participant_academy": {
+          "name": "fk_rgc_participant_academy",
+          "tableFrom": "registered_guardian_contacts",
+          "tableTo": "participants",
+          "columnsFrom": [
+            "participant_id",
+            "academy_id"
+          ],
+          "columnsTo": [
+            "id",
+            "academy_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sessions": {
+      "name": "sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "issued_at": {
+          "name": "issued_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rotated_from_id": {
+          "name": "rotated_from_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip": {
+          "name": "ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_agent": {
+          "name": "user_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "uq_session_token_hash": {
+          "name": "uq_session_token_hash",
+          "columns": [
+            {
+              "expression": "token_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_session_expiry": {
+          "name": "ix_session_expiry",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_session_user_active": {
+          "name": "ix_session_user_active",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "revoked_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sessions_user_id_users_id_fk": {
+          "name": "sessions_user_id_users_id_fk",
+          "tableFrom": "sessions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.webhook_inbox": {
+      "name": "webhook_inbox",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_event_id": {
+          "name": "provider_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "processed_at": {
+          "name": "processed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision": {
+          "name": "decision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'RECEIVED'"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_retry_at": {
+          "name": "next_retry_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "uq_webhook_event": {
+          "name": "uq_webhook_event",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_inbox_reconcile_queue": {
+          "name": "ix_inbox_reconcile_queue",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "next_retry_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.chat_category": {
+      "name": "chat_category",
+      "schema": "public",
+      "values": [
+        "GENERAL",
+        "BILLING",
+        "HEALTH"
+      ]
+    },
+    "public.chat_message_kind": {
+      "name": "chat_message_kind",
+      "schema": "public",
+      "values": [
+        "NORMAL_CHAT",
+        "NOTICE",
+        "ACK_REQUIRED",
+        "URGENT_ACK_REQUIRED",
+        "OPERATIONAL_TASK"
+      ]
+    },
+    "public.chat_message_status": {
+      "name": "chat_message_status",
+      "schema": "public",
+      "values": [
+        "SENT",
+        "DELIVERED",
+        "READ",
+        "ACKNOWLEDGED",
+        "RESOLVED",
+        "CANCELLED",
+        "EXPIRED"
+      ]
+    },
+    "public.chat_room_type": {
+      "name": "chat_room_type",
+      "schema": "public",
+      "values": [
+        "OWNER_COACH_DM",
+        "COACH_ALL",
+        "CLASS_COACHES",
+        "GUARDIAN_DM",
+        "CLASS_GUARDIANS",
+        "ACADEMY_NOTICE"
+      ]
+    },
+    "public.invoice_line_type": {
+      "name": "invoice_line_type",
+      "schema": "public",
+      "values": [
+        "TUITION",
+        "VEHICLE",
+        "DISCOUNT",
+        "OTHER"
+      ]
+    },
+    "public.invoice_status": {
+      "name": "invoice_status",
+      "schema": "public",
+      "values": [
+        "DRAFT",
+        "ISSUED",
+        "PARTIALLY_PAID",
+        "PAID",
+        "OVERDUE",
+        "VOID",
+        "REFUNDED"
+      ]
+    },
+    "public.membership_status": {
+      "name": "membership_status",
+      "schema": "public",
+      "values": [
+        "INVITED",
+        "ACTIVE",
+        "SUSPENDED",
+        "ENDED"
+      ]
+    },
+    "public.oauth_provider": {
+      "name": "oauth_provider",
+      "schema": "public",
+      "values": [
+        "kakao",
+        "naver",
+        "google",
+        "apple"
+      ]
+    },
+    "public.payment_status": {
+      "name": "payment_status",
+      "schema": "public",
+      "values": [
+        "PENDING",
+        "AUTHORIZED",
+        "CAPTURED",
+        "FAILED",
+        "CANCELLED",
+        "PARTIALLY_REFUNDED",
+        "REFUNDED"
+      ]
+    },
+    "public.refund_status": {
+      "name": "refund_status",
+      "schema": "public",
+      "values": [
+        "REQUESTED",
+        "MUTUALLY_APPROVED",
+        "PROCESSING",
+        "COMPLETED",
+        "FAILED",
+        "UNKNOWN",
+        "REJECTED"
+      ]
+    },
+    "public.relationship_type": {
+      "name": "relationship_type",
+      "schema": "public",
+      "values": [
+        "MOTHER",
+        "FATHER",
+        "GRANDPARENT",
+        "LEGAL_GUARDIAN",
+        "OTHER"
+      ]
+    },
+    "public.role": {
+      "name": "role",
+      "schema": "public",
+      "values": [
+        "OWNER",
+        "MANAGER",
+        "COACH",
+        "DESK",
+        "DRIVER",
+        "GUARDIAN",
+        "PLATFORM_ADMIN"
+      ]
+    },
+    "public.verification_status": {
+      "name": "verification_status",
+      "schema": "public",
+      "values": [
+        "UNVERIFIED",
+        "PENDING",
+        "VERIFIED",
+        "REJECTED",
+        "REVOKED"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

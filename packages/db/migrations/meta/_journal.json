@@ -85,6 +85,13 @@
       "when": 1784338125017,
       "tag": "0011_chat-idem",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784338733292,
+      "tag": "0012_link-revocation",
+      "breakpoints": true
     }
   ]
 }

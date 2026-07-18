@@ -22,7 +22,7 @@ export const oauthProviderEnum = pgEnum("oauth_provider", ["kakao", "naver", "go
 export const roleEnum = pgEnum("role", ["OWNER", "MANAGER", "COACH", "DESK", "DRIVER", "GUARDIAN", "PLATFORM_ADMIN"]);
 export const membershipStatusEnum = pgEnum("membership_status", ["INVITED", "ACTIVE", "SUSPENDED", "ENDED"]);
 export const relationshipTypeEnum = pgEnum("relationship_type", ["MOTHER", "FATHER", "GRANDPARENT", "LEGAL_GUARDIAN", "OTHER"]);
-export const verificationStatusEnum = pgEnum("verification_status", ["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED"]);
+export const verificationStatusEnum = pgEnum("verification_status", ["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED", "REVOKED"]);
 export const invoiceStatusEnum = pgEnum("invoice_status", ["DRAFT", "ISSUED", "PARTIALLY_PAID", "PAID", "OVERDUE", "VOID", "REFUNDED"]);
 export const paymentStatusEnum = pgEnum("payment_status", ["PENDING", "AUTHORIZED", "CAPTURED", "FAILED", "CANCELLED", "PARTIALLY_REFUNDED", "REFUNDED"]);
 export const invoiceLineTypeEnum = pgEnum("invoice_line_type", ["TUITION", "VEHICLE", "DISCOUNT", "OTHER"]);
@@ -237,6 +237,10 @@ export const guardianParticipantLinks = pgTable("guardian_participant_links", {
   canReceivePhotos: boolean("can_receive_photos").notNull(),
   canPay: boolean("can_pay").notNull(),
   canRequestRefund: boolean("can_request_refund").notNull(),
+  /* 13차 D P0-2: 철회 이력 — REVOKED(사후 철회)와 REJECTED(신청 거절)를 구분 */
+  revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+  revokedByUserId: text("revoked_by_user_id"),
+  revocationReasonCode: text("revocation_reason_code"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
   version: version(),
