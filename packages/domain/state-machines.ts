@@ -129,5 +129,11 @@ export function canApplyRefundApproval(
   if (otherSideApprover && otherSideApprover === approverUserId) {
     return deny("동일 사용자가 양측을 승인할 수 없음");
   }
+  /* 13차 D P1-2 가 실 PG ×20 경쟁으로 적발한 결함: 같은 측 재승인이
+     전부 통과 — 덮어쓰기·감사 중복·version 폭증. 승인은 측당 정확히 1회. */
+  const sameSideApprovedAt = side === "GUARDIAN" ? r.guardianApprovedAt : r.academyApprovedAt;
+  if (sameSideApprovedAt) {
+    return deny("이미 승인된 측 — 중복 승인 불가");
+  }
   return ok;
 }
