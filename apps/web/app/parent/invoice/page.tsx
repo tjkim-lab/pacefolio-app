@@ -5,10 +5,68 @@ import { useRouter } from "next/navigation";
 import { AppScroll } from "@/components/mobile/MobileShell";
 import { cn } from "@/components/ui";
 import { useParent } from "../_state";
+import { useLive, LiveBadge } from "../_live";
 import { NoteRow, PushHeader } from "../_components";
 import { won, type ChildName } from "../_data";
 
 export default function InvoicePage() {
+  const live = useLive();
+  if (live.live) return <LiveInvoicePage />;
+  return <FixtureInvoicePage />;
+}
+
+/* ── Gate 2: 실 API 청구서 — 금액·상태·구성 전부 서버 정본 ── */
+function LiveInvoicePage() {
+  const live = useLive();
+  const router = useRouter();
+  return (
+    <>
+      <PushHeader title="9~11월 청구서" sub={`실 DB ${live.invoices.length}건`} />
+      <LiveBadge />
+      <AppScroll>
+        <div className="rounded-2xl border border-line overflow-hidden bg-surface">
+          <div className="bg-side text-white p-4">
+            <div className="text-[11px] font-semibold opacity-75">원더짐 아카데미 · 9~11월 수강료</div>
+            <h3 className="text-[17px] font-extrabold mt-1.5">
+              {live.invoices.map((i) => i.participantName.slice(1)).join("·")} 합산 결제
+            </h3>
+            <div className="text-[12px] opacity-80 font-medium mt-0.5">청구 {live.invoices.length}건 · 서버가 계산한 정본 금액</div>
+          </div>
+          <div className="px-4 pb-3">
+            {live.invoices.map((iv) => (
+              <div key={iv.invoiceId}>
+                <Sub>{iv.participantName} 청구 {iv.status === "PAID" ? "· 완납 ✓" : iv.status === "REFUNDED" ? "· 환불됨" : ""}</Sub>
+                {iv.lines.map((l) => (
+                  <Line key={l.label} label={l.label} small={l.type === "DISCOUNT" ? "할인" : "수업기간 9/1~11/30"}
+                    amt={`${l.amount < 0 ? "−" : l.type === "VEHICLE" ? "+" : ""}${Math.abs(l.amount).toLocaleString()}`}
+                    disc={l.amount < 0} />
+                ))}
+                <InvSel
+                  name={iv.participantName.slice(1)}
+                  amt={iv.total.toLocaleString()}
+                  paid={iv.status !== "ISSUED"}
+                  sel={!!live.sel[iv.invoiceId]}
+                  onToggle={() => iv.status === "ISSUED" && live.toggle(iv.invoiceId)}
+                />
+              </div>
+            ))}
+            <div className="flex justify-between items-center py-3.5 border-t border-line">
+              <span className="text-[15px] font-bold text-ink">선택 결제액 <small className="text-[11.5px] font-medium text-ink3">체크한 원생만 결제</small></span>
+              <span className="text-[20px] font-extrabold tracking-tight text-ink">{won(live.selAmount)}</span>
+            </div>
+          </div>
+        </div>
+        <button onClick={() => router.push("/parent/pay")} disabled={live.selAmount === 0}
+          className="w-full rounded-xl bg-accent-strong text-white text-[15px] font-bold py-3.5 disabled:opacity-50">
+          결제하러 가기
+        </button>
+        <NoteRow icon="bulb">이 화면은 <b className="text-ink">실 API 정본</b>이에요 — 결제·환불이 서버 정산에 즉시 반영돼요. 청구는 원생별, 형제는 합산 결제.</NoteRow>
+      </AppScroll>
+    </>
+  );
+}
+
+function FixtureInvoicePage() {
   const { st, isPaid, selAmt, dispatch, toast } = useParent();
   const router = useRouter();
   const [open, setOpen] = useState(false);
