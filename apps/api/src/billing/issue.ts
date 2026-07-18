@@ -106,6 +106,105 @@ export async function createInvoice(db: Db, input: {
   });
 }
 
+/** #41: 반 단위 일괄 초안 — ACTIVE 배정 전수. 같은 기간에 비-VOID 청구가 이미
+    있는 원생은 건너뜀("이미 발송된 원생 자동 제외"의 서버 정본). 할인·일할 등
+    개별 조정은 초안 상태에서 원생별 청구서로(일괄은 기본 수강료 1라인만). */
+export async function bulkCreateClassDrafts(db: Db, input: {
+  actorUserId: string; actorRoles: readonly string[]; academyId: string;
+  classId: string; billingPeriodId: string; dueDate: string; baseFee: number;
+}, nowISO: string): Promise<
+  | { kind: "OK"; created: number; skipped: number; invoiceIds: string[] }
+  | { kind: "FORBIDDEN"; reason: string } | { kind: "INVALID"; reason: string }> {
+  if (!isStaff(input.actorRoles)) return { kind: "FORBIDDEN", reason: "일괄 청구는 원장·데스크만" };
+  if (!isValidLineAmountForType("TUITION", input.baseFee)) {
+    return { kind: "INVALID", reason: `수강료 금액 정책 위반(${input.baseFee})` };
+  }
+  return db.transaction(async (tx) => {
+    const cls = (await tx.select({ id: s.dbClasses.id }).from(s.dbClasses).where(and(
+      eq(s.dbClasses.id, input.classId), eq(s.dbClasses.academyId, input.academyId),
+    )))[0];
+    if (!cls) return { kind: "INVALID" as const, reason: "반 없음(학원 불일치 포함)" };
+    const bp = (await tx.select({ id: s.billingPeriods.id }).from(s.billingPeriods).where(and(
+      eq(s.billingPeriods.id, input.billingPeriodId), eq(s.billingPeriods.academyId, input.academyId),
+    )))[0];
+    if (!bp) return { kind: "INVALID" as const, reason: "수납 기간 없음(학원 불일치 포함)" };
+    const ens = await tx.select().from(s.dbEnrollments).where(and(
+      eq(s.dbEnrollments.classId, input.classId),
+      eq(s.dbEnrollments.academyId, input.academyId),
+      eq(s.dbEnrollments.status, "ACTIVE"),
+    ));
+    if (ens.length === 0) return { kind: "OK" as const, created: 0, skipped: 0, invoiceIds: [] };
+    const existing = await tx.select({ participantId: s.invoices.participantId }).from(s.invoices).where(and(
+      eq(s.invoices.billingPeriodId, input.billingPeriodId),
+      inArray(s.invoices.participantId, ens.map((e) => e.participantId)),
+      sql`${s.invoices.status} <> 'VOID'`,
+    ));
+    const has = new Set(existing.map((x) => x.participantId));
+    const invoiceIds: string[] = [];
+    for (const en of ens) {
+      if (has.has(en.participantId)) continue;
+      const invoiceId = newId("inv");
+      await tx.insert(s.invoices).values({
+        id: invoiceId, academyId: input.academyId, participantId: en.participantId,
+        enrollmentId: en.id, billingPeriodId: input.billingPeriodId,
+        status: "DRAFT", total: input.baseFee, dueDate: input.dueDate,
+      });
+      await tx.insert(s.invoiceLines).values({
+        id: newId("il"), invoiceId, type: "TUITION", label: "수강료", amount: input.baseFee,
+      });
+      invoiceIds.push(invoiceId);
+    }
+    await recordAudit(tx, {
+      academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "ACADEMY",
+      action: "invoice.bulk_drafted", targetType: "Class", targetId: input.classId,
+      detail: { billingPeriodId: input.billingPeriodId, created: invoiceIds.length, skipped: has.size, baseFee: input.baseFee },
+      success: true,
+    }, nowISO);
+    return { kind: "OK" as const, created: invoiceIds.length, skipped: has.size, invoiceIds };
+  });
+}
+
+/** #41: 일괄 발행 — 이 반 ACTIVE 배정 원생의 해당 기간 DRAFT 전부 ISSUED.
+    원생별 outbox INVOICE_ISSUED(알림 트랙) 유지 — 단건 발행과 같은 계약. */
+export async function bulkIssueClassDrafts(db: Db, input: {
+  actorUserId: string; actorRoles: readonly string[]; academyId: string;
+  classId: string; billingPeriodId: string;
+}, nowISO: string): Promise<
+  | { kind: "OK"; issued: number }
+  | { kind: "FORBIDDEN"; reason: string } | { kind: "INVALID"; reason: string }> {
+  if (!isStaff(input.actorRoles)) return { kind: "FORBIDDEN", reason: "일괄 발행은 원장·데스크만" };
+  return db.transaction(async (tx) => {
+    const ens = await tx.select().from(s.dbEnrollments).where(and(
+      eq(s.dbEnrollments.classId, input.classId),
+      eq(s.dbEnrollments.academyId, input.academyId),
+      eq(s.dbEnrollments.status, "ACTIVE"),
+    ));
+    if (ens.length === 0) return { kind: "OK" as const, issued: 0 };
+    const drafts = await tx.select().from(s.invoices).where(and(
+      eq(s.invoices.academyId, input.academyId),
+      eq(s.invoices.billingPeriodId, input.billingPeriodId),
+      inArray(s.invoices.participantId, ens.map((e) => e.participantId)),
+      eq(s.invoices.status, "DRAFT"),
+    )).for("update");
+    if (drafts.length === 0) return { kind: "OK" as const, issued: 0 }; // 멱등 — 이미 전부 발행됨
+    await tx.update(s.invoices).set({ status: "ISSUED" })
+      .where(inArray(s.invoices.id, drafts.map((d) => d.id)));
+    for (const d of drafts) {
+      await recordOutbox(tx, {
+        academyId: input.academyId, eventType: "INVOICE_ISSUED",
+        payload: { invoiceId: d.id, participantId: d.participantId, total: d.total, dueDate: d.dueDate },
+      }, nowISO);
+    }
+    await recordAudit(tx, {
+      academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "ACADEMY",
+      action: "invoice.bulk_issued", targetType: "Class", targetId: input.classId,
+      detail: { billingPeriodId: input.billingPeriodId, issued: drafts.length },
+      success: true,
+    }, nowISO);
+    return { kind: "OK" as const, issued: drafts.length };
+  });
+}
+
 /** 발행(DRAFT→ISSUED) — 이때부터 보호자에게 보인다(11.6 DRAFT 비노출과 짝) */
 export async function issueInvoice(db: Db, input: {
   actorUserId: string; actorRoles: readonly string[]; academyId: string; invoiceId: string;

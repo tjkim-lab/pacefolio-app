@@ -234,6 +234,31 @@ paths:
       responses:
         '201': { description: '{ billingPeriodId, periodStart, periodEnd } — 기존 행 반환 시에도 동일 형식' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /academies/{academyId}/classes/{classId}/bulk-invoice-drafts:
+    post:
+      tags: [billing]
+      summary: >
+        반 단위 일괄 청구 초안 — ACTIVE 배정 전수에 기본 수강료 1라인 DRAFT 생성.
+        같은 기간 비-VOID 청구 보유 원생은 자동 제외(skipped). staff 전용. (구현됨 #41)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: classId, in: path, required: true, schema: { type: string } }
+      responses:
+        '201': { description: '{ created, skipped, invoiceIds[] }' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: 반/기간 귀속 불일치·금액 정책 위반 }
+  /academies/{academyId}/classes/{classId}/bulk-invoice-issue:
+    post:
+      tags: [billing]
+      summary: >
+        반 단위 일괄 발행 — 이 반 ACTIVE 배정 원생의 해당 기간 DRAFT 전부 ISSUED.
+        원생별 outbox INVOICE_ISSUED 등록(단건 발행과 같은 계약)·재호출 = 0건 멱등. staff 전용. (구현됨 #41)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: classId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{ issued }' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /academies/{academyId}/invoices:
     post:
       tags: [billing]
@@ -1111,7 +1136,7 @@ paths:
       responses:
         '201': { description: batchId·요약(total/valid/invalid/withDuplicates·reuploadOfCommitted) }
         '422': { description: 이름 열 미발견·행 수 초과 }
-    get: { tags: [program-studio], summary: 가져오기 배치 목록, responses: { '200': { description: batches[] } } }
+    get: { tags: [program-studio], summary: 가져오기 배치 목록, responses: { '200': { description: 'batches[]' } } }
   /academies/{academyId}/imports/{batchId}:
     parameters:
       - { $ref: '#/components/parameters/AcademyId' }
@@ -1147,6 +1172,58 @@ paths:
       tags: [program-studio]
       summary: 되돌리기 — batch 가 만든 활동을 보관(archive) 처리(삭제 아님·멱등)
       responses: { '200': { description: archived 수 }, '422': { description: 커밋 전 배치 } }
+
+  # ── 프로그램 실행 PS4 (docs/20 §2 · 지시서 §6.6~6.8) — 반 적용·오늘 계획·
+  #    결과 확정(참석 기본 반영+예외 수정)·경험 이벤트(append-only·UNIQUE 중복 차단).
+  /academies/{academyId}/classes/{classId}/program-assignments:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: classId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [program-execution]
+      summary: 반에 프로그램 적용 — PUBLISHED 버전만·같은 버전 ACTIVE 중복 금지·outbox CLASS_PROGRAM_ASSIGNED
+      responses:
+        '201': { description: assignmentId }
+        '422': { description: 게시 안 된 버전·중복 적용·반 없음 }
+  /academies/{academyId}/program-assignments/{assignmentId}/end:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: assignmentId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [program-execution]
+      summary: 적용 종료(멱등) — effectiveTo 기록
+      responses: { '200': { description: 종료됨 } }
+  /academies/{academyId}/sessions/{sessionId}/plan:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: sessionId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [program-execution]
+      summary: 오늘 수업 계획 — 다음 회차 제안·활동 목록·결과 상태(담당 코치/스태프)
+      responses: { '200': { description: 'plans[]' }, '403': { description: 비담당 코치 } }
+    post:
+      tags: [program-execution]
+      summary: 계획 확정 — 회차 미지정 시 다음 회차 자동(UNIQUE 멱등)
+      responses: { '201': { description: planId·curriculumSessionId } }
+  /academies/{academyId}/session-plans/{planId}/results:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: planId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [program-execution]
+      summary: 결과 확정 — 완료/부분/미진행/대체 + 참석 기본 반영(출결)·예외 원생 수정 → 경험 이벤트 생성(중복 0)
+      responses:
+        '200': { description: resultsSaved·participants·experienceEvents }
+        '403': { description: 비담당 코치 }
+        '422': { description: 개정판 없음·REPLACED 대체 누락 }
+  /academies/{academyId}/participants/{participantId}/experience-map:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: participantId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [program-execution]
+      summary: 경험지도 — 영역별 경험 횟수·서로 다른 활동 수·최근성(능력 점수 아님·순위 없음)
+      responses: { '200': { description: 'domains[]' }, '404': { description: 원생 없음(교차 테넌트 포함) } }
 
 components:
   securitySchemes:

@@ -43,6 +43,11 @@ interface OwnerLiveCtx {
     participantId: string; periodStart: string; periodEnd: string; dueDate: string;
     lines: { type: string; label: string; amount: number }[];
   }) => Promise<{ ok: boolean; message: string; invoiceId?: string; total?: number }>;
+  /* #41: 그룹(반) 일괄 — 초안 전수 생성(검토) → 일괄 발행(확정·발송) */
+  bulkDrafts: (classId: string, input: { periodStart: string; periodEnd: string; dueDate: string; baseFee: number }) =>
+    Promise<{ ok: boolean; message: string; created?: number; skipped?: number }>;
+  bulkIssue: (classId: string, input: { periodStart: string; periodEnd: string }) =>
+    Promise<{ ok: boolean; message: string; issued?: number }>;
   /* #31: 코치 전달사항 — DM 개설→ACK_REQUIRED 전송, READ/ACK 은 서버 상태 재조회 */
   coaches: CoachMember[];
   sendCoachDirective: (coachUserId: string, body: string, urgent: boolean) =>
@@ -172,6 +177,39 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
     }
   }, [academyId]);
 
+  const bulkDrafts = useCallback(async (classId: string, input: {
+    periodStart: string; periodEnd: string; dueDate: string; baseFee: number;
+  }) => {
+    if (!academyId) return { ok: false, message: "학원 컨텍스트 없음" };
+    try {
+      const bp = await api.createBillingPeriod(academyId, {
+        periodStart: input.periodStart, periodEnd: input.periodEnd, cycleMonths: 3,
+      });
+      const r = await api.bulkInvoiceDrafts(academyId, classId, {
+        billingPeriodId: bp.billingPeriodId, dueDate: input.dueDate, baseFee: input.baseFee,
+      });
+      return {
+        ok: true, created: r.created, skipped: r.skipped,
+        message: `초안 ${r.created}건 생성${r.skipped ? ` · ${r.skipped}명은 기존 청구 있어 제외` : ""} — 확정·발송 가능`,
+      };
+    } catch (e) {
+      return { ok: false, message: e instanceof ApiError ? `초안 생성 실패(${e.status}: ${e.code})` : "초안 생성 실패 — 네트워크 확인" };
+    }
+  }, [academyId]);
+
+  const bulkIssue = useCallback(async (classId: string, input: { periodStart: string; periodEnd: string }) => {
+    if (!academyId) return { ok: false, message: "학원 컨텍스트 없음" };
+    try {
+      const bp = await api.createBillingPeriod(academyId, {
+        periodStart: input.periodStart, periodEnd: input.periodEnd, cycleMonths: 3,
+      });
+      const r = await api.bulkInvoiceIssue(academyId, classId, { billingPeriodId: bp.billingPeriodId });
+      return { ok: true, issued: r.issued, message: `청구서 ${r.issued}건 발행 — 보호자에게 노출 시작(알림 트랙 등록)` };
+    } catch (e) {
+      return { ok: false, message: e instanceof ApiError ? `발행 실패(${e.status}: ${e.code})` : "발행 실패 — 네트워크 확인" };
+    }
+  }, [academyId]);
+
   const createClosure = useCallback(async (body: {
     scope: "ACADEMY" | "CLASS"; classId?: string; dateStart: string; dateEnd: string;
     closureType: string; reason: string; deductSessions: boolean;
@@ -232,7 +270,7 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
     <Ctx.Provider value={{
       state, errorMsg, academyId, notices, summary, publish, classes,
       refreshNotices, refreshSummary, coaches, sendCoachDirective, refreshDirective,
-      createClosure, prorationQuote, participants, saveDraftInvoice,
+      createClosure, prorationQuote, participants, saveDraftInvoice, bulkDrafts, bulkIssue,
     }}>
       {children}
     </Ctx.Provider>

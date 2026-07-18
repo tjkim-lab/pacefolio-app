@@ -183,8 +183,24 @@ function PCPaymentsBody() {
     toast("휴무 등록(데모) — 계산기가 회차를 재계산해요. 확정된 청구서는 자동 변경 없음(수정 청구·차기 이월)");
   };
 
+  /* #41: READY = 그룹(반) 정본은 서버 반 목록 · 검토=일괄 초안 · 확정=일괄 ISSUED */
+  const groups: { id: string; nm: string; days?: string; time?: string; n?: number }[] =
+    ownerLive.state === "READY"
+      ? ownerLive.classes.map((c) => ({ id: c.classId, nm: c.name }))
+      : BILL_GROUPS;
+  const [grpFee, setGrpFee] = useState(160_000);
   const reviewGroup = (id: string) => {
-    const g = BILL_GROUPS.find((x) => x.id === id)!;
+    const g = groups.find((x) => x.id === id)!;
+    if (ownerLive.state === "READY") {
+      const q = quarterRange();
+      void ownerLive.bulkDrafts(id, {
+        periodStart: q.start, periodEnd: q.end, dueDate: q.start, baseFee: grpFee,
+      }).then((r) => {
+        toast(r.message);
+        if (r.ok) setStages((s) => ({ ...s, [id]: "REVIEWED" }));
+      });
+      return;
+    }
     confirm({
       title: `${g.nm} 청구 명단을 검토할까요?`,
       rows: [["대상", `${g.n}명 (${g.days} ${g.time})`], ["할인 적용", "형제·다종목 자동 반영"], ["중간 입회", "일할 초안 포함"], ["이전 미납", "동시 발송 표기"], ["제외", "이미 발송된 원생 자동 제외"]],
@@ -193,7 +209,23 @@ function PCPaymentsBody() {
     });
   };
   const sendGroup = (id: string) => {
-    const g = BILL_GROUPS.find((x) => x.id === id)!;
+    const g = groups.find((x) => x.id === id)!;
+    if (ownerLive.state === "READY") {
+      confirm({
+        title: `${g.nm} 청구를 확정·발송할까요?`,
+        rows: [["대상", "이 반의 검토된 초안 전부"], ["발행", "DRAFT → ISSUED (서버, 감사 기록)"], ["알림", "원생별 INVOICE_ISSUED 이벤트 등록"]],
+        warn: "확정 후 금액 변경은 수정 청구로만 기록됩니다.",
+        label: "확정하고 발송 (SENT)",
+        onConfirm: () => {
+          const q = quarterRange();
+          void ownerLive.bulkIssue(id, { periodStart: q.start, periodEnd: q.end }).then((r) => {
+            toast(r.message);
+            if (r.ok) setStages((s) => ({ ...s, [id]: "SENT" }));
+          });
+        },
+      });
+      return;
+    }
     confirm({
       title: `${g.nm} ${g.n}명에게 청구를 확정·발송할까요?`,
       rows: [["대상 원생", `${g.n}명`], ["발송 채널", "알림톡 우선 · 실패 시 SMS"], ["중복 방지", "(기간·원생·청구 버전) UNIQUE + 멱등키"], ["납부 마감", "11/28 (금)"]],
@@ -384,14 +416,23 @@ function PCPaymentsBody() {
                 <span className="text-[13px] font-extrabold text-ink whitespace-nowrap">{d.amt}</span>
               </div>
             ))}
-            {/* 그룹별 DRAFT → REVIEWED → SENT */}
-            {BILL_GROUPS.map((g) => {
-              const st = stages[g.id];
+            {/* 그룹별 DRAFT → REVIEWED → SENT — READY 는 서버 반 정본(#41) */}
+            {ownerLive.state === "READY" && (
+              <div className="flex items-center gap-2 py-2 border-b border-line2 text-[12px] font-semibold text-ink3">
+                기본 수강료
+                <input type="number" step={10000} min={0} value={grpFee}
+                  onChange={(e) => setGrpFee(Number(e.target.value) || 0)}
+                  className="w-[110px] border border-line rounded-lg px-2 py-1 text-[12px] font-bold text-ink bg-fill tabular-nums" />
+                원 · 할인·일할은 초안에서 원생별 조정
+              </div>
+            )}
+            {groups.map((g) => {
+              const st = stages[g.id] ?? "DRAFT";
               return (
                 <div key={g.id} className="flex items-center gap-2.5 py-2.5 border-b border-line2 last:border-0">
                   <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-bold text-ink">{g.nm} <small className="text-ink3 font-medium">{g.days} {g.time}</small></div>
-                    <div className="text-[11px] text-ink3 font-medium">대상 {g.n}명 · {st === "DRAFT" ? "초안" : st === "REVIEWED" ? "검토 완료" : "발송 완료"}</div>
+                    <div className="text-[13px] font-bold text-ink">{g.nm} {g.days && <small className="text-ink3 font-medium">{g.days} {g.time}</small>}</div>
+                    <div className="text-[11px] text-ink3 font-medium">{g.n != null ? `대상 ${g.n}명` : "대상 = 서버 배정 명단"} · {st === "DRAFT" ? "초안" : st === "REVIEWED" ? "검토 완료" : "발송 완료"}</div>
                   </div>
                   <Pill kind={st === "SENT" ? "ok" : st === "REVIEWED" ? "wait" : "gray"}>{st}</Pill>
                   {st === "DRAFT" && <Button variant="ghost" className="h-9 px-3 text-[12px] shrink-0" onClick={() => reviewGroup(g.id)}>명단 검토</Button>}

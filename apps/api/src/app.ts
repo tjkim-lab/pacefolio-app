@@ -35,10 +35,15 @@ import {
   stageImport, getImportBatch, listImportBatches, updateImportRow, commitImport, revertImport,
 } from "./programs/imports";
 import {
+  assignProgramToClass, endProgramAssignment, getSessionPlan, createSessionPlan,
+  confirmSessionResults, getExperienceMap,
+} from "./programs/execution";
+import {
   recordAttendance, completeSession, listSessionAttendance, createAttendanceNotice,
 } from "./attendance/service";
 import {
   createBillingPeriod, createInvoice, issueInvoice, voidInvoice, recordOfflinePayment,
+  bulkCreateClassDrafts, bulkIssueClassDrafts,
 } from "./billing/issue";
 import { publishNotice, markNoticeRead, listNotices } from "./notices/service";
 import { reportIncident, listIncidents } from "./safety/service";
@@ -605,6 +610,75 @@ export function createApp(cfg: ApiConfig) {
     return studioResult(c, await revertImport(cfg.db, { ...actor(c), batchId: c.req.param("batchId")! }, now()));
   });
 
+  /* ── 프로그램 실행 PS4 — 반 적용·오늘 계획·결과 확정·경험지도 ── */
+  const AssignProgramBody = z.object({
+    programVersionId: z.string().min(1).max(64),
+    programLevelId: z.string().max(64).optional(),
+    effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  }).strict();
+  app.post("/academies/:academyId/classes/:classId/program-assignments", guard, csrf, academyCtx, async (c) => {
+    const p = AssignProgramBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const r = await assignProgramToClass(cfg.db, {
+      ...actor(c), classId: c.req.param("classId")!, ...p.data,
+    }, now());
+    if (r.kind === "ASSIGNED") return c.json(r, 201);
+    return studioResult(c, r);
+  });
+  const EndAssignmentBody = z.object({
+    effectiveTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  }).strict();
+  app.post("/academies/:academyId/program-assignments/:assignmentId/end", guard, csrf, academyCtx, async (c) => {
+    const p = EndAssignmentBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await endProgramAssignment(cfg.db, {
+      ...actor(c), assignmentId: c.req.param("assignmentId")!, ...p.data,
+    }, now()));
+  });
+  app.get("/academies/:academyId/sessions/:sessionId/plan", guard, academyCtx, async (c) => {
+    const r = await getSessionPlan(cfg.db, { ...actor(c), classSessionId: c.req.param("sessionId")! });
+    if (r === null) return c.json({ error: "NOT_FOUND" }, 404);
+    if (r === "FORBIDDEN") return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json(r);
+  });
+  const CreatePlanBody = z.object({
+    assignmentId: z.string().min(1).max(64),
+    curriculumSessionId: z.string().max(64).optional(),
+  }).strict();
+  app.post("/academies/:academyId/sessions/:sessionId/plan", guard, csrf, academyCtx, async (c) => {
+    const p = CreatePlanBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const r = await createSessionPlan(cfg.db, {
+      ...actor(c), classSessionId: c.req.param("sessionId")!, ...p.data,
+    }, now());
+    if (r.kind === "PLANNED") return c.json(r, 201);
+    return studioResult(c, r);
+  });
+  const ConfirmResultsBody = z.object({
+    results: z.array(z.object({
+      activityRevisionId: z.string().min(1).max(64),
+      result: z.enum(["COMPLETED", "PARTIAL", "NOT_DONE", "REPLACED"]),
+      replacementActivityRevisionId: z.string().max(64).optional(),
+      coachNote: z.string().max(1000).optional(),
+    })).min(1).max(50),
+    participantOverrides: z.array(z.object({
+      participantId: z.string().min(1).max(64),
+      participation: z.enum(["FULL", "PARTIAL", "OBSERVED", "NOT_PARTICIPATED"]),
+    })).max(200).optional(),
+  }).strict();
+  app.post("/academies/:academyId/session-plans/:planId/results", guard, csrf, academyCtx, async (c) => {
+    const p = ConfirmResultsBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await confirmSessionResults(cfg.db, {
+      ...actor(c), sessionPlanId: c.req.param("planId")!, ...p.data,
+    }, now()));
+  });
+  app.get("/academies/:academyId/participants/:participantId/experience-map", guard, academyCtx, async (c) => {
+    const r = await getExperienceMap(cfg.db, { ...actor(c), participantId: c.req.param("participantId")! });
+    if (!r) return c.json({ error: "NOT_FOUND" }, 404);
+    return c.json(r);
+  });
+
   /* ── 기본선 3단계(#24): 학원 생성 · 직원 초대 ── */
   const CreateAcademyBody = z.object({
     name: z.string().min(1).max(60),
@@ -692,6 +766,38 @@ export function createApp(cfg: ApiConfig) {
     if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
     if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
     return c.json({ invoiceId: r.invoiceId, total: r.total, status: "DRAFT" }, 201);
+  });
+  /* #41: 반 단위 일괄 초안·일괄 발행 — "명단 검토"→초안 전수 생성, "확정·발송"→ISSUED */
+  const BulkDraftBody = z.object({
+    billingPeriodId: z.string().min(1).max(64),
+    dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    baseFee: z.number().int(),
+  }).strict();
+  app.post("/academies/:academyId/classes/:classId/bulk-invoice-drafts", guard, csrf, academyCtx, async (c) => {
+    const parsed = BulkDraftBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await bulkCreateClassDrafts(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, classId: c.req.param("classId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind !== "OK") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ created: r.created, skipped: r.skipped, invoiceIds: r.invoiceIds }, 201);
+  });
+  const BulkIssueBody = z.object({ billingPeriodId: z.string().min(1).max(64) }).strict();
+  app.post("/academies/:academyId/classes/:classId/bulk-invoice-issue", guard, csrf, academyCtx, async (c) => {
+    const parsed = BulkIssueBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await bulkIssueClassDrafts(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, classId: c.req.param("classId")!,
+      billingPeriodId: parsed.data.billingPeriodId,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind !== "OK") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ issued: r.issued }, 200);
   });
   app.post("/academies/:academyId/invoices/:invoiceId/issue", guard, csrf, academyCtx, async (c) => {
     const auth = c.get("auth"); const m = c.get("membership");

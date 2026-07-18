@@ -102,6 +102,8 @@ const ParticipantList = z.object({
 });
 const BillingPeriodCreate = z.object({ billingPeriodId: z.string() });
 const InvoiceCreate = z.object({ invoiceId: z.string(), total: z.number().int() });
+const BulkDrafts = z.object({ created: z.number().int(), skipped: z.number().int(), invoiceIds: z.array(z.string()) });
+const BulkIssue = z.object({ issued: z.number().int() });
 
 /* 휴무·일할(#38 — PC draft 정본화 1) */
 const ClosureCreate = z.object({ closureId: z.string(), canceledSessions: z.number().int() });
@@ -409,6 +411,17 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       lines: { type: string; label: string; amount: number }[];
     }) =>
       call(InvoiceCreate, `/academies/${academyId}/invoices`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    /* 그룹 일괄 발송(#41) — 반 단위 초안 전수 생성 → 검토 → 일괄 ISSUED */
+    bulkInvoiceDrafts: (academyId: string, classId: string, body: {
+      billingPeriodId: string; dueDate: string; baseFee: number;
+    }) =>
+      call(BulkDrafts, `/academies/${academyId}/classes/${classId}/bulk-invoice-drafts`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    bulkInvoiceIssue: (academyId: string, classId: string, body: { billingPeriodId: string }) =>
+      call(BulkIssue, `/academies/${academyId}/classes/${classId}/bulk-invoice-issue`, {
         method: "POST", csrf: true, body: JSON.stringify(body),
       }),
     /* 휴무·일할(#38) — "숫자 직접 수정 금지": event 등록 → 서버 재계산 */

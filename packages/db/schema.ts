@@ -1187,6 +1187,108 @@ export const importRows = pgTable("import_rows", {
   foreignKey({ name: "fk_imr_batch_academy", columns: [t.importBatchId, t.academyId], foreignColumns: [importBatches.id, importBatches.academyId] }),
 ]);
 
+/* ── 프로그램 실행 PS4 (docs/20 §2 · 지시서 §6.6~6.8) ──
+   게시된 프로그램을 반에 적용하고, 실제 수업(classSessions)과 커리큘럼 회차를
+   연결(session_plans), 코치가 활동 결과를 확정하면 참석 원생의 경험 이벤트가
+   쌓인다. 경험 ≠ 숙련(점수 아님) — 이벤트는 append-only·중복은 UNIQUE 로 차단.
+   게시 버전은 불변(PS1)이므로 참조가 곧 스냅샷 — 과거 수업 내용이 안 바뀐다. */
+export const sessionActivityResultEnum = pgEnum("session_activity_result", [
+  "COMPLETED", "PARTIAL", "NOT_DONE", "REPLACED",
+]);
+export const experienceParticipationEnum = pgEnum("experience_participation", [
+  "FULL", "PARTIAL", "OBSERVED", "NOT_PARTICIPATED",
+]);
+
+/* 반 ↔ 게시된 프로그램 버전 — 같은 버전을 여러 반에 적용 가능 */
+export const classProgramAssignments = pgTable("class_program_assignments", {
+  id: text("id").primaryKey(),                     // cpa_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  classId: text("class_id").notNull(),
+  programVersionId: text("program_version_id").notNull(), // PUBLISHED 만(서비스 검증)
+  programLevelId: text("program_level_id"),
+  effectiveFrom: date("effective_from").notNull(),
+  effectiveTo: date("effective_to"),
+  startCurriculumSessionId: text("start_curriculum_session_id"),
+  allowIndividualProgress: boolean("allow_individual_progress").notNull().default(true),
+  coachEditPolicy: text("coach_edit_policy").notNull().default("REPLACE_ALLOWED"), // 대체 허용 정책
+  status: text("status").notNull().default("ACTIVE"), // ACTIVE | ENDED
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => [
+  uniqueIndex("uq_cpa_id_academy").on(t.id, t.academyId),
+  index("ix_cpa_class").on(t.classId),
+  // 같은 반에 같은 버전 ACTIVE 중복 적용 금지(종료 후 재적용 허용)
+  uniqueIndex("uq_cpa_active").on(t.classId, t.programVersionId)
+    .where(sql`${t.status} = 'ACTIVE'`),
+  check("ck_cpa_status", sql`${t.status} IN ('ACTIVE', 'ENDED')`),
+  check("ck_cpa_edit_policy", sql`${t.coachEditPolicy} IN ('REPLACE_ALLOWED', 'PLAN_LOCKED')`),
+  foreignKey({ name: "fk_cpa_class_academy", columns: [t.classId, t.academyId], foreignColumns: [dbClasses.id, dbClasses.academyId] }),
+  foreignKey({ name: "fk_cpa_version_academy", columns: [t.programVersionId, t.academyId], foreignColumns: [programVersions.id, programVersions.academyId] }),
+  foreignKey({ name: "fk_cpa_level_academy", columns: [t.programLevelId, t.academyId], foreignColumns: [programLevels.id, programLevels.academyId] }),
+]);
+
+/* 실제 수업 ↔ 커리큘럼 회차 — 오늘 수업의 계획. 게시 버전 참조 = 불변 스냅샷 */
+export const sessionPlans = pgTable("session_plans", {
+  id: text("id").primaryKey(),                     // spl_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  classSessionId: text("class_session_id").notNull(),
+  classProgramAssignmentId: text("class_program_assignment_id").notNull(),
+  curriculumSessionId: text("curriculum_session_id"), // null = 자유 수업(계획 없이 실행)
+  sourceProgramVersionId: text("source_program_version_id").notNull(), // 당시 버전 고정
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => [
+  uniqueIndex("uq_spl_id_academy").on(t.id, t.academyId),
+  uniqueIndex("uq_spl_session_assignment").on(t.classSessionId, t.classProgramAssignmentId),
+  index("ix_spl_assignment").on(t.classProgramAssignmentId),
+  foreignKey({ name: "fk_spl_session_academy", columns: [t.classSessionId, t.academyId], foreignColumns: [classSessions.id, classSessions.academyId] }),
+  foreignKey({ name: "fk_spl_assignment_academy", columns: [t.classProgramAssignmentId, t.academyId], foreignColumns: [classProgramAssignments.id, classProgramAssignments.academyId] }),
+  foreignKey({ name: "fk_spl_curriculum_academy", columns: [t.curriculumSessionId, t.academyId], foreignColumns: [curriculumSessions.id, curriculumSessions.academyId] }),
+]);
+
+/* 활동 결과 — 코치 확정. 대체(REPLACED)는 대체 활동 개정판 기록 */
+export const sessionActivityResults = pgTable("session_activity_results", {
+  id: text("id").primaryKey(),                     // sar_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  sessionPlanId: text("session_plan_id").notNull(),
+  activityRevisionId: text("activity_revision_id").notNull(),
+  result: sessionActivityResultEnum("result").notNull(),
+  replacementActivityRevisionId: text("replacement_activity_revision_id"),
+  coachNote: text("coach_note"),
+  confirmedByUserId: text("confirmed_by_user_id").notNull().references(() => users.id),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex("uq_sar_plan_activity").on(t.sessionPlanId, t.activityRevisionId),
+  foreignKey({ name: "fk_sar_plan_academy", columns: [t.sessionPlanId, t.academyId], foreignColumns: [sessionPlans.id, sessionPlans.academyId] }),
+  foreignKey({ name: "fk_sar_revision_academy", columns: [t.activityRevisionId, t.academyId], foreignColumns: [activityRevisions.id, activityRevisions.academyId] }),
+  foreignKey({ name: "fk_sar_replacement_academy", columns: [t.replacementActivityRevisionId, t.academyId], foreignColumns: [activityRevisions.id, activityRevisions.academyId] }),
+  // REPLACED 인데 대체 활동 없음 금지 — 서비스가 막아도 DB 최종 방어
+  check("ck_sar_replacement", sql`${t.result} <> 'REPLACED' OR ${t.replacementActivityRevisionId} IS NOT NULL`),
+]);
+
+/* 경험 이벤트 — append-only. 경험은 숙련 점수가 아니다(docs/20 §2).
+   UNIQUE(원생·수업·활동개정판·영역) = 중복 경험 차단(지시서 §6.8 필수) */
+export const participantExperienceEvents = pgTable("participant_experience_events", {
+  id: text("id").primaryKey(),                     // pxe_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  participantId: text("participant_id").notNull(),
+  classSessionId: text("class_session_id").notNull(),
+  activityRevisionId: text("activity_revision_id").notNull(),
+  growthDomainId: text("growth_domain_id").notNull(),
+  participation: experienceParticipationEnum("participation").notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(),
+  recordedByUserId: text("recorded_by_user_id").notNull().references(() => users.id),
+}, (t) => [
+  uniqueIndex("uq_pxe_dedup").on(t.participantId, t.classSessionId, t.activityRevisionId, t.growthDomainId),
+  index("ix_pxe_participant_domain").on(t.participantId, t.growthDomainId),
+  index("ix_pxe_participant_occurred").on(t.participantId, t.occurredAt),
+  foreignKey({ name: "fk_pxe_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+  foreignKey({ name: "fk_pxe_session_academy", columns: [t.classSessionId, t.academyId], foreignColumns: [classSessions.id, classSessions.academyId] }),
+  foreignKey({ name: "fk_pxe_revision_academy", columns: [t.activityRevisionId, t.academyId], foreignColumns: [activityRevisions.id, activityRevisions.academyId] }),
+  foreignKey({ name: "fk_pxe_domain_academy", columns: [t.growthDomainId, t.academyId], foreignColumns: [growthDomains.id, growthDomains.academyId] }),
+]);
+
 export const refundAllocations = pgTable("refund_allocations", {
   id: text("id").primaryKey(),                    // ra_xxx
   refundId: text("refund_id").notNull().references(() => refunds.id),
