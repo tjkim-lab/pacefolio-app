@@ -14,10 +14,20 @@ import { IconCheck } from "@/components/ui/icons";
 import { useConfirm } from "../../_kit";
 import { useOwnerChat } from "../_state";
 import { roomById, type OMsg } from "../_data";
+import { useOwnerChatLive, type LiveChatMessage } from "../_live";
 
 export default function OwnerChatRoom() {
   const params = useParams<{ room: string }>();
   const roomId = params.room;
+  const live = useOwnerChatLive();
+  /* #39-②: 서버 방(cr_*)은 실 데이터 화면으로 — fixture 방은 기존 데모 유지 */
+  if (roomId.startsWith("cr_")) {
+    return <LiveRoomView roomId={roomId} />;
+  }
+  return <FixtureRoomView roomId={roomId} liveState={live.state} />;
+}
+
+function FixtureRoomView({ roomId }: { roomId: string; liveState: string }) {
   const c = useOwnerChat();
   const room = roomById(roomId);
   const { confirm, confirmNode } = useConfirm();
@@ -227,5 +237,93 @@ function Bubble({ m }: { m: OMsg }) {
         </span>
       )}
     </div>
+  );
+}
+
+/* #39-②: 서버 방 화면 — 메시지·전송이 chat 서버 정본. 금액 자유텍스트는 서버가 차단 대상
+   아님(BILLING 카드 정책은 postMessage 검증) — 여기선 NORMAL_CHAT 만 전송. */
+function LiveRoomView({ roomId }: { roomId: string }) {
+  const live = useOwnerChatLive();
+  const [msgs, setMsgs] = useState<LiveChatMessage[]>([]);
+  const [draft, setDraft] = useState("");
+  const [note, setNote] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (live.state !== "READY") return;
+    (async () => {
+      try { setMsgs(await live.loadMessages(roomId)); }
+      catch { setNote("메시지를 불러오지 못했어요"); }
+    })();
+  }, [live.state, roomId, live]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [msgs.length]);
+
+  const title = live.rooms.find((r) => r.roomId === roomId)?.title ?? "대화";
+  const send = () => {
+    const body = draft.trim();
+    if (!body || busy || live.state !== "READY") return;
+    setBusy(true);
+    void (async () => {
+      const r = await live.send(roomId, body);
+      setBusy(false);
+      if (!r.ok) { setNote(r.message); return; }
+      setDraft(""); setNote(undefined);
+      setMsgs(await live.loadMessages(roomId).catch(() => msgs));
+    })();
+  };
+
+  return (
+    <>
+      <AppHeader title={`${title} (실 데이터)`} back="/owner/chat" />
+      <AppScroll>
+        {live.state !== "READY" && (
+          <p className="text-[13px] font-medium text-ink3 px-1">
+            {live.state === "ERROR" ? `서버 오류(${live.errorMsg})` : "연결 확인 중..."}
+          </p>
+        )}
+        <div className="space-y-2">
+          {msgs.map((m) => {
+            const mine = m.senderUserId === live.myUserId;
+            return (
+              <div key={m.messageId} className={cn("flex", mine ? "justify-end" : "justify-start")}>
+                <div className={cn(
+                  "max-w-[78%] rounded-2xl px-3.5 py-2.5 text-[13.5px] font-medium leading-relaxed",
+                  mine ? "bg-accent-strong text-white" : "bg-fill text-ink",
+                )}>
+                  {m.kind !== "NORMAL_CHAT" && (
+                    <div className={cn("text-[10.5px] font-bold mb-0.5", mine ? "text-white/80" : "text-warn-ink")}>
+                      {m.kind === "ACK_REQUIRED" || m.kind === "URGENT_ACK_REQUIRED" ? `확인 필수 · ${m.status}` : m.kind}
+                    </div>
+                  )}
+                  {m.body}
+                </div>
+              </div>
+            );
+          })}
+          <div ref={endRef} />
+        </div>
+        {note && <p className="text-[12px] font-semibold text-danger-ink px-1 mt-2">{note}</p>}
+        <div className="sticky bottom-0 mt-3 flex gap-2 bg-surface pt-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && send()}
+            placeholder="메시지 입력 — 서버에 저장돼요"
+            className="h-11 flex-1 rounded-xl border border-line bg-fill px-3.5 text-[13.5px] font-medium text-ink focus:outline-none focus:border-accent"
+          />
+          <button
+            onClick={send}
+            disabled={busy}
+            className="h-11 rounded-xl bg-accent-strong px-4 text-[13.5px] font-bold text-white disabled:opacity-50"
+          >
+            {busy ? "..." : "전송"}
+          </button>
+        </div>
+      </AppScroll>
+    </>
   );
 }

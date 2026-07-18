@@ -10,11 +10,16 @@ import { cn } from "@/components/ui";
 import { IconChat } from "@/components/ui/icons";
 import { useOwnerChat } from "./_state";
 import { OWNER_ROOMS, type OwnerRoom } from "./_data";
+import { useOwnerChatLive, type LiveChatRoom } from "./_live";
 
 export default function OwnerChatList() {
+  const live = useOwnerChatLive();
   const coaches = OWNER_ROOMS.filter((r) => r.group === "coach");
   const guardians = OWNER_ROOMS.filter((r) => r.group === "guardian");
   const watches = OWNER_ROOMS.filter((r) => r.group === "watch");
+  /* #39-②: READY 면 서버 방이 정본 — 코치 DM·보호자 DM 을 서버 목록으로 */
+  const liveCoachRooms = live.state === "READY" ? live.rooms.filter((r) => r.type === "OWNER_COACH_DM") : [];
+  const liveGuardianRooms = live.state === "READY" ? live.rooms.filter((r) => r.type === "GUARDIAN_DM") : [];
 
   return (
     <>
@@ -27,18 +32,22 @@ export default function OwnerChatList() {
           </p>
         </div>
 
-        <SectionLabel>코치</SectionLabel>
+        <SectionLabel>코치{live.state === "READY" ? " (실 데이터)" : ""}</SectionLabel>
         <div className="space-y-2.5">
-          {coaches.map((r) => (
-            <ChatRow key={r.id} room={r} />
-          ))}
+          {live.state === "READY"
+            ? liveCoachRooms.length > 0
+              ? liveCoachRooms.map((r) => <LiveChatRoomRow key={r.roomId} room={r} />)
+              : <p className="px-1 text-[12px] font-medium text-ink3">아직 코치 대화방이 없어요 — PC 공지·소통에서 전달사항을 보내면 열려요.</p>
+            : coaches.map((r) => <ChatRow key={r.id} room={r} />)}
         </div>
 
-        <SectionLabel>학부모 1:1 — 원생 기준으로 열려요</SectionLabel>
+        <SectionLabel>학부모 1:1 — 원생 기준으로 열려요{live.state === "READY" ? " (실 데이터)" : ""}</SectionLabel>
         <div className="space-y-2.5">
-          {guardians.map((r) => (
-            <ChatRow key={r.id} room={r} />
-          ))}
+          {live.state === "READY"
+            ? liveGuardianRooms.length > 0
+              ? liveGuardianRooms.map((r) => <LiveChatRoomRow key={r.roomId} room={r} />)
+              : <p className="px-1 text-[12px] font-medium text-ink3">보호자 대화방이 아직 없어요.</p>
+            : guardians.map((r) => <ChatRow key={r.id} room={r} />)}
         </div>
 
         <SectionLabel>코치 ↔ 학부모 대화 · 관리 열람</SectionLabel>
@@ -110,6 +119,31 @@ function ChatRow({ room }: { room: OwnerRoom }) {
           </span>
         )}
       </div>
+    </Link>
+  );
+}
+
+/* #39-②: 서버 방 행 — 제목·미확인 수(unacked) 서버 정본 */
+function LiveChatRoomRow({ room }: { room: LiveChatRoom }) {
+  return (
+    <Link
+      href={`/owner/chat/${room.roomId}`}
+      className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3.5"
+    >
+      <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-accent-weak text-[15px] font-extrabold text-accent-ink">
+        {room.title.charAt(0)}
+      </div>
+      <div className="min-w-0 flex-1">
+        <span className="truncate text-[14.5px] font-bold text-ink">{room.title}</span>
+        <div className="mt-0.5 truncate text-[13px] font-medium text-ink3">
+          {room.type === "OWNER_COACH_DM" ? "코치 1:1 · 서버 정본" : "보호자 1:1 · 서버 정본"}
+        </div>
+      </div>
+      {room.unacked > 0 && (
+        <span className="inline-grid h-5 min-w-5 place-items-center rounded-full bg-danger px-1.5 text-[11px] font-bold text-white">
+          {room.unacked}
+        </span>
+      )}
     </Link>
   );
 }
