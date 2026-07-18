@@ -158,6 +158,12 @@ export function LiveBillingProvider({ children }: { children: ReactNode }) {
       if (r.status !== "PENDING") {
         return { ok: false, message: `결제 준비 상태 이상: ${r.status}` };
       }
+      /* E 리뷰 P0: 아래 웹훅 호출은 mockpg 시뮬레이션 전용(브라우저가 PG 역할 대행) —
+         실 PG 는 PG→서버 직통 웹훅이므로 이 블록 전체가 제거 대상.
+         시뮬레이션 플래그 없이는 실행 금지(secret 노출 경로 명시 게이트). */
+      if (process.env.NEXT_PUBLIC_PACEFOLIO_PG_SIMULATION !== "1") {
+        return { ok: false, message: "결제 대기 — 실 PG 연동 전(시뮬레이션 플래그 꺼짐). 준비된 결제는 서버에 남아있어요" };
+      }
       const wh = await fetch("/api/webhooks/pg/mockpg", {
         method: "POST",
         headers: { "content-type": "application/json", "x-webhook-secret": "dev-mockpg-secret" },
