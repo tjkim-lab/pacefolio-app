@@ -1,12 +1,26 @@
 /* 서버 엔트리 — 로컬/프로덕션 기동용. 테스트는 app.request() 로 대체. */
 import { serve } from "@hono/node-server";
-import { createDb } from "@pacefolio/db";
+import { createDb, createPgliteDevDb, type Db } from "@pacefolio/db";
+import { seedWondergym } from "@pacefolio/db/seed";
 import { createApp } from "./app";
 
 const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
+const isProd = process.env.NODE_ENV === "production";
+if (!databaseUrl && isProd) {
   console.error("DATABASE_URL 이 필요합니다 (PostgreSQL 16).");
   process.exit(1);
+}
+
+/* Gate 2 dev 폴백: DATABASE_URL 없으면 PGlite(in-memory) + 자동 migrate/seed.
+   비영속 — 재시작 시 초기화. 실 PostgreSQL 검증은 DATABASE_URL/CI 로. */
+let db: Db;
+if (databaseUrl) {
+  db = createDb(databaseUrl);
+} else {
+  console.warn("[dev] DATABASE_URL 없음 — PGlite in-memory DB 로 기동 (비영속·단일 커넥션·dev 전용)");
+  db = await createPgliteDevDb();
+  await seedWondergym(db, new Date().toISOString());
+  console.warn("[dev] seed 완료 — 박서연(보호자)·김도윤(원장)·원더짐·ISSUED 청구 2건");
 }
 
 /* R8 C8-04: 조건부 boot validation — "조용한 장애" 방지.
@@ -25,7 +39,7 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const app = createApp({
-  db: createDb(databaseUrl),
+  db,
   providers: {}, // 실제 provider 는 클라이언트 키 발급 후 등록(카카오 앵커부터)
   allowedOrigins: (process.env.PACEFOLIO_ALLOWED_ORIGINS ?? "http://localhost:3000").split(","),
   redirectUri: process.env.PACEFOLIO_OAUTH_REDIRECT_URI ?? "http://localhost:3001/auth/callback",
@@ -34,7 +48,8 @@ const app = createApp({
   // R7 P0-1 fail-closed: 실 provider verifier 등록 전까지 웹훅은 전부 404.
   // mockpg 도 dev + 시크릿 설정 시에만 열림.
   enableMockPg: process.env.NODE_ENV !== "production",
-  mockPgSecret: process.env.PACEFOLIO_MOCKPG_SECRET,
+  // dev 는 기본 시크릿으로 mockpg 개방(Gate 2 시뮬) — 프로덕션은 env 없으면 404(fail-closed 유지)
+  mockPgSecret: process.env.PACEFOLIO_MOCKPG_SECRET ?? (isProd ? undefined : "dev-mockpg-secret"),
   webhookVerifiers: {}, // 실 PG adapter 연동 시 provider 별 raw-body 서명 verifier 등록
 });
 

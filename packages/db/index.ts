@@ -21,3 +21,18 @@ export function createDb(databaseUrl: string) {
 }
 
 export type Db = ReturnType<typeof createDb>;
+
+/** Gate 2 dev 폴백 — DATABASE_URL 없이 PGlite(in-memory)로 기동.
+    같은 migration 을 적용하므로 스키마 동일 · 비영속(재시작 시 초기화) ·
+    단일 커넥션이라 동시성 검증은 불가(CI postgres 가 정본). 프로덕션 금지. */
+export async function createPgliteDevDb(): Promise<Db> {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const { drizzle } = await import("drizzle-orm/pglite");
+  const { migrate } = await import("drizzle-orm/pglite/migrator");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+  const client = new PGlite();
+  const db = drizzle(client, { schema });
+  await migrate(db, { migrationsFolder: join(dirname(fileURLToPath(import.meta.url)), "migrations") });
+  return db as unknown as Db;
+}

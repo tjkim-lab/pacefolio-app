@@ -21,6 +21,19 @@ export function proxy(req: NextRequest) {
     return new NextResponse(null, { status: 404 });
   }
 
+  /* Gate 2 (LCV1 1.4): 세션 쿠키 게이트 — NEXT_PUBLIC_PACEFOLIO_REQUIRE_SESSION=1
+     이면 개인정보 라우트는 pf_session 쿠키 없이 진입 불가.
+     edge 는 쿠키 존재만 확인 — 유효성 최종 판정은 API guard(401)가 정본. */
+  if (
+    process.env.NEXT_PUBLIC_PACEFOLIO_REQUIRE_SESSION === "1" &&
+    !req.cookies.get("pf_session")
+  ) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/stage/gate2";
+    url.search = "?login=required";
+    return NextResponse.redirect(url);
+  }
+
   const res = NextResponse.next();
   res.headers.set("Cache-Control", "private, no-store"); // 뒤로가기·공유 캐시 방지
   res.headers.set("X-Robots-Tag", "noindex, noarchive"); // 색인·캐시 차단(헤더 강제)

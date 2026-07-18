@@ -36,6 +36,13 @@ export type PrepareResult = z.infer<typeof PrepareResult>;
 
 const DevLoginResult = z.object({ userId: z.string() });
 
+const RefundCreate = z.object({
+  refundId: z.string(), requestedAmount: z.number().int().positive(), status: z.string(),
+});
+export type RefundCreate = z.infer<typeof RefundCreate>;
+const RefundApprove = z.object({ refundId: z.string(), status: z.string() });
+export type RefundApprove = z.infer<typeof RefundApprove>;
+
 /* ── 에러 — status 와 서버 error 코드 보존 ── */
 export class ApiError extends Error {
   constructor(
@@ -103,6 +110,19 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       call(PrepareResult, `/academies/${academyId}/payments/prepare`, {
         method: "POST", csrf: true, idempotencyKey,
         body: JSON.stringify({ invoiceIds }),
+      }),
+    /* 환불 — 요청자 = 실제 결제자 · 양측 승인(side 는 서버가 역할로 도출) */
+    requestRefund: (
+      academyId: string,
+      body: { paymentId: string; participantId: string; reasonCode: string; reasonText?: string },
+      idempotencyKey: string,
+    ) =>
+      call(RefundCreate, `/academies/${academyId}/refunds`, {
+        method: "POST", csrf: true, idempotencyKey, body: JSON.stringify(body),
+      }),
+    approveRefund: (academyId: string, refundId: string) =>
+      call(RefundApprove, `/academies/${academyId}/refunds/${refundId}/approvals`, {
+        method: "POST", csrf: true,
       }),
   };
 }
