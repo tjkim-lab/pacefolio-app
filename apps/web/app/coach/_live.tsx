@@ -45,6 +45,11 @@ interface CoachLiveCtx {
   complete: () => Promise<{ ok: boolean; message: string }>;
   brief: LiveBrief | null;
   ackBrief: () => Promise<{ ok: boolean; message: string }>;
+  reportIncident: (input: {
+    participantId: string; type: string; severity: string; situation: string;
+    location?: string; firstAid?: string; classContinued: boolean;
+    followUpNeeded: boolean; guardianContact: string;
+  }) => Promise<{ ok: boolean; message: string; occurredAt?: string }>;
 }
 
 const Ctx = createContext<CoachLiveCtx | null>(null);
@@ -165,8 +170,24 @@ export function CoachLiveProvider({ children }: { children: ReactNode }) {
     }
   }, [state, academyId, brief]);
 
+  /* #32: 안전 기록 = 서버 정본 — 발생 시각은 서버가 기록, 감사·원장 알림 Outbox 동반 */
+  const reportIncident = useCallback(async (input: {
+    participantId: string; type: string; severity: string; situation: string;
+    location?: string; firstAid?: string; classContinued: boolean;
+    followUpNeeded: boolean; guardianContact: string;
+  }) => {
+    if (state !== "READY" || !academyId) return { ok: false, message: "실연결 아님" };
+    try {
+      const r = await api.reportIncident(academyId, { ...input, sessionId });
+      const t = new Date(r.occurredAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+      return { ok: true, occurredAt: r.occurredAt, message: `서버 기록 완료(${t}) — 원장 알림 발행·감사 이력 기록` };
+    } catch (e) {
+      return { ok: false, message: e instanceof ApiError ? `기록 실패(${e.status}: ${e.code})` : "기록 실패 — 네트워크 확인" };
+    }
+  }, [state, academyId, sessionId]);
+
   return (
-    <Ctx.Provider value={{ state, errorMsg, academyId, sessionId, sessionLabel, roster, saveAttendance, complete, brief, ackBrief }}>
+    <Ctx.Provider value={{ state, errorMsg, academyId, sessionId, sessionLabel, roster, saveAttendance, complete, brief, ackBrief, reportIncident }}>
       {children}
     </Ctx.Provider>
   );

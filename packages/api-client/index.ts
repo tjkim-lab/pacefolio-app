@@ -115,6 +115,17 @@ const ChatMessageList = z.object({
   })),
 });
 const ChatAck = z.object({ status: z.string() });
+/* 안전사고(#32) — 발생 시각은 서버가 기록 */
+const IncidentCreate = z.object({ incidentId: z.string(), occurredAt: z.string() });
+const IncidentList = z.object({
+  incidents: z.array(z.object({
+    incidentId: z.string(), participantId: z.string(), participantName: z.string(),
+    reportedByUserId: z.string(), type: z.string(), severity: z.string(),
+    situation: z.string(), location: z.string().nullable(), firstAid: z.string().nullable(),
+    classContinued: z.boolean(), followUpNeeded: z.boolean(), guardianContact: z.string(),
+    occurredAt: z.string(),
+  })),
+});
 
 /* Admin 관제(#27) — PLATFORM_ADMIN 전용(비관리자 404) */
 const AdminOverview = z.object({
@@ -302,6 +313,17 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       call(ChatAck, `/academies/${academyId}/chat/messages/${messageId}/ack`, {
         method: "POST", csrf: true,
       }),
+    /* 안전사고(#32) */
+    reportIncident: (academyId: string, body: {
+      participantId: string; sessionId?: string; type: string; severity: string;
+      situation: string; location?: string; firstAid?: string;
+      classContinued: boolean; followUpNeeded: boolean; guardianContact: string;
+    }) =>
+      call(IncidentCreate, `/academies/${academyId}/incidents`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    listIncidents: (academyId: string) =>
+      call(IncidentList, `/academies/${academyId}/incidents`),
     /* 세션 리뷰: 서버·openapi 에 있던 op 의 클라이언트 누락 보완 */
     adminRevokeUserSessions: (userId: string, reason: string) =>
       call(z.void(), `/admin/users/${userId}/session-revocation`, {

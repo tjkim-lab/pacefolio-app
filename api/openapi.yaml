@@ -576,6 +576,45 @@ paths:
       responses:
         '204': { description: 취소됨 }
 
+  /academies/{academyId}/incidents:
+    post:
+      tags: [safety]
+      summary: >
+        안전사고 기록(#32) — 담당 코치(ACTIVE 배정×등록) 또는 staff. 발생 시각 = 서버 기록,
+        AuditLog(상황 원문 미포함) + Outbox SAFETY_INCIDENT_REPORTED(원장 알림 REQUIRED tier)
+      parameters:
+        - { name: academyId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [participantId, type, severity, situation, classContinued, followUpNeeded, guardianContact]
+              properties:
+                participantId: { type: string }
+                sessionId: { type: string }
+                type: { type: string, enum: [MINOR_INJURY, CONDITION, CLASS_HALT, SAFETY_ACCIDENT, OTHER] }
+                severity: { type: string, enum: [MINOR, CAUTION, SEVERE] }
+                situation: { type: string, maxLength: 2000 }
+                location: { type: string, maxLength: 200 }
+                firstAid: { type: string, maxLength: 1000 }
+                classContinued: { type: boolean }
+                followUpNeeded: { type: boolean }
+                guardianContact: { type: string, enum: [CONTACTED, NEEDED, NOT_NEEDED] }
+      responses:
+        '201': { description: '기록됨(incidentId·occurredAt=서버 시각)' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: 원생·세션 불일치 등 }
+    get:
+      tags: [safety]
+      summary: 안전사고 목록 — staff 전체·코치 본인 보고분(열람도 감사), 보호자 표면 없음(v1)
+      parameters:
+        - { name: academyId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: incidents 배열 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /academies/{academyId}/members:
     get:
       tags: [academies]

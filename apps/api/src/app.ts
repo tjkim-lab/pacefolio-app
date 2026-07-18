@@ -28,6 +28,7 @@ import {
   createBillingPeriod, createInvoice, issueInvoice, voidInvoice, recordOfflinePayment,
 } from "./billing/issue";
 import { publishNotice, markNoticeRead, listNotices } from "./notices/service";
+import { reportIncident, listIncidents } from "./safety/service";
 import { createAcademy, inviteMember, acceptInvite, listMembers } from "./academies/service";
 import { preparePayment, processPgWebhook } from "./billing/service";
 import { requestRefund, approveRefund, processRefundWebhook } from "./billing/refunds";
@@ -614,6 +615,40 @@ export function createApp(cfg: ApiConfig) {
         return c.json({ error: "ACTIVE_PAYMENT_ATTEMPT_EXISTS", paymentId: r.paymentId }, 409);
       case "DENIED": return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
     }
+  });
+
+  /* 안전사고 기록(#32) — 발생 시각 = 서버, 기록·열람 전부 감사 */
+  const IncidentBody = z.object({
+    participantId: z.string().min(1).max(64),
+    sessionId: z.string().min(1).max(64).optional(),
+    type: z.enum(["MINOR_INJURY", "CONDITION", "CLASS_HALT", "SAFETY_ACCIDENT", "OTHER"]),
+    severity: z.enum(["MINOR", "CAUTION", "SEVERE"]),
+    situation: z.string().min(1).max(2000),
+    location: z.string().max(200).optional(),
+    firstAid: z.string().max(1000).optional(),
+    classContinued: z.boolean(),
+    followUpNeeded: z.boolean(),
+    guardianContact: z.enum(["CONTACTED", "NEEDED", "NOT_NEEDED"]),
+  }).strict();
+  app.post("/academies/:academyId/incidents", guard, csrf, academyCtx, async (c) => {
+    const parsed = IncidentBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await reportIncident(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ incidentId: r.incidentId, occurredAt: r.occurredAt }, 201);
+  });
+  app.get("/academies/:academyId/incidents", guard, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    const rows = await listIncidents(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles, academyId: c.req.param("academyId")!,
+    }, now());
+    if (!rows) return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json({ incidents: rows });
   });
 
   /* 멤버 목록(#31) — staff 전용. 코치 전달사항 대상 선택의 정본(PII 미포함) */

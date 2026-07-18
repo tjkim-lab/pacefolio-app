@@ -582,6 +582,35 @@ export const outboxEvents = pgTable("outbox_events", {
   index("ix_outbox_unpublished").on(t.publishedAt, t.createdAt), // publisher 폴링
 ]);
 
+/* ── 안전사고 기록(#32 — E 리뷰 C2): 코치 현장 기록의 서버 정본 ──
+   발생 시각 = 서버 기록(클라이언트 고정 시각 금지). 민감 기록 — 열람·기록 전부 감사. */
+export const incidentTypeEnum = pgEnum("incident_type", ["MINOR_INJURY", "CONDITION", "CLASS_HALT", "SAFETY_ACCIDENT", "OTHER"]);
+export const incidentSeverityEnum = pgEnum("incident_severity", ["MINOR", "CAUTION", "SEVERE"]);
+export const guardianContactStatusEnum = pgEnum("guardian_contact_status", ["CONTACTED", "NEEDED", "NOT_NEEDED"]);
+
+export const safetyIncidents = pgTable("safety_incidents", {
+  id: text("id").primaryKey(),                     // inc_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  participantId: text("participant_id").notNull(),
+  sessionId: text("session_id"),                   // 수업 컨텍스트(선택)
+  reportedByUserId: text("reported_by_user_id").notNull().references(() => users.id),
+  type: incidentTypeEnum("type").notNull(),
+  severity: incidentSeverityEnum("severity").notNull(),
+  situation: text("situation").notNull(),          // 언제·어디서·어떻게
+  location: text("location"),
+  firstAid: text("first_aid"),                     // 현장 조치
+  classContinued: boolean("class_continued").notNull(),
+  followUpNeeded: boolean("follow_up_needed").notNull(),
+  guardianContact: guardianContactStatusEnum("guardian_contact").notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(), // 서버 기록 시각
+  createdAt: createdAt(),
+}, (t) => [
+  index("ix_incident_academy_occurred").on(t.academyId, t.occurredAt),
+  index("ix_incident_participant").on(t.participantId),
+  foreignKey({ name: "fk_incident_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+  foreignKey({ name: "fk_incident_session_academy", columns: [t.sessionId, t.academyId], foreignColumns: [classSessions.id, classSessions.academyId] }),
+]);
+
 /* ── PACEFOLIO 구독(학원→우리) — 가격 확정 2026-07-18: BASIC 29,000 / PRO 99,000 ── */
 export const subscriptionPlanEnum = pgEnum("subscription_plan", ["BASIC", "PRO"]);
 export const subscriptionStatusEnum = pgEnum("subscription_status", ["TRIAL", "ACTIVE", "PAST_DUE", "CANCELED"]);

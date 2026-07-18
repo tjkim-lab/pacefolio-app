@@ -93,6 +93,15 @@ export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUS)[number];
 
 /* SupportView 열람 범위의 정본 = authorization.ts SUPPORT_VIEW_RESOURCES (중복 정의 금지 — 세션 리뷰) */
 
+/* 안전사고 기록(#32 — E 리뷰 C2) — 코치 IncidentSheet 의 서버 정본.
+   화면 한글 라벨 ↔ enum 매핑은 웹이 담당(계약은 enum 만). */
+export const INCIDENT_TYPE = ["MINOR_INJURY", "CONDITION", "CLASS_HALT", "SAFETY_ACCIDENT", "OTHER"] as const;
+export type IncidentType = (typeof INCIDENT_TYPE)[number];
+export const INCIDENT_SEVERITY = ["MINOR", "CAUTION", "SEVERE"] as const;
+export type IncidentSeverity = (typeof INCIDENT_SEVERITY)[number];
+export const GUARDIAN_CONTACT_STATUS = ["CONTACTED", "NEEDED", "NOT_NEEDED"] as const;
+export type GuardianContactStatus = (typeof GUARDIAN_CONTACT_STATUS)[number];
+
 /* 결제 서비스 온보딩 상태 — 원장 설정의 PG 가입·심사 수명주기 */
 export const PG_ONBOARDING_STATUS = ["NOT_ENROLLED", "IN_REVIEW", "AVAILABLE", "ACTIVE", "RESTRICTED"] as const;
 export type PgOnboardingStatus = (typeof PG_ONBOARDING_STATUS)[number];
@@ -155,6 +164,7 @@ export const DOMAIN_EVENT_TYPE = [
   "INVOICE_ISSUED",
   "PAYMENT_CAPTURED",
   "REFUND_COMPLETED",
+  "SAFETY_INCIDENT_REPORTED", // #32 — 원장 알림(REQUIRED tier) 트랙
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPE)[number];
 
