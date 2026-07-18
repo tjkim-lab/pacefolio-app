@@ -176,6 +176,13 @@
       "when": 1784393321380,
       "tag": "0024_subscription-ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784417283955,
+      "tag": "0025_import-staging",
+      "breakpoints": true
     }
   ]
 }

@@ -30,6 +30,14 @@ export async function createBillingPeriod(db: Db, input: {
 }, nowISO: string): Promise<{ kind: "OK"; billingPeriodId: string } | { kind: "FORBIDDEN"; reason: string } | { kind: "INVALID"; reason: string }> {
   if (!isStaff(input.actorRoles)) return { kind: "FORBIDDEN", reason: "수납 기간 생성은 원장·데스크만" };
   if (input.periodStart >= input.periodEnd) return { kind: "INVALID", reason: "기간 역전" };
+  /* #40: find-or-create 멱등 — 같은 (시작,끝) 기간 재요청은 기존 행 반환
+     (중간입회 draft 저장이 분기 기간을 반복 참조 — 중복 기간 행 방지) */
+  const existing = (await db.select().from(s.billingPeriods).where(and(
+    eq(s.billingPeriods.academyId, input.academyId),
+    eq(s.billingPeriods.periodStart, input.periodStart),
+    eq(s.billingPeriods.periodEnd, input.periodEnd),
+  )))[0];
+  if (existing) return { kind: "OK", billingPeriodId: existing.id };
   const billingPeriodId = newId("bp");
   await db.insert(s.billingPeriods).values({
     id: billingPeriodId, academyId: input.academyId,

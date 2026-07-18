@@ -1141,6 +1141,52 @@ export const curriculumSessionActivities = pgTable("curriculum_session_activitie
   foreignKey({ name: "fk_csa_revision_academy", columns: [t.activityRevisionId, t.academyId], foreignColumns: [activityRevisions.id, activityRevisions.academyId] }),
 ]);
 
+/* ── 가져오기 스테이징 PS3 (docs/20 §4 · 지시서 §8) ──
+   원본을 운영 테이블에 바로 넣지 않는다: 업로드→정규화→검증→중복후보→미리보기
+   →원장 확인→커밋(tx). 원본 행(rawPayload) 영구 보존 · 자동 병합 금지. */
+export const importBatchStatusEnum = pgEnum("import_batch_status", ["STAGED", "COMMITTED", "REVERTED"]);
+
+export const importBatches = pgTable("import_batches", {
+  id: text("id").primaryKey(),                     // imb_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  targetType: text("target_type").notNull().default("ACTIVITY"), // 미래: SKILL 등
+  fileName: text("file_name").notNull(),
+  fileHash: text("file_hash").notNull(),           // SHA-256 — 같은 파일 중복 커밋 방지
+  status: importBatchStatusEnum("status").notNull().default("STAGED"),
+  mapping: text("mapping").notNull(),              // 열 매핑 JSON(자동 제안 + 원장 확정)
+  uploadedByUserId: text("uploaded_by_user_id").notNull().references(() => users.id),
+  committedAt: timestamp("committed_at", { withTimezone: true, mode: "string" }),
+  committedByUserId: text("committed_by_user_id"),
+  revertedAt: timestamp("reverted_at", { withTimezone: true, mode: "string" }),
+  revertedByUserId: text("reverted_by_user_id"),
+  createdAt: createdAt(),
+  version: version(),
+}, (t) => [
+  uniqueIndex("uq_imb_id_academy").on(t.id, t.academyId),
+  index("ix_imb_academy_hash").on(t.academyId, t.fileHash), // 재업로드 감지
+]);
+
+export const importRows = pgTable("import_rows", {
+  id: text("id").primaryKey(),                     // imr_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  importBatchId: text("import_batch_id").notNull(),
+  sourceRowNumber: integer("source_row_number").notNull(), // 원본 행 추적(헤더=1)
+  rawPayload: text("raw_payload").notNull(),       // 원본 셀 JSON — 영구 보존
+  normalizedPayload: text("normalized_payload").notNull(), // 정규화 제안 JSON(수정 가능)
+  validationStatus: text("validation_status").notNull(),   // VALID | INVALID
+  validationMessages: text("validation_messages").notNull(), // JSON 배열
+  duplicateCandidateIds: text("duplicate_candidate_ids").notNull(), // JSON 배열 — 제안만
+  resolution: text("resolution").notNull().default("CREATE"), // CREATE | SKIP
+  committedEntityId: text("committed_entity_id"),  // 커밋 시 생성된 activityId
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex("uq_imr_batch_row").on(t.importBatchId, t.sourceRowNumber),
+  index("ix_imr_batch").on(t.importBatchId),
+  check("ck_imr_resolution", sql`${t.resolution} IN ('CREATE', 'SKIP')`),
+  check("ck_imr_validation", sql`${t.validationStatus} IN ('VALID', 'INVALID')`),
+  foreignKey({ name: "fk_imr_batch_academy", columns: [t.importBatchId, t.academyId], foreignColumns: [importBatches.id, importBatches.academyId] }),
+]);
+
 export const refundAllocations = pgTable("refund_allocations", {
   id: text("id").primaryKey(),                    // ra_xxx
   refundId: text("refund_id").notNull().references(() => refunds.id),

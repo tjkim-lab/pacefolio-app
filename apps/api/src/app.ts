@@ -22,7 +22,7 @@ import {
   createClass, generateSessions, cancelSession, listClasses, listSessions, listClassRoster,
 } from "./classes/service";
 import {
-  createParticipant, changeParticipantStatus, enrollParticipant, endEnrollment,
+  createParticipant, changeParticipantStatus, enrollParticipant, endEnrollment, listParticipants,
 } from "./students/service";
 import {
   createProgram, listPrograms, updateProgram, createVersion, publishVersion, getVersionDetail,
@@ -31,6 +31,9 @@ import {
   createActivity, listActivities, updateActivity, archiveActivity, setActivityGrowthTags,
   createSection, deleteSection, createCurriculumSession, deleteCurriculumSession, setSessionActivities,
 } from "./programs/service";
+import {
+  stageImport, getImportBatch, listImportBatches, updateImportRow, commitImport, revertImport,
+} from "./programs/imports";
 import {
   recordAttendance, completeSession, listSessionAttendance, createAttendanceNotice,
 } from "./attendance/service";
@@ -544,6 +547,62 @@ export function createApp(cfg: ApiConfig) {
       ...actor(c), curriculumSessionId: c.req.param("curriculumSessionId")!,
       activities: p.data.activities,
     }, now()));
+  });
+
+  /* ── 가져오기 스테이징 PS3 (docs/20 §4) — 미리보기 전 운영 데이터 무변경 ── */
+  const MappingShape = z.object({
+    name: z.number().int().min(0).optional(),
+    description: z.number().int().min(0).optional(),
+    primaryDomain: z.number().int().min(0).optional(),
+    secondaryDomains: z.array(z.number().int().min(0)).max(40).optional(),
+    difficultyLabel: z.number().int().min(0).optional(),
+    recommendedAgeLabel: z.number().int().min(0).optional(),
+  }).strict();
+  const StageImportBody = z.object({
+    fileName: z.string().min(1).max(200),
+    csvText: z.string().min(1).max(2_000_000),
+    mapping: MappingShape.optional(),
+  }).strict();
+  app.post("/academies/:academyId/imports", guard, csrf, academyCtx, async (c) => {
+    const p = StageImportBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const r = await stageImport(cfg.db, { ...actor(c), ...p.data }, now());
+    if (r.kind === "STAGED") return c.json(r, 201);
+    return studioResult(c, r);
+  });
+  app.get("/academies/:academyId/imports", guard, academyCtx, async (c) => {
+    return c.json({ batches: await listImportBatches(cfg.db, c.req.param("academyId")!) });
+  });
+  app.get("/academies/:academyId/imports/:batchId", guard, academyCtx, async (c) => {
+    const b = await getImportBatch(cfg.db, c.req.param("academyId")!, c.req.param("batchId")!);
+    if (!b) return c.json({ error: "NOT_FOUND" }, 404);
+    return c.json(b);
+  });
+  const UpdateImportRowBody = z.object({
+    normalized: z.object({
+      name: z.string().max(200).optional(),
+      description: z.string().max(4000).optional(),
+      primaryDomainName: z.string().max(60).optional(),
+      secondaryDomainNames: z.array(z.string().max(60)).max(40).optional(),
+      difficultyLabel: z.string().max(40).optional(),
+      recommendedAgeLabel: z.string().max(40).optional(),
+    }).strict().optional(),
+    resolution: z.enum(["CREATE", "SKIP"]).optional(),
+  }).strict();
+  app.patch("/academies/:academyId/imports/:batchId/rows/:rowId", guard, csrf, academyCtx, async (c) => {
+    const p = UpdateImportRowBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await updateImportRow(cfg.db, {
+      ...actor(c), batchId: c.req.param("batchId")!, rowId: c.req.param("rowId")!, ...p.data,
+    }, now()));
+  });
+  app.post("/academies/:academyId/imports/:batchId/commit", guard, csrf, academyCtx, async (c) => {
+    const r = await commitImport(cfg.db, { ...actor(c), batchId: c.req.param("batchId")! }, now());
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    return studioResult(c, r);
+  });
+  app.post("/academies/:academyId/imports/:batchId/revert", guard, csrf, academyCtx, async (c) => {
+    return studioResult(c, await revertImport(cfg.db, { ...actor(c), batchId: c.req.param("batchId")! }, now()));
   });
 
   /* ── 기본선 3단계(#24): 학원 생성 · 직원 초대 ── */
@@ -1112,6 +1171,17 @@ export function createApp(cfg: ApiConfig) {
     }, now());
     if (!rows) return c.json({ error: "FORBIDDEN" }, 403);
     return c.json({ incidents: rows });
+  });
+
+  /* 원생 목록(#40) — staff 전용, PII 미포함(이름·상태·연령) */
+  app.get("/academies/:academyId/participants", guard, academyCtx, async (c) => {
+    const m = c.get("membership");
+    const rows = await listParticipants(cfg.db, {
+      actorRoles: m.roles, academyId: c.req.param("academyId")!,
+      status: c.req.query("status") as never,
+    });
+    if (!rows) return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json({ participants: rows });
   });
 
   /* 멤버 목록(#31) — staff 전용. 코치 전달사항 대상 선택의 정본(PII 미포함) */

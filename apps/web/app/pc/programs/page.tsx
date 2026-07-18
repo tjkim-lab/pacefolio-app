@@ -35,7 +35,10 @@ export default function PCPrograms() {
     <PCShell
       title="프로그램 스튜디오"
       actions={gate.isOwner ? (
-        <ActBtn onClick={() => setWizardOpen((v) => !v)}>{wizardOpen ? "닫기" : "＋ 새 프로그램"}</ActBtn>
+        <div className="flex gap-1.5">
+          <ActBtn soft onClick={() => router.push("/pc/program-imports")}>CSV 가져오기</ActBtn>
+          <ActBtn onClick={() => setWizardOpen((v) => !v)}>{wizardOpen ? "닫기" : "＋ 새 프로그램"}</ActBtn>
+        </div>
       ) : undefined}
     >
       <StudioGate state={gate.state} errorMsg={gate.errorMsg}>

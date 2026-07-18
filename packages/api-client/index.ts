@@ -94,6 +94,15 @@ const BillingSummary = z.object({
   billedKrw: z.number().int(), capturedKrw: z.number().int(),
 });
 
+/* PC draft 정본화 2(#40) */
+const ParticipantList = z.object({
+  participants: z.array(z.object({
+    participantId: z.string(), name: z.string(), ageLabel: z.string(), status: z.string(),
+  })),
+});
+const BillingPeriodCreate = z.object({ billingPeriodId: z.string() });
+const InvoiceCreate = z.object({ invoiceId: z.string(), total: z.number().int() });
+
 /* 휴무·일할(#38 — PC draft 정본화 1) */
 const ClosureCreate = z.object({ closureId: z.string(), canceledSessions: z.number().int() });
 const ProrationQuote = z.object({
@@ -279,6 +288,43 @@ const StudioActivityUpdate = z.object({ kind: z.string(), revisionId: z.string()
 const SectionCreate = z.object({ kind: z.string(), sectionId: z.string() });
 const CurriculumSessionCreate = z.object({ kind: z.string(), curriculumSessionId: z.string() });
 
+/* 가져오기 스테이징 스키마(PS3) */
+const ImportStaged = z.object({
+  kind: z.string(), batchId: z.string(), mapping: z.record(z.string(), z.unknown()),
+  total: z.number(), valid: z.number(), invalid: z.number(), withDuplicates: z.number(),
+  reuploadOfCommitted: z.boolean(),
+});
+const ImportBatchList = z.object({
+  batches: z.array(z.object({
+    batchId: z.string(), fileName: z.string(), status: z.string(),
+    createdAt: z.string(), committedAt: z.string().optional(),
+  })),
+});
+const ImportRowShape = z.object({
+  rowId: z.string(), sourceRowNumber: z.number(),
+  raw: z.array(z.string()),
+  normalized: z.object({
+    name: z.string(), description: z.string().optional(),
+    primaryDomainName: z.string().optional(),
+    secondaryDomainNames: z.array(z.string()),
+    difficultyLabel: z.string().optional(), recommendedAgeLabel: z.string().optional(),
+  }),
+  validationStatus: z.string(), validationMessages: z.array(z.string()),
+  duplicateCandidateIds: z.array(z.string()), resolution: z.string(),
+  committedEntityId: z.string().optional(),
+});
+const ImportBatchDetail = z.object({
+  batchId: z.string(), fileName: z.string(), status: z.string(),
+  mapping: z.record(z.string(), z.unknown()),
+  committedAt: z.string().optional(), revertedAt: z.string().optional(),
+  rows: z.array(ImportRowShape),
+});
+export type ImportBatchDetail = z.infer<typeof ImportBatchDetail>;
+export type ImportRow = z.infer<typeof ImportRowShape>;
+const ImportCommitResult = z.object({
+  kind: z.string(), created: z.number(), skipped: z.number(), invalid: z.number(),
+});
+
 export function createApiClient(cfg: ApiClientConfig = {}) {
   const base = cfg.baseUrl ?? "";
   const fetchFn: FetchLike = cfg.fetchFn ?? ((i, init) => fetch(i, init));
@@ -350,6 +396,20 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
     completeSession: (academyId: string, sessionId: string) =>
       call(SessionComplete, `/academies/${academyId}/sessions/${sessionId}/complete`, {
         method: "POST", csrf: true,
+      }),
+    /* PC draft 정본화 2(#40) — 원생 목록·수납 기간(멱등)·청구 초안 */
+    listParticipants: (academyId: string, status?: string) =>
+      call(ParticipantList, `/academies/${academyId}/participants${status ? `?status=${status}` : ""}`),
+    createBillingPeriod: (academyId: string, body: { periodStart: string; periodEnd: string; cycleMonths: number }) =>
+      call(BillingPeriodCreate, `/academies/${academyId}/billing-periods`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    createDraftInvoice: (academyId: string, body: {
+      participantId: string; billingPeriodId: string; dueDate: string;
+      lines: { type: string; label: string; amount: number }[];
+    }) =>
+      call(InvoiceCreate, `/academies/${academyId}/invoices`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
       }),
     /* 휴무·일할(#38) — "숫자 직접 수정 금지": event 등록 → 서버 재계산 */
     createClosure: (academyId: string, body: {
@@ -530,6 +590,30 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
         `/academies/${academyId}/curriculum-sessions/${curriculumSessionId}/activities`, {
           method: "PUT", csrf: true, body: JSON.stringify({ activities }),
         }),
+    /* 가져오기 스테이징 PS3 — 업로드→미리보기→행수정→커밋→되돌리기 */
+    stageImport: (academyId: string, body: { fileName: string; csvText: string; mapping?: object }) =>
+      call(ImportStaged, `/academies/${academyId}/imports`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    listImports: (academyId: string) =>
+      call(ImportBatchList, `/academies/${academyId}/imports`),
+    getImportBatch: (academyId: string, batchId: string) =>
+      call(ImportBatchDetail, `/academies/${academyId}/imports/${batchId}`),
+    updateImportRow: (academyId: string, batchId: string, rowId: string, body: {
+      normalized?: { name?: string; description?: string; primaryDomainName?: string; secondaryDomainNames?: string[] };
+      resolution?: "CREATE" | "SKIP";
+    }) =>
+      call(z.object({ kind: z.string(), validationStatus: z.string().optional() }),
+        `/academies/${academyId}/imports/${batchId}/rows/${rowId}`, {
+          method: "PATCH", csrf: true, body: JSON.stringify(body),
+        }),
+    commitImport: (academyId: string, batchId: string) =>
+      call(ImportCommitResult, `/academies/${academyId}/imports/${batchId}/commit`, {
+        method: "POST", csrf: true,
+      }),
+    revertImport: (academyId: string, batchId: string) =>
+      call(z.object({ kind: z.string(), archived: z.number() }),
+        `/academies/${academyId}/imports/${batchId}/revert`, { method: "POST", csrf: true }),
   };
 }
 

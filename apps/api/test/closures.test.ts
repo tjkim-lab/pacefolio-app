@@ -166,3 +166,42 @@ test("철회: 이 이벤트가 취소한 세션만 복원 — 다른 사유 취�
   // 멱등
   assert.equal(((await (await post(owner, `/academies/a_wg/closures/${closureId}/revocation`)).json()) as { restoredSessions: number }).restoredSessions, 0);
 });
+
+test("#40: 원생 목록(staff)·수납기간 멱등·견적→DRAFT 청구 초안 저장", async () => {
+  // 원생 목록: staff OK(PII 미포함) · 코치 403
+  await db.insert(s.participants).values({
+    id: "p_mj", academyId: "a_wg", name: "이수아", birth: "2018-02-02", ageLabel: "8세",
+  });
+  const list = await get(owner, "/academies/a_wg/participants");
+  assert.equal(list.status, 200);
+  const rows = ((await list.json()) as { participants: { name: string }[] }).participants;
+  assert.ok(rows.some((r) => r.name === "이수아"));
+  assert.ok(!JSON.stringify(rows).includes("phone"));
+  assert.equal((await get(coach, "/academies/a_wg/participants")).status, 403);
+  // 수납기간 find-or-create 멱등
+  const bp1 = await post(owner, "/academies/a_wg/billing-periods", {
+    periodStart: "2026-09-01", periodEnd: "2026-11-30", cycleMonths: 3,
+  });
+  const bp2 = await post(owner, "/academies/a_wg/billing-periods", {
+    periodStart: "2026-09-01", periodEnd: "2026-11-30", cycleMonths: 3,
+  });
+  const id1 = ((await bp1.json()) as { billingPeriodId: string }).billingPeriodId;
+  const id2 = ((await bp2.json()) as { billingPeriodId: string }).billingPeriodId;
+  assert.equal(id1, id2); // 같은 기간 = 같은 행
+  // 견적(9월 유효 7회 · 9/15 입회 5회) → DRAFT 청구(일할+할인 라인)
+  const q = (await (await post(owner, `/academies/a_wg/classes/${clsId()}/proration-quote`, {
+    periodStart: "2026-09-01", periodEnd: "2026-09-30", joinDate: "2026-09-15", baseFee: 160_000,
+  })).json()) as { amount: number; remainingSessions: number; totalSessions: number };
+  const inv = await post(owner, "/academies/a_wg/invoices", {
+    participantId: "p_mj", billingPeriodId: id1, dueDate: "2026-09-15",
+    lines: [
+      { type: "TUITION", label: `수강료 일할(${q.remainingSessions}/${q.totalSessions}회)`, amount: q.amount },
+      { type: "DISCOUNT", label: "형제 20%", amount: -Math.round(q.amount * 0.2) },
+    ],
+  });
+  assert.equal(inv.status, 201);
+  const body = (await inv.json()) as { invoiceId: string; total: number };
+  assert.equal(body.total, q.amount - Math.round(q.amount * 0.2)); // 서버 합산 = 일할 − 할인
+  const row = (await db.select().from(s.invoices).where(eq(s.invoices.id, body.invoiceId)))[0];
+  assert.equal(row.status, "DRAFT"); // 저장 = 초안, 발송은 issue 에서
+});

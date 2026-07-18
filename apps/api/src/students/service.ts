@@ -49,6 +49,23 @@ export async function createParticipant(db: Db, input: {
   });
 }
 
+/** 원생 목록(#40) — staff 전용. AudienceFilter 2단계·청구 초안·명단 화면의 기반.
+   연락처 등 PII 미포함 — 이름·상태·연령 라벨만. */
+export async function listParticipants(db: Db, input: {
+  actorRoles: readonly string[]; academyId: string; status?: ParticipantStatus;
+}) {
+  if (!isStaff(input.actorRoles)) return null;
+  const rows = await db.select({
+    participantId: s.participants.id,
+    name: s.participants.name,
+    ageLabel: s.participants.ageLabel,
+    status: s.participants.status,
+  }).from(s.participants)
+    .where(eq(s.participants.academyId, input.academyId))
+    .orderBy(s.participants.name);
+  return input.status ? rows.filter((r) => r.status === input.status) : rows;
+}
+
 export async function changeParticipantStatus(db: Db, input: {
   actorUserId: string; actorRoles: readonly string[]; academyId: string;
   participantId: string; status: ParticipantStatus; reason?: string;

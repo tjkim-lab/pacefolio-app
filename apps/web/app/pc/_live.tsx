@@ -37,6 +37,12 @@ interface OwnerLiveCtx {
   prorationQuote: (classId: string, body: {
     periodStart: string; periodEnd: string; joinDate: string; baseFee: number;
   }) => Promise<{ ok: boolean; message: string; quote?: { totalSessions: number; remainingSessions: number; amount: number; basis: string } }>;
+  /* #40: 청구 초안 저장 — 견적 결과를 DRAFT 청구서로(발송은 청구 초안 검토에서) */
+  participants: { participantId: string; name: string; ageLabel: string; status: string }[];
+  saveDraftInvoice: (input: {
+    participantId: string; periodStart: string; periodEnd: string; dueDate: string;
+    lines: { type: string; label: string; amount: number }[];
+  }) => Promise<{ ok: boolean; message: string; invoiceId?: string; total?: number }>;
   /* #31: 코치 전달사항 — DM 개설→ACK_REQUIRED 전송, READ/ACK 은 서버 상태 재조회 */
   coaches: CoachMember[];
   sendCoachDirective: (coachUserId: string, body: string, urgent: boolean) =>
@@ -59,6 +65,7 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
   const [summary, setSummary] = useState<BillingSummaryData>();
   const [coaches, setCoaches] = useState<CoachMember[]>([]);
   const [classes, setClasses] = useState<{ classId: string; name: string }[]>([]);
+  const [participants, setParticipants] = useState<{ participantId: string; name: string; ageLabel: string; status: string }[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -91,14 +98,15 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
         if (!ms) { setState("FIXTURE"); return; } // 원장 seed 없음 = 데모
         const aid = ms.academyId;
         setAcademyId(aid);
-        const [nt, sum, mem, cls] = await Promise.all([
+        const [nt, sum, mem, cls, pts] = await Promise.all([
           api.listNotices(aid), api.billingSummary(aid), api.listMembers(aid, "COACH"),
-          api.listClasses(aid),
+          api.listClasses(aid), api.listParticipants(aid),
         ]);
         setNotices(nt.notices);
         setSummary(sum);
         setCoaches(mem.members);
         setClasses(cls.classes.map((x) => ({ classId: x.classId, name: x.name })));
+        setParticipants(pts.participants);
         setState("READY");
       } catch (e) {
         if (!reachable) {
@@ -138,6 +146,31 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
     }
     return { ok: true, recipients: r.recipients, message: `보호자 ${r.recipients}명에게 발송했어요` };
   }, [academyId, refreshNotices]);
+
+  const saveDraftInvoice = useCallback(async (input: {
+    participantId: string; periodStart: string; periodEnd: string; dueDate: string;
+    lines: { type: string; label: string; amount: number }[];
+  }) => {
+    if (!academyId) return { ok: false, message: "학원 컨텍스트 없음" };
+    try {
+      const bp = await api.createBillingPeriod(academyId, {
+        periodStart: input.periodStart, periodEnd: input.periodEnd, cycleMonths: 3,
+      }); // find-or-create 멱등
+      const inv = await api.createDraftInvoice(academyId, {
+        participantId: input.participantId, billingPeriodId: bp.billingPeriodId,
+        dueDate: input.dueDate, lines: input.lines,
+      });
+      return {
+        ok: true, invoiceId: inv.invoiceId, total: inv.total,
+        message: `청구 초안 저장(${inv.total.toLocaleString()}원) — 발송은 청구 초안 검토에서`,
+      };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        return { ok: false, message: "이미 이 원생·기간의 청구서가 있어요 — 수정은 VOID 후 재발행" };
+      }
+      return { ok: false, message: e instanceof ApiError ? `저장 실패(${e.status}: ${e.code})` : "저장 실패 — 네트워크 확인" };
+    }
+  }, [academyId]);
 
   const createClosure = useCallback(async (body: {
     scope: "ACADEMY" | "CLASS"; classId?: string; dateStart: string; dateEnd: string;
@@ -199,7 +232,7 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
     <Ctx.Provider value={{
       state, errorMsg, academyId, notices, summary, publish, classes,
       refreshNotices, refreshSummary, coaches, sendCoachDirective, refreshDirective,
-      createClosure, prorationQuote,
+      createClosure, prorationQuote, participants, saveDraftInvoice,
     }}>
       {children}
     </Ctx.Provider>

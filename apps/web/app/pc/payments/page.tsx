@@ -92,6 +92,30 @@ function PCPaymentsBody() {
   };
   const mjBase = mjQuote ? mjQuote.amount : Math.round((mj.r / mjCls.total) * mjCls.fee);
   const mjAmt = Math.round((mjBase * (100 - mjDisc.pct)) / 100 / 10) * 10; // 10원 반올림 정책 고정
+  /* #40: READY 저장 = 실 DRAFT 청구서(일할 TUITION + 할인 라인) — 발송은 검토에서 */
+  const [mjParticipantId, setMjParticipantId] = useState("");
+  const saveDraft = () => {
+    if (ownerLive.state !== "READY") {
+      setMjSaved(true);
+      toast("청구 초안 저장(데모) — 바로 발송하지 않아요. 청구 초안에서 검토 후 확정하세요");
+      return;
+    }
+    if (!mjQuote || !mjParticipantId || !mjJoin) { toast("원생·서버 견적이 필요해요"); return; }
+    const q = quarterRange();
+    const lines: { type: string; label: string; amount: number }[] = [
+      { type: "TUITION", label: `수강료 일할(${mjQuote.remainingSessions}/${mjQuote.totalSessions}회)`, amount: mjQuote.amount },
+    ];
+    if (mjDisc.pct > 0) {
+      lines.push({ type: "DISCOUNT", label: `${mjDisc.nm} −${mjDisc.pct}%`, amount: -Math.round((mjQuote.amount * mjDisc.pct) / 100) });
+    }
+    void ownerLive.saveDraftInvoice({
+      participantId: mjParticipantId, periodStart: q.start, periodEnd: q.end,
+      dueDate: mjJoin, lines,
+    }).then((r) => {
+      toast(r.message);
+      if (r.ok) setMjSaved(true);
+    });
+  };
 
   // 부분 발송 (그룹별 단계)
   const [stages, setStages] = useState<Record<string, GroupStage>>(
@@ -289,6 +313,16 @@ function PCPaymentsBody() {
             <div className="text-[11px] font-bold text-ink3 mb-1 mt-2.5">② 첫 수업일</div>
             {ownerLive.state === "READY" ? (
               <div className="flex gap-2 flex-wrap items-center">
+                <select
+                  value={mjParticipantId}
+                  onChange={(e) => { setMjParticipantId(e.target.value); setMjSaved(false); }}
+                  className="border border-line rounded-lg px-2 py-1.5 text-[12px] font-semibold text-ink bg-fill"
+                >
+                  <option value="">원생 선택</option>
+                  {ownerLive.participants.map((p) => (
+                    <option key={p.participantId} value={p.participantId}>{p.name} ({p.ageLabel})</option>
+                  ))}
+                </select>
                 <input type="date" value={mjJoin} onChange={(e) => { setMjJoin(e.target.value); setMjQuote(null); }}
                   className="border border-line rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-ink bg-fill" />
                 <label className="text-[11px] font-semibold text-ink3">분기료(원)</label>
@@ -328,9 +362,10 @@ function PCPaymentsBody() {
             <p className="text-[11.5px] text-ink3 font-medium leading-relaxed mt-2">
               공휴일·학원 휴무 제외된 <b className="text-brand">실제 수업 캘린더 기준</b> 회차예요 — 단순 날짜 차이 아님. 수동 수정 시 이유 필수.
             </p>
-            <Button variant="primary" full className="mt-3" disabled={mjSaved}
-              onClick={() => { setMjSaved(true); toast("청구 초안 저장 — 바로 발송하지 않아요. 청구 초안에서 검토 후 확정하세요"); }}>
-              {mjSaved ? "초안 저장됨 ✓ · 발송은 청구 초안에서" : `청구 초안으로 저장 · ₩${fmt(mjAmt)}`}
+            <Button variant="primary" full className="mt-3" disabled={mjSaved} onClick={saveDraft}>
+              {mjSaved ? "초안 저장됨 ✓ · 발송은 청구 초안에서"
+                : ownerLive.state === "READY" ? `청구 초안 저장(서버 DRAFT) · ₩${fmt(mjAmt)}`
+                : `청구 초안으로 저장 · ₩${fmt(mjAmt)}`}
             </Button>
           </Panel>
         </div>

@@ -225,7 +225,27 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
 
   # ── 청구 · 결제 · 환불 (P0-1·2·4·7) ──────────────────────────
+  /academies/{academyId}/billing-periods:
+    post:
+      tags: [billing]
+      summary: 수납 기간 생성 — 같은 (periodStart, periodEnd) 재요청 = 기존 행 반환(find-or-create 멱등). staff 전용. (구현됨 #40)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+      responses:
+        '201': { description: '{ billingPeriodId, periodStart, periodEnd } — 기존 행 반환 시에도 동일 형식' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /academies/{academyId}/invoices:
+    post:
+      tags: [billing]
+      summary: >
+        청구서 초안(DRAFT) 생성 — participant·billingPeriod 학원 귀속 검증(422),
+        total = 라인 합산(서버 계산, 클라이언트 금액 신뢰 안 함). 발송은 별도 issue. staff 전용. (구현됨 #40)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+      responses:
+        '201': { description: '{ invoiceId, total, status: DRAFT }' }
+        '409': { description: 같은 원생·기간 청구서 중복 }
+        '422': { description: participant/billingPeriod 귀속 불일치 }
     get:
       tags: [billing]
       summary: 내 자녀 청구서 목록 — 보호자 관점(VERIFIED 연결 자녀분만)
@@ -364,6 +384,11 @@ paths:
       summary: 학생 등록(원장·데스크만) — 선등록 보호자 연락처(OTP 결합 근거) 포함. (구현됨)
       parameters: [ { $ref: '#/components/parameters/AcademyId' } ]
       responses: { '201': { description: '{ participantId }' }, '403': { $ref: '#/components/responses/Forbidden' } }
+    get:
+      tags: [attendance]
+      summary: 원생 목록(staff 전용) — PII 미포함(participantId·name·ageLabel·status만). 청구 초안 원생 선택용. (구현됨 #40)
+      parameters: [ { $ref: '#/components/parameters/AcademyId' } ]
+      responses: { '200': { description: '{ participants: [{ participantId, name, ageLabel, status }] }' }, '403': { $ref: '#/components/responses/Forbidden' } }
   /academies/{academyId}/participants/{participantId}/status:
     post:
       tags: [attendance]
@@ -1075,6 +1100,53 @@ paths:
       tags: [program-studio]
       summary: 회차 활동 세트 교체 — 개정판 ID 로 연결·ARCHIVED 배치 금지·활동 수 고정 없음(DRAFT 만)
       responses: { '200': { description: 교체됨 }, '422': { description: 게시본·보관 활동·중복 배치 } }
+
+  # ── 가져오기 스테이징 PS3 (docs/20 §4 · 지시서 §8) — 미리보기 전 운영 무변경·
+  #    원본 보존·자동 병합 금지·같은 파일 중복 커밋 방지·batch 되돌리기(archive).
+  /academies/{academyId}/imports:
+    parameters: [{ $ref: '#/components/parameters/AcademyId' }]
+    post:
+      tags: [program-studio]
+      summary: CSV 스테이징 — 파싱→열 자동매핑→정규화→검증→중복 후보(운영 데이터 무변경)
+      responses:
+        '201': { description: batchId·요약(total/valid/invalid/withDuplicates·reuploadOfCommitted) }
+        '422': { description: 이름 열 미발견·행 수 초과 }
+    get: { tags: [program-studio], summary: 가져오기 배치 목록, responses: { '200': { description: batches[] } } }
+  /academies/{academyId}/imports/{batchId}:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: batchId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [program-studio]
+      summary: 미리보기 — 행별 원본(raw)·정규화 제안·검증 메시지·중복 후보·처리 상태
+      responses: { '200': { description: 상세 }, '404': { description: 없음(교차 테넌트 포함) } }
+  /academies/{academyId}/imports/{batchId}/rows/{rowId}:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: batchId, in: path, required: true, schema: { type: string } }
+      - { name: rowId, in: path, required: true, schema: { type: string } }
+    patch:
+      tags: [program-studio]
+      summary: 행 수정(정규화 값·CREATE/SKIP) → 재검증 — STAGED 배치만
+      responses: { '200': { description: 재검증 결과 }, '422': { description: 커밋된 배치 } }
+  /academies/{academyId}/imports/{batchId}/commit:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: batchId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [program-studio]
+      summary: 커밋(tx) — VALID+CREATE 행만 활동 생성(부분 성공 정책)·같은 파일 재커밋 409
+      responses:
+        '200': { description: created/skipped/invalid }
+        '409': { description: 이미 커밋됨·같은 fileHash 커밋 존재 }
+  /academies/{academyId}/imports/{batchId}/revert:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: batchId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [program-studio]
+      summary: 되돌리기 — batch 가 만든 활동을 보관(archive) 처리(삭제 아님·멱등)
+      responses: { '200': { description: archived 수 }, '422': { description: 커밋 전 배치 } }
 
 components:
   securitySchemes:
