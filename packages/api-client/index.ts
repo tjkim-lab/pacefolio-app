@@ -78,6 +78,30 @@ export type SessionList = z.infer<typeof SessionList>;
 const AttendanceSave = z.object({ recorded: z.number().int(), updated: z.number().int() });
 const SessionComplete = z.object({ sessionId: z.string(), status: z.string() });
 
+/* Admin 관제(#27) — PLATFORM_ADMIN 전용(비관리자 404) */
+const AdminOverview = z.object({
+  academies: z.object({ total: z.number().int(), suspended: z.number().int() }),
+  participants: z.number().int(),
+  subscription: z.object({
+    mrrKrw: z.number().int(),
+    activeByPlan: z.object({ BASIC: z.number().int(), PRO: z.number().int() }),
+    priceTable: z.record(z.string(), z.number().int()),
+  }),
+  tuition: z.object({ billedKrw: z.number().int(), unpaidKrw: z.number().int(), capturedKrw: z.number().int() }),
+  refundsPending: z.number().int(),
+});
+const AdminAcademyList = z.object({
+  academies: z.array(z.object({
+    academyId: z.string(), name: z.string(), ownerName: z.string(),
+    suspended: z.boolean(),
+    subscription: z.object({
+      plan: z.string(), status: z.string(), priceKrwMonthly: z.number().int(),
+    }).nullable(),
+    activeParticipants: z.number().int(), unpaidKrw: z.number().int(),
+  })),
+});
+const AdminSubscriptionSet = z.object({ subscriptionId: z.string(), priceKrwMonthly: z.number().int() });
+
 /* ── 에러 — status 와 서버 error 코드 보존 ── */
 export class ApiError extends Error {
   constructor(
@@ -176,6 +200,13 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
     completeSession: (academyId: string, sessionId: string) =>
       call(SessionComplete, `/academies/${academyId}/sessions/${sessionId}/complete`, {
         method: "POST", csrf: true,
+      }),
+    /* Admin 관제(#27) — 수익(MRR)·학원별 지표·구독 지정 */
+    adminOverview: () => call(AdminOverview, "/admin/overview"),
+    adminAcademies: () => call(AdminAcademyList, "/admin/academies"),
+    adminSetSubscription: (academyId: string, plan: "BASIC" | "PRO") =>
+      call(AdminSubscriptionSet, `/admin/academies/${academyId}/subscription`, {
+        method: "PUT", csrf: true, body: JSON.stringify({ plan }),
       }),
   };
 }
