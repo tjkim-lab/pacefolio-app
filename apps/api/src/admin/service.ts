@@ -1,0 +1,283 @@
+/* PACEFOLIO Admin 백엔드 1차 (#27) — TJ 관제 축
+   ① 관제 조회: 플랫폼 overview(MRR·구독·수납 집계) + 학원별 지표
+   ② 구독: 가격정책 확정(2026-07-18) BASIC 29,000 / PRO 99,000 — 지정·변경·해지
+   ③ SupportView: 사유 필수·시간 제한·철회 — 테넌트 내부 열람의 유일한 문
+   ④ 통제 액션: 학원 정지(전 멤버 세션 폐기 + guard 차단)·사용자 세션 강제 폐기
+   전 액션 감사(audit) — "관리자도 감사받는다"가 이 모듈의 헌법. */
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { schema as s } from "@pacefolio/db";
+import {
+  SUBSCRIPTION_PRICE_KRW, SUBSCRIPTION_PLAN, type SubscriptionPlan,
+} from "@pacefolio/domain";
+import { newId } from "../crypto";
+import { recordAudit } from "../audit";
+import { revokeAllSessions, type Db } from "../sessions/service";
+
+export type AdminResult<T = Record<never, never>> =
+  | ({ kind: "OK" } & T)
+  | { kind: "NOT_FOUND" }
+  | { kind: "INVALID"; reason: string };
+
+/* ── ① 관제 조회 ─────────────────────────────────────── */
+
+export async function getPlatformOverview(db: Db) {
+  const [academyRow] = await db.select({
+    total: sql<number>`count(*)::int`,
+    suspended: sql<number>`count(*) filter (where ${s.academies.suspendedAt} is not null)::int`,
+  }).from(s.academies);
+  const [participantRow] = await db.select({ n: sql<number>`count(*)::int` }).from(s.participants);
+
+  const subs = await db.select({
+    plan: s.academySubscriptions.plan,
+    status: s.academySubscriptions.status,
+    mrr: sql<number>`coalesce(sum(${s.academySubscriptions.priceKrwMonthly}), 0)::int`,
+    n: sql<number>`count(*)::int`,
+  }).from(s.academySubscriptions)
+    .groupBy(s.academySubscriptions.plan, s.academySubscriptions.status);
+  const active = subs.filter((r) => r.status === "ACTIVE");
+  const planCount = (p: SubscriptionPlan) => active.find((r) => r.plan === p)?.n ?? 0;
+
+  /* 수납 집계(테넌트 학원비 — 우리 매출 아님, 관제용): 발행·수납·미납 */
+  const [inv] = await db.select({
+    billed: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} not in ('DRAFT','VOID')), 0)::int`,
+    unpaid: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} in ('ISSUED','PARTIALLY_PAID','OVERDUE')), 0)::int`,
+  }).from(s.invoices);
+  const [pay] = await db.select({
+    captured: sql<number>`coalesce(sum(${s.payments.amount}) filter (where ${s.payments.status} = 'CAPTURED'), 0)::int`,
+  }).from(s.payments);
+  const [ref] = await db.select({
+    pending: sql<number>`count(*) filter (where ${s.refunds.status} in ('REQUESTED','MUTUALLY_APPROVED','PROCESSING'))::int`,
+  }).from(s.refunds);
+
+  return {
+    academies: { total: academyRow.total, suspended: academyRow.suspended },
+    participants: participantRow.n,
+    subscription: {
+      /* 우리 수익의 정본: MRR = ACTIVE 구독 월요금 합 */
+      mrrKrw: active.reduce((sum, r) => sum + r.mrr, 0),
+      activeByPlan: { BASIC: planCount("BASIC"), PRO: planCount("PRO") },
+      priceTable: SUBSCRIPTION_PRICE_KRW,
+    },
+    tuition: { billedKrw: inv.billed, unpaidKrw: inv.unpaid, capturedKrw: pay.captured },
+    refundsPending: ref.pending,
+  };
+}
+
+export async function listAcademiesOverview(db: Db) {
+  const rows = await db.select({
+    academyId: s.academies.id,
+    name: s.academies.name,
+    ownerName: s.academies.ownerName,
+    suspendedAt: s.academies.suspendedAt,
+    createdAt: s.academies.createdAt,
+  }).from(s.academies).orderBy(s.academies.createdAt);
+
+  const subs = await db.select().from(s.academySubscriptions);
+  const parts = await db.select({
+    academyId: s.participants.academyId,
+    n: sql<number>`count(*) filter (where ${s.participants.status} in ('TRIAL','ENROLLED'))::int`,
+  }).from(s.participants).groupBy(s.participants.academyId);
+  const invs = await db.select({
+    academyId: s.invoices.academyId,
+    unpaid: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} in ('ISSUED','PARTIALLY_PAID','OVERDUE')), 0)::int`,
+  }).from(s.invoices).groupBy(s.invoices.academyId);
+
+  return rows.map((a) => {
+    const sub = subs.find((x) => x.academyId === a.academyId);
+    return {
+      academyId: a.academyId, name: a.name, ownerName: a.ownerName,
+      suspended: !!a.suspendedAt,
+      subscription: sub
+        ? { plan: sub.plan, status: sub.status, priceKrwMonthly: sub.priceKrwMonthly }
+        : null,
+      activeParticipants: parts.find((x) => x.academyId === a.academyId)?.n ?? 0,
+      unpaidKrw: invs.find((x) => x.academyId === a.academyId)?.unpaid ?? 0,
+    };
+  });
+}
+
+/* ── ② 구독 — 학원당 1행, 지정 = upsert(가격 스냅샷) ───── */
+
+export async function setSubscription(db: Db, input: {
+  actorUserId: string; academyId: string; plan: SubscriptionPlan;
+}, nowISO: string): Promise<AdminResult<{ subscriptionId: string; priceKrwMonthly: number }>> {
+  if (!SUBSCRIPTION_PLAN.includes(input.plan)) return { kind: "INVALID", reason: "알 수 없는 플랜" };
+  const price = SUBSCRIPTION_PRICE_KRW[input.plan];
+  return db.transaction(async (tx) => {
+    const academy = (await tx.select().from(s.academies)
+      .where(eq(s.academies.id, input.academyId)).for("update"))[0];
+    if (!academy) return { kind: "NOT_FOUND" as const };
+    const prev = (await tx.select().from(s.academySubscriptions)
+      .where(eq(s.academySubscriptions.academyId, input.academyId)).for("update"))[0];
+    let subscriptionId: string;
+    if (prev) {
+      subscriptionId = prev.id;
+      await tx.update(s.academySubscriptions).set({
+        plan: input.plan, priceKrwMonthly: price, status: "ACTIVE",
+        canceledAt: null, updatedAt: nowISO,
+        version: sql`${s.academySubscriptions.version} + 1`,
+      }).where(eq(s.academySubscriptions.id, prev.id));
+    } else {
+      subscriptionId = newId("sub");
+      await tx.insert(s.academySubscriptions).values({
+        id: subscriptionId, academyId: input.academyId,
+        plan: input.plan, status: "ACTIVE", priceKrwMonthly: price,
+        startedAt: nowISO, createdAt: nowISO, updatedAt: nowISO,
+      });
+    }
+    await recordAudit(tx, {
+      academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
+      action: "subscription.set", targetType: "AcademySubscription", targetId: subscriptionId,
+      detail: { plan: input.plan, priceKrwMonthly: price, prevPlan: prev?.plan ?? null },
+      success: true,
+    }, nowISO);
+    return { kind: "OK" as const, subscriptionId, priceKrwMonthly: price };
+  });
+}
+
+export async function cancelSubscription(db: Db, input: {
+  actorUserId: string; academyId: string; reason?: string;
+}, nowISO: string): Promise<AdminResult<{ subscriptionId: string }>> {
+  return db.transaction(async (tx) => {
+    const sub = (await tx.select().from(s.academySubscriptions)
+      .where(eq(s.academySubscriptions.academyId, input.academyId)).for("update"))[0];
+    if (!sub) return { kind: "NOT_FOUND" as const };
+    if (sub.status !== "CANCELED") {
+      await tx.update(s.academySubscriptions).set({
+        status: "CANCELED", canceledAt: nowISO, updatedAt: nowISO,
+        version: sql`${s.academySubscriptions.version} + 1`,
+      }).where(eq(s.academySubscriptions.id, sub.id));
+      await recordAudit(tx, {
+        academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
+        action: "subscription.canceled", targetType: "AcademySubscription", targetId: sub.id,
+        reason: input.reason, detail: { plan: sub.plan }, success: true,
+      }, nowISO);
+    }
+    return { kind: "OK" as const, subscriptionId: sub.id }; // 멱등
+  });
+}
+
+/* ── ③ SupportView — 열람은 세션 단위, 사유·만료·철회·감사 ── */
+
+const SUPPORT_VIEW_MAX_MINUTES = 60;
+const SUPPORT_VIEW_DEFAULT_MINUTES = 30;
+
+export async function issueSupportView(db: Db, input: {
+  actorUserId: string; academyId: string; reason: string;
+  minutes?: number; allowedResources?: readonly string[];
+}, nowISO: string): Promise<AdminResult<{ supportViewId: string; expiresAt: string }>> {
+  if (!input.reason.trim()) return { kind: "INVALID", reason: "사유 필수" };
+  const minutes = Math.min(input.minutes ?? SUPPORT_VIEW_DEFAULT_MINUTES, SUPPORT_VIEW_MAX_MINUTES);
+  if (minutes < 5) return { kind: "INVALID", reason: "최소 5분" };
+  return db.transaction(async (tx) => {
+    const academy = (await tx.select({ id: s.academies.id }).from(s.academies)
+      .where(eq(s.academies.id, input.academyId)))[0];
+    if (!academy) return { kind: "NOT_FOUND" as const };
+    const supportViewId = newId("sv");
+    const expiresAt = new Date(new Date(nowISO).getTime() + minutes * 60_000).toISOString();
+    await tx.insert(s.supportViews).values({
+      id: supportViewId, academyId: input.academyId, adminUserId: input.actorUserId,
+      reason: input.reason.trim(),
+      allowedResources: JSON.stringify(input.allowedResources ?? ["OPERATIONS_READONLY"]),
+      issuedAt: nowISO, expiresAt, createdAt: nowISO,
+    });
+    await recordAudit(tx, {
+      academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
+      action: "support_view.issued", targetType: "SupportView", targetId: supportViewId,
+      reason: input.reason.trim(), detail: { minutes }, success: true,
+    }, nowISO);
+    return { kind: "OK" as const, supportViewId, expiresAt };
+  });
+}
+
+export async function revokeSupportView(db: Db, input: {
+  actorUserId: string; supportViewId: string; reason?: string;
+}, nowISO: string): Promise<AdminResult<{ supportViewId: string }>> {
+  return db.transaction(async (tx) => {
+    const sv = (await tx.select().from(s.supportViews)
+      .where(eq(s.supportViews.id, input.supportViewId)).for("update"))[0];
+    if (!sv) return { kind: "NOT_FOUND" as const };
+    if (!sv.revokedAt) {
+      await tx.update(s.supportViews).set({ revokedAt: nowISO })
+        .where(eq(s.supportViews.id, sv.id));
+      await recordAudit(tx, {
+        academyId: sv.academyId, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
+        action: "support_view.revoked", targetType: "SupportView", targetId: sv.id,
+        reason: input.reason, success: true,
+      }, nowISO);
+    }
+    return { kind: "OK" as const, supportViewId: sv.id }; // 멱등
+  });
+}
+
+/* ── ④ 통제 액션 — 정지는 guard 차단 + 전 멤버 세션 즉시 폐기 ── */
+
+export async function suspendAcademy(db: Db, input: {
+  actorUserId: string; academyId: string; reason: string;
+}, nowISO: string): Promise<AdminResult<{ revokedUserSessions: number }>> {
+  if (!input.reason.trim()) return { kind: "INVALID", reason: "사유 필수" };
+  return db.transaction(async (tx) => {
+    const academy = (await tx.select().from(s.academies)
+      .where(eq(s.academies.id, input.academyId)).for("update"))[0];
+    if (!academy) return { kind: "NOT_FOUND" as const };
+    if (academy.suspendedAt) return { kind: "OK" as const, revokedUserSessions: 0 }; // 멱등
+    await tx.update(s.academies).set({
+      suspendedAt: nowISO, updatedAt: nowISO, version: sql`${s.academies.version} + 1`,
+    }).where(eq(s.academies.id, academy.id));
+    /* 다음 요청을 기다리지 않는다 — 소속 전원 세션 즉시 폐기(guard 는 이후 재로그인도 차단) */
+    const members = await tx.select({ userId: s.academyMemberships.userId })
+      .from(s.academyMemberships)
+      .where(eq(s.academyMemberships.academyId, academy.id));
+    const userIds = [...new Set(members.map((m) => m.userId))];
+    if (userIds.length > 0) {
+      await tx.update(s.sessions).set({ revokedAt: nowISO }).where(and(
+        inArray(s.sessions.userId, userIds), isNull(s.sessions.revokedAt),
+      ));
+    }
+    await recordAudit(tx, {
+      academyId: academy.id, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
+      action: "academy.suspended", targetType: "Academy", targetId: academy.id,
+      reason: input.reason.trim(), detail: { members: userIds.length }, success: true,
+    }, nowISO);
+    return { kind: "OK" as const, revokedUserSessions: userIds.length };
+  });
+}
+
+export async function unsuspendAcademy(db: Db, input: {
+  actorUserId: string; academyId: string; reason?: string;
+}, nowISO: string): Promise<AdminResult> {
+  return db.transaction(async (tx) => {
+    const academy = (await tx.select().from(s.academies)
+      .where(eq(s.academies.id, input.academyId)).for("update"))[0];
+    if (!academy) return { kind: "NOT_FOUND" as const };
+    if (academy.suspendedAt) {
+      await tx.update(s.academies).set({
+        suspendedAt: null, updatedAt: nowISO, version: sql`${s.academies.version} + 1`,
+      }).where(eq(s.academies.id, academy.id));
+      await recordAudit(tx, {
+        academyId: academy.id, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
+        action: "academy.unsuspended", targetType: "Academy", targetId: academy.id,
+        reason: input.reason, success: true,
+      }, nowISO);
+    }
+    return { kind: "OK" as const }; // 멱등
+  });
+}
+
+export async function adminRevokeUserSessions(db: Db, input: {
+  actorUserId: string; targetUserId: string; reason: string;
+}, nowISO: string): Promise<AdminResult> {
+  if (!input.reason.trim()) return { kind: "INVALID", reason: "사유 필수" };
+  return db.transaction(async (tx) => {
+    const user = (await tx.select({ id: s.users.id }).from(s.users)
+      .where(eq(s.users.id, input.targetUserId)))[0];
+    if (!user) return { kind: "NOT_FOUND" as const };
+    await revokeAllSessions(tx, user.id, nowISO);
+    await recordAudit(tx, {
+      actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
+      action: "user.sessions_revoked", targetType: "User", targetId: user.id,
+      reason: input.reason.trim(), success: true,
+    }, nowISO);
+    return { kind: "OK" as const };
+  });
+}

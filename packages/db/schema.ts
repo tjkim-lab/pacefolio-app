@@ -100,6 +100,7 @@ export const academies = pgTable("academies", {
   logoEmoji: text("logo_emoji").notNull(),
   ownerName: text("owner_name").notNull(),
   billingCycleDefault: integer("billing_cycle_default").notNull(),
+  suspendedAt: timestamp("suspended_at", { withTimezone: true, mode: "string" }), // admin 통제 — guard 가 403 차단
   createdAt: createdAt(),
   updatedAt: updatedAt(),
   version: version(),
@@ -579,6 +580,43 @@ export const outboxEvents = pgTable("outbox_events", {
   attempts: integer("attempts").default(0).notNull(),
 }, (t) => [
   index("ix_outbox_unpublished").on(t.publishedAt, t.createdAt), // publisher 폴링
+]);
+
+/* ── PACEFOLIO 구독(학원→우리) — 가격 확정 2026-07-18: BASIC 29,000 / PRO 99,000 ── */
+export const subscriptionPlanEnum = pgEnum("subscription_plan", ["BASIC", "PRO"]);
+export const subscriptionStatusEnum = pgEnum("subscription_status", ["TRIAL", "ACTIVE", "PAST_DUE", "CANCELED"]);
+
+export const academySubscriptions = pgTable("academy_subscriptions", {
+  id: text("id").primaryKey(),                     // sub_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  plan: subscriptionPlanEnum("plan").notNull(),
+  status: subscriptionStatusEnum("status").notNull(),
+  priceKrwMonthly: integer("price_krw_monthly").notNull(), // 스냅샷 — 가격 개정 대비
+  startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }).notNull(),
+  canceledAt: timestamp("canceled_at", { withTimezone: true, mode: "string" }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: version(),
+}, (t) => [
+  uniqueIndex("uq_subscription_academy").on(t.academyId), // 학원당 구독 1개(플랜 변경 = 갱신)
+  check("ck_subscription_price", sql`${t.priceKrwMonthly} > 0 AND ${t.priceKrwMonthly} <= 10000000`),
+]);
+
+/* SupportView — 플랫폼 관리자의 테넌트 내부 열람은 세션 단위로만
+   (domain authorization.ts 설계의 DB 정본): 사유 필수 · 시간 제한 · 철회 가능 · 전 이력 감사 */
+export const supportViews = pgTable("support_views", {
+  id: text("id").primaryKey(),                     // sv_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  adminUserId: text("admin_user_id").notNull().references(() => users.id),
+  reason: text("reason").notNull(),                // 발급 사유 — 공란 금지
+  allowedResources: text("allowed_resources").notNull(), // JSON 배열 문자열
+  issuedAt: timestamp("issued_at", { withTimezone: true, mode: "string" }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+  createdAt: createdAt(),
+}, (t) => [
+  index("ix_support_views_academy").on(t.academyId),
+  check("ck_support_view_window", sql`${t.expiresAt} > ${t.issuedAt}`),
 ]);
 
 /* ── 기본선 3단계(#24): 공지 — 발행·읽음 추적(미열람 명단의 서버 정본) ── */

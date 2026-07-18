@@ -4,6 +4,8 @@
    실패 = 401 통일(fail-closed) — 이유 세분 노출 금지. */
 import type { Context, Next } from "hono";
 import { getCookie } from "hono/cookie";
+import { eq } from "drizzle-orm";
+import { schema as s } from "@pacefolio/db";
 import { resolveSession, revokeAllSessions, type Db, type ResolvedSession } from "./sessions/service";
 
 export const SESSION_COOKIE = "pf_session";
@@ -43,6 +45,10 @@ export function requireAcademyContext(db: Db, now: () => string, requiredRole?: 
     }
     const m = auth.memberships.find((x) => x.academyId === academyId);
     if (!m) return c.json({ error: "FORBIDDEN_TENANT_SCOPE" }, 403);
+    /* admin 통제 액션(#27): 정지된 학원은 전 역할 차단 — 구독·정책 위반 대응 지렛대 */
+    const academy = (await db.select({ suspendedAt: s.academies.suspendedAt })
+      .from(s.academies).where(eq(s.academies.id, academyId)))[0];
+    if (academy?.suspendedAt) return c.json({ error: "ACADEMY_SUSPENDED" }, 403);
     if (m.status !== "ACTIVE") {
       await revokeAllSessions(db, auth.userId, now()); // docs/10: 접근 차단 + 세션·토큰 폐기
       return c.json({ error: "MEMBERSHIP_NOT_ACTIVE" }, 403);
@@ -51,6 +57,19 @@ export function requireAcademyContext(db: Db, now: () => string, requiredRole?: 
       return c.json({ error: "FORBIDDEN_ROLE" }, 403);
     }
     c.set("membership", m);
+    await next();
+  };
+}
+
+/** Admin 경계(#27) — requireAcademyContext 의 PLATFORM_ADMIN 차단과 대칭.
+   ACTIVE PLATFORM_ADMIN 멤버십만 통과. 그 외엔 404(admin 표면 존재 은닉). */
+export function requirePlatformAdmin() {
+  return async (c: Context<GuardEnv>, next: Next) => {
+    const auth = c.get("auth");
+    const ok = auth?.memberships.some(
+      (m) => m.roles.includes("PLATFORM_ADMIN") && m.status === "ACTIVE",
+    );
+    if (!ok) return c.json({ error: "NOT_FOUND" }, 404);
     await next();
   };
 }

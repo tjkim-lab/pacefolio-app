@@ -81,6 +81,16 @@ export function canTransitionParticipantStatus(from: ParticipantStatus, to: Part
   return PARTICIPANT_NEXT[from].includes(to);
 }
 
+/* PACEFOLIO 구독(학원→우리) — 가격정책 확정 2026-07-18 (TJ):
+   2플랜 · 월 29,000 / 99,000. 플랜별 기능 구분은 TBD(가격만 선확정). */
+export const SUBSCRIPTION_PLAN = ["BASIC", "PRO"] as const;
+export type SubscriptionPlan = (typeof SUBSCRIPTION_PLAN)[number];
+export const SUBSCRIPTION_PRICE_KRW: Record<SubscriptionPlan, number> = {
+  BASIC: 29_000, PRO: 99_000,
+};
+export const SUBSCRIPTION_STATUS = ["TRIAL", "ACTIVE", "PAST_DUE", "CANCELED"] as const;
+export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUS)[number];
+
 /* 결제 서비스 온보딩 상태 — 원장 설정의 PG 가입·심사 수명주기 */
 export const PG_ONBOARDING_STATUS = ["NOT_ENROLLED", "IN_REVIEW", "AVAILABLE", "ACTIVE", "RESTRICTED"] as const;
 export type PgOnboardingStatus = (typeof PG_ONBOARDING_STATUS)[number];

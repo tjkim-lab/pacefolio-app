@@ -576,27 +576,83 @@ paths:
       responses:
         '204': { description: 취소됨 }
 
-  # ── Admin Support View (읽기전용·만료·감사) ───────────────────
-  /admin/support-view-sessions:
-    post:
+  # ── Admin 백엔드 1차(#27) — PLATFORM_ADMIN 전용 경계 ───────────
+  # 일반 역할 접근 = 404(표면 은닉) · PLATFORM_ADMIN 의 일반 학원 API = 403 (대칭 격리)
+  # 상태 변경 전부 감사(AuditLog actorRole=PLATFORM_ADMIN)
+  /admin/overview:
+    get:
       tags: [admin]
-      summary: >
-        Support View 세션 발급 — PLATFORM_ADMIN + MFA. ticket·사유 필수, 15분 만료,
-        target academy allowlist, 마스킹 기본, 모든 접근 감사 로그. (계약 초안 — 미구현)
+      summary: 플랫폼 관제 — MRR(ACTIVE 구독 월요금 합)·플랜별 카운트·수납/미납·환불 대기
+      responses:
+        '200': { description: '집계(academies·participants·subscription{mrrKrw,activeByPlan,priceTable}·tuition·refundsPending)' }
+        '404': { description: 비관리자 — 표면 은닉 }
+  /admin/academies:
+    get:
+      tags: [admin]
+      summary: 학원별 지표 — 구독(플랜·상태·가격)·재원 원생 수·미납액·정지 여부
+      responses:
+        '200': { description: 학원 목록 }
+        '404': { description: 비관리자 }
+  /admin/academies/{academyId}/subscription:
+    put:
+      tags: [admin]
+      summary: 구독 지정·변경 — 가격정책 확정(2026-07-18) BASIC 29,000/PRO 99,000, 가격 스냅샷 저장
+      parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [targetAcademyId, supportTicketId, reason], properties: { targetAcademyId: { type: string }, supportTicketId: { type: string }, reason: { type: string } } } } }
+        content: { application/json: { schema: { type: object, required: [plan], properties: { plan: { type: string, enum: [BASIC, PRO] } } } } }
       responses:
-        '201': { description: '세션(expiresAt)', content: { application/json: { schema: { type: object, properties: { supportViewSessionId: { type: string }, expiresAt: { type: string, format: date-time } } } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-  /admin/support-view-sessions/{sessionId}:
+        '200': { description: '지정됨(subscriptionId·priceKrwMonthly)' }
+        '404': { description: 학원 없음 또는 비관리자 }
+  /admin/academies/{academyId}/subscription/cancellation:
+    post:
+      tags: [admin]
+      summary: 구독 해지 — CANCELED 는 MRR 제외, 멱등
+      parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: 해지됨 }
+  /admin/academies/{academyId}/suspension:
+    post:
+      tags: [admin]
+      summary: 학원 정지 — 사유 필수, 전 멤버 세션 즉시 폐기 + guard 가 ACADEMY_SUSPENDED 403
+      parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string } } } } }
+      responses:
+        '200': { description: '정지됨(revokedUserSessions)' }
     delete:
       tags: [admin]
-      summary: Support View 조기 종료(revocation) (계약 초안 — 미구현)
-      parameters:
-        - { name: sessionId, in: path, required: true, schema: { type: string } }
+      summary: 정지 해제 — 멱등
+      parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
       responses:
-        '204': { description: 종료됨 }
+        '204': { description: 해제됨 }
+  /admin/support-views:
+    post:
+      tags: [admin]
+      summary: SupportView 발급 — 사유 필수, 기본 30분·최대 60분 만료, 발급·철회 전부 감사
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [academyId, reason], properties: { academyId: { type: string }, reason: { type: string }, minutes: { type: integer, minimum: 5, maximum: 60 } } } } }
+      responses:
+        '201': { description: '발급(supportViewId·expiresAt)' }
+  /admin/support-views/{supportViewId}/revocation:
+    post:
+      tags: [admin]
+      summary: SupportView 철회 — 멱등
+      parameters: [{ name: supportViewId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: 철회됨 }
+  /admin/users/{userId}/session-revocation:
+    post:
+      tags: [admin]
+      summary: 사용자 전 세션 강제 폐기 — 사유 필수(계정 탈취 대응)
+      parameters: [{ name: userId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string } } } } }
+      responses:
+        '204': { description: 폐기됨 }
 
 components:
   securitySchemes:

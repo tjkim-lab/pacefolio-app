@@ -26,11 +26,19 @@ export async function seedWondergym(db: Db, nowISO: string): Promise<void> {
   await db.insert(s.users).values([
     { id: "u_guardian_psy", name: "박서연", phone: "010-3000-1234", createdAt: nowISO, updatedAt: nowISO },
     { id: "u_owner", name: "김도윤", phone: "010-1000-0001", email: "owner@wondergym.co.kr", createdAt: nowISO, updatedAt: nowISO },
+    { id: "u_platform_tj", name: "TJ", phone: "010-9000-0001", email: "tj.kim@wondergym.co.kr", createdAt: nowISO, updatedAt: nowISO }, // 플랫폼 관제(#27)
   ]);
   await db.insert(s.academyMemberships).values([
     { id: "m_guardian_psy", userId: "u_guardian_psy", academyId: "a_wondergym", roles: ["GUARDIAN"], status: "ACTIVE", joinedAt: "2025-03-02" },
     { id: "m_owner", userId: "u_owner", academyId: "a_wondergym", roles: ["OWNER"], status: "ACTIVE", joinedAt: "2024-03-01" },
+    // PLATFORM_ADMIN — 일반 앱 guard 가 차단, /admin 경계만 통과(#27)
+    { id: "m_platform_tj", userId: "u_platform_tj", academyId: "a_wondergym", roles: ["PLATFORM_ADMIN"], status: "ACTIVE", joinedAt: "2024-01-01" },
   ]);
+  // 원더짐 = 고객 0번 — 구독 데모(가격 확정 2026-07-18: BASIC 29,000 / PRO 99,000)
+  await db.insert(s.academySubscriptions).values({
+    id: "sub_wondergym", academyId: "a_wondergym", plan: "BASIC", status: "ACTIVE",
+    priceKrwMonthly: 29000, startedAt: nowISO, createdAt: nowISO, updatedAt: nowISO,
+  });
   await db.insert(s.participants).values([
     { id: "p_dodam", academyId: "a_wondergym", name: "김도담", birth: "2017-04-10", ageLabel: "8세" },
     { id: "p_seojun", academyId: "a_wondergym", name: "김서준", birth: "2018-08-22", ageLabel: "7세" },
