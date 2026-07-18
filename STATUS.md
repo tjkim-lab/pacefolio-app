@@ -1,23 +1,53 @@
-# PACEFOLIO — 진행 현황 (2026-07-16 밤, R5 GO → 백엔드 착공)
+# PACEFOLIO — 진행 현황 · 핸드오프 (2026-07-19)
 
 > 유소년 스포츠·교육 아카데미 운영 플랫폼. 원더짐 = 고객 0번, 멀티테넌트 day 1.
-> **DB 착공 금지 헌법 해제(2026-07-16 유저 확정)** — 5차 리뷰 **8.7·GO 판정** 근거.
-> 법률 체크(학원법 반환기준·체육시설 분류)는 병행 — 환불 수치 확정 전 완료.
-> 완료 표기는 저장소 증거(테스트·타입·CI) 기준으로만 ✅.
+> 완료 표기는 저장소 증거(테스트·타입·CI) 기준으로만 ✅. 이 문서가 핸드오프 정본 —
+> 세부는 각 절의 docs 링크. 미러(리뷰 공유) = tjkim-lab/pacefolio-app.
 
 ## 한 줄
-5차 리뷰 **8.7·GO** → **백엔드 착공, R5 §7 Phase 0~6 기반 완주** (2026-07-17).
-`packages/db`(12+7테이블·제약 강제·seed) + `apps/api`(OAuth·세션·guard·보호자
-연결·결제·웹훅) + `packages/api-client`(runtime validation). 6차 리뷰(5직무)
-유효 지적 반영(환불 웹훅 처리기·동시각 RECONCILE). 테스트 **183**.
+백엔드 착공(R5 GO 8.7) 이후 **기본선 수명주기 전 구간 실 API + 4역할 화면 실연결 +
+가격 확정·Admin 관제 + 13차 A~E·14차 A–D 리뷰 반영 + 사진 파이프라인 코어**까지 완료.
+테스트 **api 137 · domain 141 · db 15 · web 10 · Playwright e2e 3** — CI 2 job(verify+e2e) 그린.
 
 ## 검증 방법 (재현 가능)
 ```bash
-npm install && npm test   # 183 tests (api 29+3CI전용 + web 4 + db 9 + domain 130 + contracts 8)
+npm install && npm test          # 전 워크스페이스 (PG 동시성 경쟁은 DATABASE_URL_TEST/CI 에서)
 npm run typecheck && npm run lint && npm run build
-npx @redocly/cli lint api/openapi.yaml   # OpenAPI lint (CI 포함)
-# 동시성 경쟁 테스트(동일 invite 20요청→1성공 등)는 CI postgres service 에서 실행
+npx @redocly/cli lint api/openapi.yaml
+npm run test:e2e -w web          # Playwright — API(PGlite seed)+web 자동 기동, chromium
+npm run dev                      # :3000 웹 + :3001 API(PGlite in-memory 자동 seed)
 ```
+
+## 핸드오프 — 지금 어디까지 (2026-07-19)
+
+### ✅ 완료 (착공 이후 → 현재)
+| 트랙 | 내용 | 근거 |
+|---|---|---|
+| 기본선 수명주기(#22~24) | 학원 생성→코치 초대→반·일정(유형 3종)→학생 상태머신→출결(담당·전원 검증)→청구 발행(부호·상한)→오프라인 수납(증빙·정산 도출)→공지(receipt·미열람) — 전 구간 실 API | docs/15 |
+| 화면 실연결(4역할) | 학부모 결제(서버 확정 판정)·코치 출결/전달사항 ACK/안전기록/사진 동의 확인·원장 공지(반 필터)/수납 집계/코치 전달·TJ admin 4표면 — LiveProvider 4상태(fixture = 명시 플래그·비프로덕션 네트워크 실패만) | `*/_live.tsx` |
+| 가격·Admin(#27~29) | **가격 확정: BASIC 29,000/PRO 99,000**(기능 구분 TBD) · 구독+MRR·학원별 관제·정지/해제(자기잠금 방지)·SupportView·전 액션 감사 | docs/17 |
+| 소통(배치14+#31) | READ≠ACK≠RESOLVED·BILLING 서버 카드·HEALTH 담당 검증 + **읽기 시점 재인가**(코치 담당 해제·보호자 canPay 회수 시 가림) + 전송 멱등 ON CONFLICT | docs/12 |
+| 안전(#32) | safety_incidents — 담당 검증·발생 시각=서버·감사(원문 미포함)·원장 알림 Outbox·열람 감사 | |
+| 사진 코어(#19) | 동의 영속화(If-Match)·photo_assets·**동의 게이트 서버 강제**(422+차단 명단)·스토리지 어댑터 경계(dev 구현·프로덕션 미주입 501) — 잔여 = 실 사업자 어댑터 1개 | |
+| 컴플라이언스 | PII 암호화(전화 원문 제거·fail-closed)·proxy 역할 검증(세션 정본·404 fail-closed)·처리방침 초안 | docs/16 |
+| 리뷰 대응 | 13차 A~E 반영 완료(docs/18 트리아지) · **14차 재검토: A·D 승인, B P0·C P1 전부 반영**(fixture fail-open 제거 포함) · 자체 멀티에이전트 리뷰 13건 수정(미납 이중계상 P1 등) | docs/REVIEW-REQUEST-14 |
+| 품질 인프라 | CI verify+e2e · PG 동시성 경쟁 테스트(같은 측 재승인·동시 전송 멱등 등) · openapi drift 가드 | .github/workflows |
+
+### ⏸️ 결정 대기 (TJ) — 이것만 정하면 다음이 풀림
+1. **사진 저장소 사업자** — 추천 AWS S3 서울(또는 NCP). 결정 → 어댑터 1파일(반나절)로 사진 완성
+2. **플랜 기능 구분**(BASIC vs PRO) — 추천 A안(운영=기본, 성장·마케팅=PRO). 결정 → 기능 gate 배선
+3. **데모 배지(#33)** — 디자인 터미널에 비주얼 규약 지시(판별 로직은 준비됨)
+4. **법률 검토 발주** — 학원법 환불 기준·업종 분류·처리방침·수탁 모델 4종 묶음. **실 PG 전 필수(헌법)**
+
+### ▶️ 다음 개발 후보 (결정 무관)
+- **PC draft 서버 정본화**(대형, E 리뷰 13B FAIL 잔여): 휴무 이벤트→회차 재계산·중간입회 청구 초안·그룹 일괄 발송·강사 교체 — 새 도메인 슬라이스
+- AudienceFilter 2단계(수납·대회·CSV) · 양방향 채팅 UI · E2E 범위 확대 · owner 모바일 잔여 실연결
+
+### 🔌 외부 준비물 (Gate 3 전제)
+카카오 개발자 키(실 로그인) · PG sandbox(정산 방식: 결제선생 모델 벤치마크, RESEARCH B1) ·
+알림톡/SMS 사업자 · main branch protection
+
+## 이하 = 이력 (착공 초기 기록, 참고용)
 
 ### ✅ 백엔드 Phase 4~6 기반 + R6 대응 (2026-07-17)
 | 항목 | 내용 |
