@@ -256,3 +256,61 @@ test("C8-02 C: 같은 providerEventId CAPTURED ×20 → APPLY 1·IGNORE 19·vers
   assert.equal(pay.status, "CAPTURED");
   assert.equal(pay.version, 2); // 정확히 1회 갱신(+1)
 });
+
+/* ═══ 12차 hardening(#18): 환불 승인 ↔ 링크 철회 동시 경쟁 ═══
+   철회 tx 가 링크 행 잠금을 쥔 채 커밋 전인 동안 승인이 도착하는 정확한
+   동시 시나리오. FOR UPDATE 재검증(LCV1-P0-03 + 행 잠금)이 없으면 승인은
+   철회 전 스냅샷(VERIFIED)을 읽고 both-commit — "철회됐는데 승인"이 된다.
+   잠금 후에는 승인이 철회 커밋을 기다렸다가 철회된 값을 읽고 DENIED. */
+import { approveRefund } from "../src/billing/refunds";
+
+test("hardening: 링크 철회 tx 커밋 전 도착한 승인 → 잠금 대기 후 DENIED", { skip }, async () => {
+  const w = await setup();
+  const uid = rid("u"); const gid = rid("gd");
+  await w.db.insert(s2.users).values({ id: uid, name: "경쟁보호자", phone: "010-0000-0000" });
+  await w.db.insert(s2.guardians).values({ id: gid, userId: uid });
+  const linkId = rid("gl");
+  await w.db.insert(s2.guardianParticipantLinks).values({
+    id: linkId, guardianId: gid, participantId: w.participantId, academyId: w.academyId,
+    relationshipType: "MOTHER", isPrimaryGuardian: true, verificationStatus: "VERIFIED",
+    canViewSchedule: true, canViewAttendance: true, canViewHealthInfo: true,
+    canReceivePhotos: true, canPay: true, canRequestRefund: true,
+  });
+  const payId = rid("pay");
+  await w.db.insert(s2.payments).values({
+    id: payId, academyId: w.academyId, guardianId: gid, amount: 100000,
+    status: "CAPTURED", idempotencyKey: rid("k"),
+  });
+  const refId = rid("ref");
+  await w.db.insert(s2.refunds).values({
+    id: refId, academyId: w.academyId, paymentId: payId, participantId: w.participantId,
+    status: "REQUESTED", reasonCode: "PERSONAL", requestedAmount: 100000,
+    requestedByUserId: uid, requestedAt: NOW(), idempotencyKey: rid("rk"),
+  });
+
+  const client = await sharedPool!.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "SELECT id FROM guardian_participant_links WHERE id = $1 FOR UPDATE", [linkId],
+    );
+    // 승인 시도 — 링크 FOR UPDATE 에서 블록돼야 함(커밋 전 승인 금지)
+    const approval = approveRefund(w.db, {
+      actorUserId: uid, academyId: w.academyId, refundId: refId, side: "GUARDIAN",
+    }, NOW());
+    await new Promise((r) => setTimeout(r, 400)); // 승인이 잠금 대기에 진입할 시간
+    await client.query(
+      "UPDATE guardian_participant_links SET verification_status = 'REJECTED' WHERE id = $1", [linkId],
+    );
+    await client.query("COMMIT");
+    const res = await approval;
+    assert.equal(res.kind, "DENIED"); // 철회 커밋을 본 뒤 거부 — 운영 심사 경로
+    assert.match((res as { reason: string }).reason, /유효하지 않음/);
+    // 승인 흔적이 없어야 함
+    const ref = (await w.db.select().from(s2.refunds).where(eq2(s2.refunds.id, refId)))[0];
+    assert.equal(ref.guardianApprovedAt, null);
+    assert.equal(ref.status, "REQUESTED");
+  } finally {
+    client.release();
+  }
+});
