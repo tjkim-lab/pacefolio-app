@@ -899,6 +899,8 @@ paths:
   #    불변식: DRAFT 만 편집 · PUBLISHED 직접 수정 금지(복제로만) ·
   #    이름은 식별자가 아니다(Activity 불변 ID + Revision) · 변이 = OWNER(PS1).
   /academies/{academyId}/programs:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
     post:
       tags: [program-studio]
       summary: 프로그램 생성 — 진행 방식 복수 조합, 첫 DRAFT 버전 자동 생성
@@ -915,70 +917,122 @@ paths:
     get:
       tags: [program-studio]
       summary: 프로그램 목록 — 방식·버전 요약 포함(학원 멤버 조회)
-      responses: { '200': { description: programs[] } }
+      responses: { '200': { description: 'programs[]' } }
   /academies/{academyId}/programs/{programId}:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: programId, in: path, required: true, schema: { type: string } }
     patch:
       tags: [program-studio]
       summary: 프로그램 정보 수정·보관(archive) — 버전 콘텐츠와 별개
       responses: { '200': { description: 수정됨 }, '404': { description: 없음(교차 테넌트 포함) } }
   /academies/{academyId}/programs/{programId}/versions:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: programId, in: path, required: true, schema: { type: string } }
     post:
       tags: [program-studio]
       summary: 새 버전(DRAFT) — basedOnVersionId 지정 시 레벨·커리큘럼 딥카피(게시본 수정 경로)
       responses: { '201': { description: versionId }, '422': { description: 복제 원본 없음 } }
   /academies/{academyId}/versions/{versionId}:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: versionId, in: path, required: true, schema: { type: string } }
     get:
       tags: [program-studio]
       summary: 버전 상세 — 레벨·구조·회차·회차별 활동(개정판 이름 포함)
       responses: { '200': { description: 상세 }, '404': { description: 없음 } }
   /academies/{academyId}/versions/{versionId}/publish:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: versionId, in: path, required: true, schema: { type: string } }
     post:
       tags: [program-studio]
       summary: 게시 — DRAFT→PUBLISHED(멱등) · outbox PROGRAM_VERSION_PUBLISHED
       responses: { '200': { description: 게시됨 }, '422': { description: 전이 불가 } }
   /academies/{academyId}/versions/{versionId}/levels:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: versionId, in: path, required: true, schema: { type: string } }
     post:
       tags: [program-studio]
       summary: 단계 생성 — 단계명은 데이터(enum 아님) · DRAFT 만
       responses: { '201': { description: levelId }, '422': { description: 게시본 편집 시도·이름 중복 } }
   /academies/{academyId}/versions/{versionId}/levels/{levelId}:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: versionId, in: path, required: true, schema: { type: string } }
+      - { name: levelId, in: path, required: true, schema: { type: string } }
     patch: { tags: [program-studio], summary: 단계 수정(DRAFT 만), responses: { '200': { description: 수정됨 } } }
     delete: { tags: [program-studio], summary: 단계 삭제(DRAFT 만), responses: { '200': { description: 삭제됨 } } }
   /academies/{academyId}/growth-domains:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
     post:
       tags: [program-studio]
       summary: 성장 영역 생성(FMS 등 — 테넌트 소유 데이터, 템플릿은 seed 복사)
       responses: { '201': { description: domainId } }
-    get: { tags: [program-studio], summary: 성장 영역 목록, responses: { '200': { description: domains[] } } }
+    get: { tags: [program-studio], summary: 성장 영역 목록, responses: { '200': { description: 'domains[]' } } }
   /academies/{academyId}/growth-domains/{domainId}:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: domainId, in: path, required: true, schema: { type: string } }
     patch: { tags: [program-studio], summary: 성장 영역 수정(active 토글 포함 — 삭제 대신 비활성), responses: { '200': { description: 수정됨 } } }
   /academies/{academyId}/activities:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
     post:
       tags: [program-studio]
       summary: 활동 생성 — Activity(불변 ID) + Revision 1(콘텐츠) 동시 생성
       responses: { '201': { description: activityId·revisionId } }
-    get: { tags: [program-studio], summary: 활동 목록(현재 개정판·성장영역 태그 포함), responses: { '200': { description: activities[] } } }
+    get: { tags: [program-studio], summary: 활동 목록(현재 개정판·성장영역 태그 포함), responses: { '200': { description: 'activities[]' } } }
   /academies/{academyId}/activities/{activityId}:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: activityId, in: path, required: true, schema: { type: string } }
     patch:
       tags: [program-studio]
       summary: 활동 수정 — 게시 커리큘럼이 참조 중이면 자동 새 개정판(과거 기록 보존)
       responses: { '200': { description: revisionId·newRevision } }
   /academies/{academyId}/activities/{activityId}/archive:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: activityId, in: path, required: true, schema: { type: string } }
     post: { tags: [program-studio], summary: 활동 보관 — 신규 배치 금지·기존 참조 유지(멱등), responses: { '200': { description: 보관됨 } } }
   /academies/{academyId}/activities/{activityId}/growth-tags:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: activityId, in: path, required: true, schema: { type: string } }
     put:
       tags: [program-studio]
       summary: 현재 개정판의 성장영역 태그 세트 교체 — PRIMARY 정확히 1
       responses: { '200': { description: 교체됨 }, '422': { description: PRIMARY 위반·중복·영역 없음 } }
   /academies/{academyId}/versions/{versionId}/sections:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: versionId, in: path, required: true, schema: { type: string } }
     post: { tags: [program-studio], summary: 커리큘럼 구조 생성(분기·시즌 등 임의 계층 · DRAFT 만), responses: { '201': { description: sectionId } } }
   /academies/{academyId}/versions/{versionId}/sections/{sectionId}:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: versionId, in: path, required: true, schema: { type: string } }
+      - { name: sectionId, in: path, required: true, schema: { type: string } }
     delete: { tags: [program-studio], summary: 구조 삭제(하위·회차 없을 때 · DRAFT 만), responses: { '200': { description: 삭제됨 } } }
   /academies/{academyId}/versions/{versionId}/sessions:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: versionId, in: path, required: true, schema: { type: string } }
     post: { tags: [program-studio], summary: 회차(주차) 생성 — 주차 수 제한 없음(DRAFT 만), responses: { '201': { description: curriculumSessionId } } }
   /academies/{academyId}/versions/{versionId}/sessions/{curriculumSessionId}:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: versionId, in: path, required: true, schema: { type: string } }
+      - { name: curriculumSessionId, in: path, required: true, schema: { type: string } }
     delete: { tags: [program-studio], summary: 회차 삭제(DRAFT 만), responses: { '200': { description: 삭제됨 } } }
   /academies/{academyId}/curriculum-sessions/{curriculumSessionId}/activities:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: curriculumSessionId, in: path, required: true, schema: { type: string } }
     put:
       tags: [program-studio]
       summary: 회차 활동 세트 교체 — 개정판 ID 로 연결·ARCHIVED 배치 금지·활동 수 고정 없음(DRAFT 만)
