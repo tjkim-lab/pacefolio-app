@@ -115,6 +115,16 @@ const ChatMessageList = z.object({
   })),
 });
 const ChatAck = z.object({ status: z.string() });
+/* 사진(#19) */
+const PhotoUpload = z.object({
+  photoId: z.string(),
+  upload: z.object({
+    url: z.string(), method: z.literal("PUT"),
+    headers: z.record(z.string(), z.string()), expiresAt: z.string(),
+  }),
+});
+const PhotoFinalize = z.object({ photoId: z.string() });
+
 /* 안전사고(#32) — 발생 시각은 서버가 기록 */
 const IncidentCreate = z.object({ incidentId: z.string(), occurredAt: z.string() });
 const IncidentList = z.object({
@@ -162,12 +172,13 @@ const AdminSupportViewList = z.object({
   })),
 });
 
-/* ── 에러 — status 와 서버 error 코드 보존 ── */
+/* ── 에러 — status·서버 error 코드·응답 body 보존(#19: CONSENT_REQUIRED 차단 명단 등) ── */
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly code: string,
     message?: string,
+    public readonly body?: unknown,
   ) {
     super(message ?? `${status} ${code}`);
     this.name = "ApiError";
@@ -211,7 +222,7 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as { error?: string };
-      throw new ApiError(res.status, body.error ?? "UNKNOWN");
+      throw new ApiError(res.status, body.error ?? "UNKNOWN", undefined, body);
     }
     if (res.status === 204) return schema.parse(undefined as never);
     return schema.parse(await res.json()); // 응답 runtime validation
@@ -324,6 +335,17 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       }),
     listIncidents: (academyId: string) =>
       call(IncidentList, `/academies/${academyId}/incidents`),
+    /* 사진 파이프라인(#19) — 업로드 의도·동의 게이트 확정 */
+    createPhotoUpload: (academyId: string, body: { sessionId?: string; contentType: string; byteSize: number }) =>
+      call(PhotoUpload, `/academies/${academyId}/photos`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    finalizePhoto: (academyId: string, photoId: string, body: {
+      participantIds: string[]; purpose: string; audience: string;
+    }) =>
+      call(PhotoFinalize, `/academies/${academyId}/photos/${photoId}/finalize`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
     /* 세션 리뷰: 서버·openapi 에 있던 op 의 클라이언트 누락 보완 */
     adminRevokeUserSessions: (userId: string, reason: string) =>
       call(z.void(), `/admin/users/${userId}/session-revocation`, {

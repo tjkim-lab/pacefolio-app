@@ -362,32 +362,7 @@ function StepReport() {
         </div>
       </Card>
 
-      <Card className="mt-2.5">
-        <div className="flex items-center justify-between">
-          <h4 className="text-[13.5px] font-bold text-ink">사진 3장</h4>
-          <button
-            onClick={c.checkPhoto}
-            className="rounded-lg bg-accent-strong px-3 py-2 text-[12px] font-bold text-white"
-          >
-            {c.photoChecked ? "확인됨 ✓" : "사진 확인"}
-          </button>
-        </div>
-        <div className="mt-1 text-[12px] font-medium text-ink2">
-          {c.photoChecked
-            ? `확인됨 ✓ · 원생 3명 포함 · 게시 동의 없는 원생 포함 사진 1장은 반 공유 제외 · 공개 범위: ${PHOTO_SCOPE[c.photoScope]}`
-            : "발송 전에 사진 속 원생과 공개 범위를 확인해주세요."}
-        </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {Object.entries(PHOTO_SCOPE).map(([key, label]) => (
-            <Chip key={key} on={c.photoScope === key} onClick={() => c.setPhotoScope(key)}>
-              {label}
-            </Chip>
-          ))}
-        </div>
-        <div className="mt-2 text-[11.5px] font-semibold text-warn-ink">
-          게시 동의가 없는 원생이 포함된 사진은 반 공유에서 자동 제외돼요.
-        </div>
-      </Card>
+      <PhotoConsentCard c={c} />
 
       <Note>
         발송하면 원생별 리포트가 각 보호자 앱으로 가고, <b className="text-ink">반 채팅방엔 공통 완료 카드만</b> 올라가요 👏
@@ -482,5 +457,66 @@ function Note({ children, icon = "bulb" }: { children: React.ReactNode; icon?: "
       </span>
       <span>{children}</span>
     </div>
+  );
+}
+
+/* #19 C3: 사진 동의 게이트 — READY 시 서버 finalize 로 차단 명단을 실 판정.
+   "동의 없는 원생 자동 제외"가 안내 문구가 아니라 서버 응답이 된다. */
+import { useState as usePhotoState } from "react";
+
+function PhotoConsentCard({ c }: { c: ReturnType<typeof useCoach> }) {
+  const live = useCoachLive();
+  const [checking, setChecking] = usePhotoState(false);
+  const [result, setResult] = usePhotoState<{ ok: boolean; message: string; blockedNames: string[] } | null>(null);
+
+  const onCheck = () => {
+    if (live.state !== "READY") { c.checkPhoto(); return; } // 데모 경로 유지
+    if (checking) return;
+    setChecking(true);
+    void live.verifyPhotoConsent(c.photoScope === "class" ? "class" : "individual").then((r) => {
+      setChecking(false);
+      setResult(r);
+    });
+  };
+
+  const liveMode = live.state === "READY";
+  const checked = liveMode ? result !== null : c.photoChecked;
+  return (
+    <Card className="mt-2.5">
+      <div className="flex items-center justify-between">
+        <h4 className="text-[13.5px] font-bold text-ink">사진 3장</h4>
+        <button
+          onClick={onCheck}
+          className="rounded-lg bg-accent-strong px-3 py-2 text-[12px] font-bold text-white"
+        >
+          {checking ? "서버 확인 중..." : checked ? "확인됨 ✓" : "사진 확인"}
+        </button>
+      </div>
+      <div className="mt-1 text-[12px] font-medium text-ink2">
+        {liveMode
+          ? result
+            ? result.ok
+              ? `서버 동의 게이트 통과 ✓ · 명단 전원 게시 동의 확인 · 공개 범위: ${PHOTO_SCOPE[c.photoScope]}`
+              : `${result.message}${result.blockedNames.length ? ` — 제외 대상: ${result.blockedNames.join(", ")}` : ""}`
+            : "발송 전에 사진 속 원생과 공개 범위를 확인해주세요 — 판정은 서버 동의 게이트가 해요."
+          : c.photoChecked
+            ? `확인됨 ✓ · 원생 3명 포함 · 게시 동의 없는 원생 포함 사진 1장은 반 공유 제외 · 공개 범위: ${PHOTO_SCOPE[c.photoScope]} (데모)`
+            : "발송 전에 사진 속 원생과 공개 범위를 확인해주세요."}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {Object.entries(PHOTO_SCOPE).map(([key, label]) => (
+          <Chip
+            key={key}
+            on={c.photoScope === key}
+            onClick={() => { c.setPhotoScope(key); if (liveMode) setResult(null); }}
+          >
+            {label}
+          </Chip>
+        ))}
+      </div>
+      <div className="mt-2 text-[11.5px] font-semibold text-warn-ink">
+        게시 동의가 없는 원생이 포함된 사진은 반 공유에서 자동 제외돼요.
+      </div>
+    </Card>
   );
 }

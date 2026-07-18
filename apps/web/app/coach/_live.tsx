@@ -50,6 +50,10 @@ interface CoachLiveCtx {
     location?: string; firstAid?: string; classContinued: boolean;
     followUpNeeded: boolean; guardianContact: string;
   }) => Promise<{ ok: boolean; message: string; occurredAt?: string }>;
+  /* #19 C3: 사진 동의 게이트 확인 — 명단 전원 태그로 finalize 를 시도해
+     서버 차단 명단(미동의 원생)을 실 데이터로 받는다 */
+  verifyPhotoConsent: (scope: "individual" | "class") =>
+    Promise<{ ok: boolean; message: string; blockedNames: string[] }>;
 }
 
 const Ctx = createContext<CoachLiveCtx | null>(null);
@@ -195,8 +199,40 @@ export function CoachLiveProvider({ children }: { children: ReactNode }) {
     }
   }, [state, academyId, sessionId]);
 
+  const verifyPhotoConsent = useCallback(async (scope: "individual" | "class") => {
+    if (state !== "READY" || !academyId) return { ok: false, message: "실연결 아님", blockedNames: [] };
+    try {
+      /* 업로드 의도 → dev 스토리지 PUT → finalize(동의 게이트) — 실 이미지 선택은
+         실 스토리지 어댑터와 함께(사업자 결정 후). 지금은 게이트 판정이 실 데이터. */
+      const up = await api.createPhotoUpload(academyId, {
+        sessionId, contentType: "image/jpeg", byteSize: 1024,
+      });
+      await fetch(`/api${up.upload.url}`, {
+        method: "PUT", headers: up.upload.headers, body: "demo", credentials: "include",
+      });
+      const combo = scope === "class"
+        ? { purpose: "CLASS_SHARE", audience: "CLASS_MEMBERS" }
+        : { purpose: "INDIVIDUAL_DELIVERY", audience: "GUARDIAN_ONLY" };
+      await api.finalizePhoto(academyId, up.photoId, {
+        participantIds: roster.map((k) => k.participantId), ...combo,
+      });
+      return { ok: true, message: "전원 게시 동의 확인 ✓ (서버 검증)", blockedNames: [] };
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "CONSENT_REQUIRED") {
+        const blocked = (e.body as { blockedParticipantIds?: string[] } | undefined)?.blockedParticipantIds ?? [];
+        const names = blocked.map((pid) => roster.find((k) => k.participantId === pid)?.name ?? pid);
+        return {
+          ok: false,
+          message: `동의 없는 원생 ${names.length}명 — 이 범위로는 게시 불가(서버 차단)`,
+          blockedNames: names,
+        };
+      }
+      return { ok: false, message: e instanceof ApiError ? `확인 실패(${e.status}: ${e.code})` : "확인 실패 — 네트워크 확인", blockedNames: [] };
+    }
+  }, [state, academyId, sessionId, roster]);
+
   return (
-    <Ctx.Provider value={{ state, errorMsg, academyId, sessionId, sessionLabel, roster, saveAttendance, complete, brief, ackBrief, reportIncident }}>
+    <Ctx.Provider value={{ state, errorMsg, academyId, sessionId, sessionLabel, roster, saveAttendance, complete, brief, ackBrief, reportIncident, verifyPhotoConsent }}>
       {children}
     </Ctx.Provider>
   );

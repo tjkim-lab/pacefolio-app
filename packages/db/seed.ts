@@ -101,6 +101,26 @@ export async function seedWondergym(db: Db, nowISO: string): Promise<void> {
     createdAt: nowISO, updatedAt: nowISO,
   });
 
+  // #19: 사진 동의 데모 — 도담 = 반 공유까지 동의 / 서준 = 개별 전달만.
+  // 코치 앱 "사진 확인"에서 반 공유 선택 시 서준이 서버 차단 명단으로 뜬다.
+  await db.insert(s.photoConsents).values([
+    {
+      id: "pc_dodam", academyId: "a_wondergym", participantId: "p_dodam", guardianId: "gd_psy",
+      policyVersion: "v1.0", channel: "app",
+      grants: JSON.stringify([
+        { purpose: "INDIVIDUAL_DELIVERY", audience: "GUARDIAN_ONLY" },
+        { purpose: "CLASS_SHARE", audience: "CLASS_MEMBERS" },
+      ]),
+      consentedAt: nowISO, createdAt: nowISO, updatedAt: nowISO,
+    },
+    {
+      id: "pc_seojun", academyId: "a_wondergym", participantId: "p_seojun", guardianId: "gd_psy",
+      policyVersion: "v1.0", channel: "app",
+      grants: JSON.stringify([{ purpose: "INDIVIDUAL_DELIVERY", audience: "GUARDIAN_ONLY" }]),
+      consentedAt: nowISO, createdAt: nowISO, updatedAt: nowISO,
+    },
+  ]);
+
   // #31: 원장→코치 전달사항 데모 — 코치 앱 홈의 필수 확인 카드가 서버 정본으로 뜨도록.
   // dmKey 규약 = domain chat.ts (type:userIds정렬:participantId)
   await db.insert(s.chatRooms).values({
