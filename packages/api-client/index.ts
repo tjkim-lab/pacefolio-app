@@ -78,6 +78,22 @@ export type SessionList = z.infer<typeof SessionList>;
 const AttendanceSave = z.object({ recorded: z.number().int(), updated: z.number().int() });
 const SessionComplete = z.object({ sessionId: z.string(), status: z.string() });
 
+/* 원장 화면 실연결(#25) — 공지·수납 관제 */
+const NoticePublish = z.object({ noticeId: z.string(), recipients: z.number().int() });
+const NoticeList = z.object({
+  notices: z.array(z.object({
+    noticeId: z.string(), title: z.string(), body: z.string(), audience: z.string(),
+    publishedAt: z.string(),
+    recipients: z.number().int().optional(), // staff 전용 필드
+    unread: z.number().int().optional(),
+  })),
+});
+const BillingSummary = z.object({
+  unpaidCount: z.number().int(), unpaidKrw: z.number().int(),
+  paidCount: z.number().int(), paidKrw: z.number().int(),
+  billedKrw: z.number().int(), capturedKrw: z.number().int(),
+});
+
 /* Admin 관제(#27) — PLATFORM_ADMIN 전용(비관리자 404) */
 const AdminOverview = z.object({
   academies: z.object({ total: z.number().int(), suspended: z.number().int() }),
@@ -212,6 +228,15 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       call(SessionComplete, `/academies/${academyId}/sessions/${sessionId}/complete`, {
         method: "POST", csrf: true,
       }),
+    /* 원장 공지·수납 관제(#25) */
+    publishNotice: (academyId: string, body: { title: string; body: string; audience: string }) =>
+      call(NoticePublish, `/academies/${academyId}/notices`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    listNotices: (academyId: string) =>
+      call(NoticeList, `/academies/${academyId}/notices`),
+    billingSummary: (academyId: string) =>
+      call(BillingSummary, `/academies/${academyId}/billing/summary`),
     /* Admin 관제(#27) — 수익(MRR)·학원별 지표·구독 지정 */
     adminOverview: () => call(AdminOverview, "/admin/overview"),
     adminAcademies: () => call(AdminAcademyList, "/admin/academies"),

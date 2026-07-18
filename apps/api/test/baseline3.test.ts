@@ -210,3 +210,16 @@ test("공지: 발행(보호자 receipt 생성) → 읽음(최초 시각 보존) 
   const momList = (await (await get(mom, `/academies/${academy}/notices`)).json()) as { notices: { unread?: number }[] };
   assert.equal(momList.notices[0].unread, undefined);
 });
+
+test("수납 관제 집계(#25): staff 발행·수납·미납 합 — 보호자 403", async () => {
+  const r = await get(founder, `/academies/${academy}/billing/summary`);
+  assert.equal(r.status, 200);
+  const sum = (await r.json()) as {
+    unpaidCount: number; unpaidKrw: number; paidCount: number; paidKrw: number;
+    billedKrw: number; capturedKrw: number;
+  };
+  // 오프라인 수납 테스트에서 invoice 1건이 완납(PAID)됨
+  assert.equal(sum.paidCount, 1);
+  assert.equal(sum.billedKrw, sum.paidKrw + sum.unpaidKrw);
+  assert.equal((await get(mom, `/academies/${academy}/billing/summary`)).status, 403);
+});

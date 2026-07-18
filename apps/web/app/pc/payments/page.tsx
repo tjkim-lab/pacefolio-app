@@ -15,6 +15,7 @@ import {
   CYCLE_NEXT, CALC, MJ_CLASSES, MJ_OPTS, MJ_DISCOUNTS, OFF_TYPES, OFF_SCOPES,
   BILL_GROUPS, REFUND_LIST, fmt,
 } from "../_data";
+import { OwnerLiveProvider, useOwnerLive } from "../_live";
 
 const CYCLES = [
   { v: "월별", sub: "매월 1일 시작" },
@@ -30,7 +31,16 @@ const DRAFTS = [
 type GroupStage = "DRAFT" | "REVIEWED" | "SENT";
 
 export default function PCPayments() {
+  return (
+    <OwnerLiveProvider>
+      <PCPaymentsBody />
+    </OwnerLiveProvider>
+  );
+}
+
+function PCPaymentsBody() {
   const { confirm, toast, overlays } = useOverlays();
+  const ownerLive = useOwnerLive(); // #25: READY 시 수납 현황 = 서버 집계
 
   // 수납 주기
   const [cycle, setCycle] = useState("3개월 단위");
@@ -265,7 +275,31 @@ export default function PCPayments() {
             )}
           </Panel>
 
-          {anySent && (
+          {ownerLive.state === "READY" && ownerLive.summary ? (
+            /* #25: 실 데이터 — 발행·수납·미납은 서버 정산이 도출(화면 토글 아님) */
+            (() => {
+              const s = ownerLive.summary;
+              const liveRate = s.billedKrw > 0 ? Math.round((s.paidKrw / s.billedKrw) * 100) : 0;
+              return (
+                <Panel title={<span className="flex items-center gap-2">수납 현황 <span className="inline-flex items-center gap-1 text-[10.5px] font-extrabold text-brand"><span className="w-[7px] h-[7px] rounded-full bg-accent" />실 데이터</span></span>}>
+                  <div className="flex gap-2.5">
+                    {[
+                      [String(s.paidCount + s.unpaidCount), "발행 청구", ""],
+                      [String(s.paidCount), "수납 완료", "live"],
+                      [String(s.unpaidCount), "미납 건", "hot"],
+                      [`${fmt(s.unpaidKrw)}`, "미납액", "hot"],
+                    ].map(([v, k, kind], i) => (
+                      <div key={i} className={`flex-1 text-center rounded-xl py-3 border ${kind === "live" ? "border-accent bg-accent-weak" : kind === "hot" ? "border-danger-weak bg-danger-weak" : "border-line bg-surface"}`}>
+                        <div className={`text-[19px] font-extrabold tabular-nums ${kind === "live" ? "text-brand" : kind === "hot" ? "text-danger-ink" : "text-ink"}`}>{v}</div>
+                        <div className="text-[10.5px] text-ink3 font-semibold mt-0.5">{k}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2.5 mt-2.5"><Meter pct={liveRate} /><span className="text-[12px] text-ink3 font-semibold whitespace-nowrap">수납률 {liveRate}% · 수납 {fmt(s.paidKrw)} / 발행 {fmt(s.billedKrw)}</span></div>
+                </Panel>
+              );
+            })()
+          ) : anySent && (
             <Panel title={<span className="flex items-center gap-2">수납 현황 실시간 <span className="inline-flex items-center gap-1 text-[10.5px] font-extrabold text-brand"><span className="w-[7px] h-[7px] rounded-full bg-accent animate-pulse" />LIVE</span></span>}>
               <div className="flex gap-2.5">
                 {[[String(sentCount), "발송 원생", ""], [String(live.read), "열람", "live"], [String(live.paid), "결제 완료", "live"], [String(sentCount - live.paid), "미결제", "hot"]].map(([v, k, kind], i) => (

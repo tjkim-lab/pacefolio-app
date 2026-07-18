@@ -9,6 +9,7 @@ import { useOverlays, Panel, Note, ActBtn, FilterChip, DChip, Spinner } from "..
 import { Button } from "@/components/ui";
 import { NT_CHIPS, COACH_CHIPS, BANNERS_INIT, QA_MGR, QA_CATS, type QaItem } from "../_data";
 import { IconChat, IconBell, IconSpark } from "@/components/ui/icons";
+import { OwnerLiveProvider, useOwnerLive } from "../_live";
 
 type Banner = { title: string; sub: string; pill: string; tone: "accent" | "warn" };
 
@@ -53,7 +54,16 @@ function Row({
 }
 
 export default function PCNotice() {
+  return (
+    <OwnerLiveProvider>
+      <PCNoticeBody />
+    </OwnerLiveProvider>
+  );
+}
+
+function PCNoticeBody() {
   const { confirm, toast, overlays } = useOverlays();
+  const live = useOwnerLive(); // #25: READY 시 발송·읽음 추적이 실 API
 
   /* 공지 보내기 */
   const [ntTitle, setNtTitle] = useState("");
@@ -89,6 +99,19 @@ export default function PCNotice() {
       ],
       label: "발송",
       onConfirm: () => {
+        /* #25: 실연결 시 서버 발행 — 수신자 수·미열람은 서버 진실 */
+        if (live.state === "READY") {
+          void (async () => {
+            const r = await live.publish({
+              title: ntTitle.trim(), body: ntBody.trim(), audience: aud.label,
+            });
+            if (!r.ok) { toast(r.message); return; }
+            setSent(true);
+            setSentInfo({ title: ntTitle.trim(), p: r.recipients });
+            toast(r.message);
+          })();
+          return;
+        }
         setSent(true);
         setSentInfo({ title: ntTitle.trim(), p: aud.p });
         setRead(0);
@@ -232,41 +255,75 @@ export default function PCNotice() {
           </Button>
           {sentInfo && (
             <div className="mt-2.5 bg-accent-weak text-brand rounded-xl px-3.5 py-2.5 text-[12px] font-semibold leading-relaxed">
-              ✓ 발송 완료 · 도달 {sentInfo.p}/{sentInfo.p} · 읽음 {read}/{sentInfo.p}
+              {live.state === "READY"
+                ? <>✓ 발송 완료 · 수신 보호자 {sentInfo.p}명 · 읽음 추적은 오른쪽 목록(서버 기준)</>
+                : <>✓ 발송 완료 · 도달 {sentInfo.p}/{sentInfo.p} · 읽음 {read}/{sentInfo.p}</>}
             </div>
           )}
         </Panel>
 
         {/* RIGHT — 최근 공지 + 코치 전달 */}
-        <Panel title="최근 공지 · 읽음 추적" hnote="안 읽은 보호자에게만 재발송" hnoteAccent>
-          {sentInfo && (
-            <Row
-              icon={<IconBell size={18} />}
-              title={sentInfo.title}
-              sub={`방금 · 도달 ${sentInfo.p}/${sentInfo.p} · 읽음 ${read}/${sentInfo.p}`}
-              trailing={<span className="text-[10.5px] font-bold text-brand bg-accent-weak rounded-full px-2 py-0.5">방금</span>}
-            />
+        <Panel
+          title={live.state === "READY" ? "최근 공지 · 읽음 추적 (실 데이터)" : "최근 공지 · 읽음 추적"}
+          hnote="안 읽은 보호자에게만 재발송"
+          hnoteAccent
+        >
+          {live.state === "READY" ? (
+            <>
+              {live.notices.length === 0 && (
+                <div className="text-[12px] text-ink3 font-medium py-2">아직 발행한 공지가 없어요 — 왼쪽에서 첫 공지를 보내보세요.</div>
+              )}
+              {live.notices.map((n) => (
+                <Row
+                  key={n.noticeId}
+                  icon={<IconBell size={18} />}
+                  title={n.title}
+                  sub={`수신 ${n.recipients ?? 0}명 · 읽음 ${(n.recipients ?? 0) - (n.unread ?? 0)}/${n.recipients ?? 0}${(n.unread ?? 0) > 0 ? ` · 미열람 ${n.unread}명` : ""}`}
+                  trailing={
+                    (n.unread ?? 0) > 0
+                      ? <span className="text-[10.5px] font-bold text-warn-ink bg-warn-weak rounded-full px-2 py-0.5">미열람 {n.unread}</span>
+                      : <span className="text-[10.5px] font-bold text-brand bg-accent-weak rounded-full px-2 py-0.5">전원 읽음</span>
+                  }
+                />
+              ))}
+              <div className="mt-1.5">
+                <ActBtn soft onClick={() => { void live.refreshNotices().then(() => toast("읽음 현황 갱신")); }}>
+                  읽음 현황 새로고침
+                </ActBtn>
+              </div>
+            </>
+          ) : (
+            <>
+              {sentInfo && (
+                <Row
+                  icon={<IconBell size={18} />}
+                  title={sentInfo.title}
+                  sub={`방금 · 도달 ${sentInfo.p}/${sentInfo.p} · 읽음 ${read}/${sentInfo.p}`}
+                  trailing={<span className="text-[10.5px] font-bold text-brand bg-accent-weak rounded-full px-2 py-0.5">방금</span>}
+                />
+              )}
+              <Row
+                icon={<IconBell size={18} />}
+                title="가을 대회 참가 안내"
+                sub="어제 · 읽음 81/87 · 미열람 보호자 6명"
+                trailing={
+                  <ActBtn soft onClick={() => toast("안 읽은 보호자 6명에게 재알림(데모)")}>
+                    안 읽은 6명
+                  </ActBtn>
+                }
+              />
+              <Row
+                icon={<IconBell size={18} />}
+                title="10월 휴무일 안내"
+                sub="지난주 · 읽음 84/87"
+                trailing={
+                  <ActBtn soft onClick={() => toast("공지 상세 보기(데모)")}>
+                    보기
+                  </ActBtn>
+                }
+              />
+            </>
           )}
-          <Row
-            icon={<IconBell size={18} />}
-            title="가을 대회 참가 안내"
-            sub="어제 · 읽음 81/87 · 미열람 보호자 6명"
-            trailing={
-              <ActBtn soft onClick={() => toast("안 읽은 보호자 6명에게 재알림(데모)")}>
-                안 읽은 6명
-              </ActBtn>
-            }
-          />
-          <Row
-            icon={<IconBell size={18} />}
-            title="10월 휴무일 안내"
-            sub="지난주 · 읽음 84/87"
-            trailing={
-              <ActBtn soft onClick={() => toast("공지 상세 보기(데모)")}>
-                보기
-              </ActBtn>
-            }
-          />
 
           {/* 코치 전달사항 */}
           <div className="bg-fill rounded-xl p-3.5 mt-3">

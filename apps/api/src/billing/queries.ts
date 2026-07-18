@@ -1,7 +1,25 @@
 /* 조회 전용 — 보호자 관점 청구서 목록 (fixture invoicesForGuardian 의 DB 판) */
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import type { Db } from "../sessions/service";
+
+/** 원장 수납 관제 집계(#25) — staff(OWNER·DESK)만. 화면의 "LIVE 수납 현황" 실 데이터 판. */
+export async function getBillingSummary(db: Db, input: {
+  academyId: string; actorRoles: readonly string[];
+}) {
+  if (!input.actorRoles.includes("OWNER") && !input.actorRoles.includes("DESK")) return null;
+  const [inv] = await db.select({
+    unpaidCount: sql<number>`count(*) filter (where ${s.invoices.status} in ('ISSUED','PARTIALLY_PAID','OVERDUE'))::int`,
+    unpaidKrw: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} in ('ISSUED','PARTIALLY_PAID','OVERDUE')), 0)::int`,
+    paidCount: sql<number>`count(*) filter (where ${s.invoices.status} = 'PAID')::int`,
+    paidKrw: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} = 'PAID'), 0)::int`,
+    billedKrw: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} not in ('DRAFT','VOID')), 0)::int`,
+  }).from(s.invoices).where(eq(s.invoices.academyId, input.academyId));
+  const [pay] = await db.select({
+    capturedKrw: sql<number>`coalesce(sum(${s.payments.amount}) filter (where ${s.payments.status} = 'CAPTURED'), 0)::int`,
+  }).from(s.payments).where(eq(s.payments.academyId, input.academyId));
+  return { ...inv, capturedKrw: pay.capturedKrw };
+}
 
 export interface GuardianInvoiceRow {
   invoiceId: string;

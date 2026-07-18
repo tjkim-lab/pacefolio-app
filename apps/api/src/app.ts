@@ -31,7 +31,7 @@ import { publishNotice, markNoticeRead, listNotices } from "./notices/service";
 import { createAcademy, inviteMember, acceptInvite } from "./academies/service";
 import { preparePayment, processPgWebhook } from "./billing/service";
 import { requestRefund, approveRefund, processRefundWebhook } from "./billing/refunds";
-import { listGuardianInvoices, getPaymentStatus } from "./billing/queries";
+import { listGuardianInvoices, getPaymentStatus, getBillingSummary } from "./billing/queries";
 import {
   openDm, postMessage, markRead, acknowledge, resolveMessage, listRooms, listMessages,
 } from "./chat/service";
@@ -613,6 +613,16 @@ export function createApp(cfg: ApiConfig) {
         return c.json({ error: "ACTIVE_PAYMENT_ATTEMPT_EXISTS", paymentId: r.paymentId }, 409);
       case "DENIED": return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
     }
+  });
+
+  /* 원장 수납 관제 집계(#25) — staff 전용, 발행·수납·미납 실 데이터 */
+  app.get("/academies/:academyId/billing/summary", guard, academyCtx, async (c) => {
+    const m = c.get("membership");
+    const summary = await getBillingSummary(cfg.db, {
+      academyId: c.req.param("academyId")!, actorRoles: m.roles,
+    });
+    if (!summary) return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json(summary);
   });
 
   /* 내 자녀 청구서 목록 — 보호자 관점(연결 자녀만) */

@@ -576,6 +576,16 @@ paths:
       responses:
         '204': { description: 취소됨 }
 
+  /academies/{academyId}/billing/summary:
+    get:
+      tags: [billing]
+      summary: 원장 수납 관제 집계(#25) — staff(OWNER·DESK)만. 발행·수납·미납 건수/합계
+      parameters:
+        - { name: academyId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 'unpaidCount·unpaidKrw·paidCount·paidKrw·billedKrw·capturedKrw' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   # ── Admin 백엔드 1차(#27) — PLATFORM_ADMIN 전용 경계 ───────────
   # 일반 역할 접근 = 404(표면 은닉) · PLATFORM_ADMIN 의 일반 학원 API = 403 (대칭 격리)
   # 상태 변경 전부 감사(AuditLog actorRole=PLATFORM_ADMIN)
