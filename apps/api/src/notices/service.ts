@@ -16,21 +16,47 @@ export type NoticePublishResult =
 export async function publishNotice(db: Db, input: {
   actorUserId: string; actorRoles: readonly string[]; academyId: string;
   title: string; body: string; audience: string;
+  classId?: string; // AudienceFilter 1단계(E P1): 반 필터 — 해당 반 원생의 VERIFIED 보호자만
 }, nowISO: string): Promise<NoticePublishResult> {
   if (!isStaff(input.actorRoles)) return { kind: "FORBIDDEN", reason: "공지 발행은 원장·데스크만" };
   return db.transaction(async (tx) => {
+    /* 수신자 산정 — 서버 정본:
+       전체 = 학원 ACTIVE GUARDIAN 멤버십 전원
+       반 필터 = 그 반 ACTIVE 등록 원생의 VERIFIED 보호자(연결 기반) */
+    let recipientUserIds: string[];
+    if (input.classId) {
+      const cls = (await tx.select({ id: s.dbClasses.id }).from(s.dbClasses).where(and(
+        eq(s.dbClasses.id, input.classId), eq(s.dbClasses.academyId, input.academyId),
+      )))[0];
+      if (!cls) return { kind: "FORBIDDEN" as const, reason: "반 없음(학원 불일치 포함)" };
+      const rows = await tx.select({ userId: s.guardians.userId })
+        .from(s.dbEnrollments)
+        .innerJoin(s.guardianParticipantLinks, and(
+          eq(s.guardianParticipantLinks.participantId, s.dbEnrollments.participantId),
+          eq(s.guardianParticipantLinks.academyId, input.academyId),
+        ))
+        .innerJoin(s.guardians, eq(s.guardians.id, s.guardianParticipantLinks.guardianId))
+        .where(and(
+          eq(s.dbEnrollments.classId, input.classId),
+          eq(s.dbEnrollments.academyId, input.academyId),
+          eq(s.dbEnrollments.status, "ACTIVE"),
+          eq(s.guardianParticipantLinks.verificationStatus, "VERIFIED"),
+        ));
+      recipientUserIds = [...new Set(rows.map((r) => r.userId))];
+    } else {
+      const members = await tx.select().from(s.academyMemberships).where(and(
+        eq(s.academyMemberships.academyId, input.academyId),
+        eq(s.academyMemberships.status, "ACTIVE"),
+      ));
+      recipientUserIds = members.filter((m) => m.roles.includes("GUARDIAN")).map((m) => m.userId);
+    }
     const noticeId = newId("nt");
     await tx.insert(s.dbNotices).values({
       id: noticeId, academyId: input.academyId, title: input.title, body: input.body,
       audience: input.audience, publishedAt: nowISO,
       createdByUserId: input.actorUserId, createdAt: nowISO,
     });
-    // v1 대상 = 학원의 ACTIVE 보호자 전원(AudienceFilter 세분화는 후속 — audience 서술 보존)
-    const members = await tx.select().from(s.academyMemberships).where(and(
-      eq(s.academyMemberships.academyId, input.academyId),
-      eq(s.academyMemberships.status, "ACTIVE"),
-    ));
-    const guardians = members.filter((m) => m.roles.includes("GUARDIAN"));
+    const guardians = recipientUserIds.map((userId) => ({ userId }));
     if (guardians.length) {
       await tx.insert(s.noticeReceipts).values(guardians.map((g) => ({
         id: newId("ntr"), noticeId, academyId: input.academyId, userId: g.userId,
@@ -39,7 +65,8 @@ export async function publishNotice(db: Db, input: {
     await recordAudit(tx, {
       academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "ACADEMY",
       action: "notice.published", targetType: "Notice", targetId: noticeId,
-      detail: { audience: input.audience, recipients: guardians.length }, success: true,
+      detail: { audience: input.audience, recipients: guardians.length, classId: input.classId ?? null },
+      success: true,
     }, nowISO);
     await recordOutbox(tx, {
       academyId: input.academyId, eventType: "NOTICE_PUBLISHED",

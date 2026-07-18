@@ -273,7 +273,7 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
         method: "POST", csrf: true,
       }),
     /* 원장 공지·수납 관제(#25) */
-    publishNotice: (academyId: string, body: { title: string; body: string; audience: string }) =>
+    publishNotice: (academyId: string, body: { title: string; body: string; audience: string; classId?: string }) =>
       call(NoticePublish, `/academies/${academyId}/notices`, {
         method: "POST", csrf: true, body: JSON.stringify(body),
       }),

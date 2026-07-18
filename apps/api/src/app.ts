@@ -441,6 +441,7 @@ export function createApp(cfg: ApiConfig) {
     title: z.string().min(1).max(80),
     body: z.string().min(1).max(4000),
     audience: z.string().min(1).max(200),
+    classId: z.string().min(1).max(64).optional(), // AudienceFilter 1단계 — 반 필터
   }).strict();
   app.post("/academies/:academyId/notices", guard, csrf, academyCtx, async (c) => {
     const parsed = NoticePubBody.safeParse(await c.req.json().catch(() => null));

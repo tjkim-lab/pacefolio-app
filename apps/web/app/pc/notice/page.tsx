@@ -72,6 +72,15 @@ function PCNoticeBody() {
   );
   const [audIdx, setAudIdx] = useState(0);
   const aud = NT_CHIPS[audIdx];
+  /* AudienceFilter 1단계(E P1): READY 면 대상 칩 = 서버 반 목록(수신자 산정도 서버) */
+  const liveAudChips = live.state === "READY"
+    ? [
+        { label: "전체", sub: "학원 보호자 전원", classId: undefined as string | undefined },
+        ...live.classes.map((c) => ({ label: `${c.name}만`, sub: "반 보호자", classId: c.classId as string | undefined })),
+      ]
+    : null;
+  const liveAud = liveAudChips?.[Math.min(audIdx, (liveAudChips?.length ?? 1) - 1)];
+  const audLabel = liveAud?.label ?? aud.label;
   const [sent, setSent] = useState(false);
   const [sentInfo, setSentInfo] = useState<{ title: string; p: number } | null>(null);
   const [read, setRead] = useState(0);
@@ -95,7 +104,7 @@ function PCNoticeBody() {
       rows: live.state === "READY"
         ? [
             ["제목", ntTitle.trim()],
-            ["대상", `${aud.label} 보호자 — 수신자 수는 서버가 산정해요`],
+            ["대상", `${audLabel} 보호자 — 수신자 수는 서버가 산정해요`],
             ["채널", "알림톡 + 앱 푸시"],
           ]
         : [
@@ -110,7 +119,9 @@ function PCNoticeBody() {
         if (live.state === "READY") {
           void (async () => {
             const title = ntTitle.trim();
-            const r = await live.publish({ title, body: ntBody.trim(), audience: aud.label });
+            const r = await live.publish({
+              title, body: ntBody.trim(), audience: audLabel, classId: liveAud?.classId,
+            });
             if (!r.ok) { toast(r.message); return; }
             /* 세션 리뷰: sent 영구 차단 금지 — 발송 후 폼 리셋으로 연속 발송 허용 */
             setSentInfo({ title, p: r.recipients });
@@ -279,16 +290,18 @@ function PCNoticeBody() {
             onChange={(e) => setNtBody(e.target.value)}
           />
           <div className="flex gap-2 flex-wrap mt-2.5">
-            {NT_CHIPS.map((c, i) => (
+            {(liveAudChips ?? NT_CHIPS).map((c, i) => (
               <DChip key={c.label} active={audIdx === i} title={c.label} sub={c.sub} onClick={() => setAudIdx(i)} />
             ))}
           </div>
           <div className="text-[11.5px] text-ink3 font-medium mt-2">
-            대상 원생 {aud.n}명 · 알림 수신 보호자 {aud.p}명
+            {live.state === "READY"
+              ? `대상: ${audLabel} — 수신자 수는 발송 시 서버가 산정해요(반 필터 = 그 반 원생의 연결 보호자)`
+              : `대상 원생 ${aud.n}명 · 알림 수신 보호자 ${aud.p}명`}
           </div>
           <Button variant="primary" full className="mt-3" onClick={sendNotice}>
             {live.state === "READY"
-              ? `${aud.label} 보호자에게 보내기`
+              ? `${audLabel} 보호자에게 보내기`
               : sent ? "발송 완료 ✓ · 도달 추적 중" : `원생 ${aud.n}명의 보호자에게 보내기`}
           </Button>
           {sentInfo && (

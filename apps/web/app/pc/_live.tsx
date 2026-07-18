@@ -24,8 +24,9 @@ interface OwnerLiveCtx {
   academyId?: string;
   notices: OwnerNotice[];
   summary?: BillingSummaryData;
-  publish: (input: { title: string; body: string; audience: string }) =>
+  publish: (input: { title: string; body: string; audience: string; classId?: string }) =>
     Promise<{ ok: boolean; recipients: number; message: string }>;
+  classes: { classId: string; name: string }[]; // AudienceFilter 1단계 — 반 칩의 정본
   refreshNotices: () => Promise<void>;
   refreshSummary: () => Promise<void>;
   /* #31: 코치 전달사항 — DM 개설→ACK_REQUIRED 전송, READ/ACK 은 서버 상태 재조회 */
@@ -49,6 +50,7 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
   const [notices, setNotices] = useState<OwnerNotice[]>([]);
   const [summary, setSummary] = useState<BillingSummaryData>();
   const [coaches, setCoaches] = useState<CoachMember[]>([]);
+  const [classes, setClasses] = useState<{ classId: string; name: string }[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -81,12 +83,14 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
         if (!ms) { setState("FIXTURE"); return; } // 원장 seed 없음 = 데모
         const aid = ms.academyId;
         setAcademyId(aid);
-        const [nt, sum, mem] = await Promise.all([
+        const [nt, sum, mem, cls] = await Promise.all([
           api.listNotices(aid), api.billingSummary(aid), api.listMembers(aid, "COACH"),
+          api.listClasses(aid),
         ]);
         setNotices(nt.notices);
         setSummary(sum);
         setCoaches(mem.members);
+        setClasses(cls.classes.map((x) => ({ classId: x.classId, name: x.name })));
         setState("READY");
       } catch (e) {
         if (!reachable) {
@@ -110,7 +114,7 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
     setSummary(await api.billingSummary(academyId));
   }, [academyId]);
 
-  const publish = useCallback(async (input: { title: string; body: string; audience: string }) => {
+  const publish = useCallback(async (input: { title: string; body: string; audience: string; classId?: string }) => {
     if (!academyId) return { ok: false, recipients: 0, message: "학원 컨텍스트 없음" };
     /* 세션 리뷰 P1 패턴: 발행 성공과 목록 갱신 실패를 분리 — 성공을 실패로 위장 금지 */
     let r;
@@ -157,7 +161,7 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
 
   return (
     <Ctx.Provider value={{
-      state, errorMsg, academyId, notices, summary, publish,
+      state, errorMsg, academyId, notices, summary, publish, classes,
       refreshNotices, refreshSummary, coaches, sendCoachDirective, refreshDirective,
     }}>
       {children}

@@ -202,3 +202,24 @@ test("보호자 예정 통보: VERIFIED 링크만 201 + Outbox — 실제 출결
     .where(eq(s.outboxEvents.eventType, "ATTENDANCE_NOTICE_CREATED"));
   assert.equal(outbox.length, 1);
 });
+
+test("AudienceFilter 1단계(E P1): 반 필터 공지 — 그 반 원생의 VERIFIED 보호자만 수신", async () => {
+  // mom = kidA VERIFIED 링크(직전 테스트) · kidA 는 clsId 배정이 휴원으로 ENDED 상태 → 재원 복귀+재배정
+  await post(owner, `/academies/a_wg/participants/${kidA}/status`, { status: "ENROLLED", reason: "복귀" });
+  await post(owner, `/academies/a_wg/participants/${kidA}/enrollments`, { classId: clsId });
+  // 반 필터 발송: 수신자 = mom 1명
+  const r1 = await post(owner, "/academies/a_wg/notices", {
+    title: "미니반 공지", body: "반 전용 안내", audience: "미니반만", classId: clsId,
+  });
+  assert.equal(r1.status, 201);
+  assert.equal(((await r1.json()) as { recipients: number }).recipients, 1);
+  // 없는 반 = 403(학원 불일치 포함)
+  assert.equal((await post(owner, "/academies/a_wg/notices", {
+    title: "x", body: "y", audience: "z", classId: "cls_none",
+  })).status, 403);
+  // 전체 발송: 학원 ACTIVE GUARDIAN 멤버십(mom) 기준 — 필터와 산정 경로가 다름을 확인
+  const r3 = await post(owner, "/academies/a_wg/notices", {
+    title: "전체 공지", body: "전원 안내", audience: "전체",
+  });
+  assert.equal(((await r3.json()) as { recipients: number }).recipients, 1);
+});

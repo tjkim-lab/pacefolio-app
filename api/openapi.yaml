@@ -168,6 +168,35 @@ paths:
         '422': { description: 'INVALID_BODY(+issues 필드 경로 배열)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ── 출결 (예정 ≠ 실제) ────────────────────────────────────────
+  /academies/{academyId}/notices:
+    post:
+      tags: [notices]
+      summary: >
+        공지 발행(#24) — staff. 수신자 산정은 서버: 전체 = ACTIVE 보호자 멤버십 /
+        classId 지정 = 그 반 ACTIVE 등록 원생의 VERIFIED 연결 보호자(AudienceFilter 1단계)
+      parameters: [{ $ref: '#/components/parameters/AcademyId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [title, body, audience], properties: { title: { type: string, maxLength: 80 }, body: { type: string, maxLength: 4000 }, audience: { type: string, maxLength: 200 }, classId: { type: string } } } } }
+      responses:
+        '201': { description: 'noticeId·recipients(서버 산정)' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    get:
+      tags: [notices]
+      summary: 공지 목록 — staff 는 수신·미열람 수 포함, 보호자는 미포함
+      parameters: [{ $ref: '#/components/parameters/AcademyId' }]
+      responses:
+        '200': { description: notices 배열 }
+  /academies/{academyId}/notices/{noticeId}/read:
+    post:
+      tags: [notices]
+      summary: 읽음 기록 — 최초 시각 보존(멱등)
+      parameters:
+        - { $ref: '#/components/parameters/AcademyId' }
+        - { name: noticeId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 기록됨 }
+
   /academies/{academyId}/attendance-notices:
     post:
       tags: [attendance]
