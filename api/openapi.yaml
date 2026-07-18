@@ -171,7 +171,7 @@ paths:
   /academies/{academyId}/attendance-notices:
     post:
       tags: [attendance]
-      summary: 보호자 결석/지각 통보(예정) — 검증(VERIFIED)된 자녀만 (계약 초안 — 미구현)
+      summary: 보호자 결석/지각 통보(예정) — VERIFIED 링크만 · Outbox(ATTENDANCE_NOTICE_CREATED) (#23 구현됨 — POST /academies/{academyId}/attendance-notices 가 실 경로)
       parameters:
         - $ref: '#/components/parameters/AcademyId'
         - $ref: '#/components/parameters/RequestId'
@@ -184,7 +184,7 @@ paths:
   /academies/{academyId}/attendance-records:
     post:
       tags: [attendance]
-      summary: 코치 실제 출결 확정 — ClassAssignment(ACTIVE) 담당 반만 (계약 초안 — 미구현)
+      summary: 코치 실제 출결 확정 — ClassAssignment(ACTIVE) 담당만 · 수정=version+감사 이력 (#23 구현됨 — POST /academies/{academyId}/sessions/{sessionId}/attendance 가 실 경로. 완료=전원 체크 검증 /complete)
       parameters:
         - $ref: '#/components/parameters/AcademyId'
         - $ref: '#/components/parameters/RequestId'
@@ -327,6 +327,53 @@ paths:
         '200': { description: '{ sessionId, status: CANCELED }' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 완료 수업 휴강 시도 }
+
+  # ── 학생 수명주기 · 출결 — 기본선 2단계(#23) ─────────────────
+  /academies/{academyId}/participants:
+    post:
+      tags: [attendance]
+      summary: 학생 등록(원장·데스크만) — 선등록 보호자 연락처(OTP 결합 근거) 포함. (구현됨)
+      parameters: [ { $ref: '#/components/parameters/AcademyId' } ]
+      responses: { '201': { description: '{ participantId }' }, '403': { $ref: '#/components/responses/Forbidden' } }
+  /academies/{academyId}/participants/{participantId}/status:
+    post:
+      tags: [attendance]
+      summary: 재원 상태 전이 — TRIAL/ENROLLED/ON_BREAK/WITHDRAWN 상태머신·휴원/퇴원 시 배정 자동 종료·멱등. (구현됨)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: participantId, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: '{ participantId, status }' }, '409': { description: 불법 전이 } }
+  /academies/{academyId}/participants/{participantId}/enrollments:
+    post:
+      tags: [attendance]
+      summary: 반 배정 — class FOR UPDATE 정원 검증(초과·중복 409)·재원 상태 필수. (구현됨)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: participantId, in: path, required: true, schema: { type: string } }
+      responses: { '201': { description: '{ enrollmentId }' }, '409': { description: 정원 초과·중복·비재원 } }
+  /academies/{academyId}/sessions/{sessionId}/attendance:
+    post:
+      tags: [attendance]
+      summary: 출결 기록(담당 코치·학원) — 세션 대상 검증·수정 이력(version+감사)·휴강 세션 거부. (구현됨)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: sessionId, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: '{ recorded, updated }' }, '403': { $ref: '#/components/responses/Forbidden' } }
+    get:
+      tags: [attendance]
+      summary: 세션 출결 조회(담당 코치·학원). (구현됨)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: sessionId, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: '{ records }' } }
+  /academies/{academyId}/sessions/{sessionId}/complete:
+    post:
+      tags: [attendance]
+      summary: 수업 완료 — 대상 전원 출결 지정 검증(미체크 409+missing)·멱등·Outbox(ACTUAL_ATTENDANCE_RECORDED). (구현됨)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: sessionId, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: '{ sessionId, status: COMPLETED }' }, '409': { description: 미체크 원생 존재 } }
 
   /academies/{academyId}/guardian-links/{linkId}/revocation:
     post:

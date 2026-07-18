@@ -68,6 +68,19 @@ export const VERIFICATION_STATUS = ["UNVERIFIED", "PENDING", "VERIFIED", "REJECT
    수업 유형 3종: 매주 동일 / 요일별 다른 시간 / 원생별 개별(소그룹·개인 레슨) */
 export const CLASS_SCHEDULE_TYPE = ["FIXED_WEEKLY", "VARIABLE_BY_WEEKDAY", "PARTICIPANT_SPECIFIC"] as const;
 export type ClassScheduleType = (typeof CLASS_SCHEDULE_TYPE)[number];
+/* 원생 재원 상태 — 기본선 2단계(#23). 체험→재원, 휴원↔재원, 퇴원 후 재등록 허용 */
+export const PARTICIPANT_STATUS = ["TRIAL", "ENROLLED", "ON_BREAK", "WITHDRAWN"] as const;
+export type ParticipantStatus = (typeof PARTICIPANT_STATUS)[number];
+const PARTICIPANT_NEXT: Record<ParticipantStatus, readonly ParticipantStatus[]> = {
+  TRIAL: ["ENROLLED", "WITHDRAWN"],
+  ENROLLED: ["ON_BREAK", "WITHDRAWN"],
+  ON_BREAK: ["ENROLLED", "WITHDRAWN"],
+  WITHDRAWN: ["ENROLLED"], // 재등록 — 이력은 audit 이 보존
+};
+export function canTransitionParticipantStatus(from: ParticipantStatus, to: ParticipantStatus): boolean {
+  return PARTICIPANT_NEXT[from].includes(to);
+}
+
 /* 결제 서비스 온보딩 상태 — 원장 설정의 PG 가입·심사 수명주기 */
 export const PG_ONBOARDING_STATUS = ["NOT_ENROLLED", "IN_REVIEW", "AVAILABLE", "ACTIVE", "RESTRICTED"] as const;
 export type PgOnboardingStatus = (typeof PG_ONBOARDING_STATUS)[number];

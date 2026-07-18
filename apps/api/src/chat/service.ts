@@ -201,12 +201,33 @@ export async function postMessage(db: Db, input: {
       }); // DB 정본에서 생성 — 클라이언트 금액 위조 불가
     }
 
-    /* 13차 C P0-3(1차): HEALTH — 방의 보호자 전원이 canViewHealthInfo 여야 전송 가능.
-       (코치 담당 ClassAssignment 검증은 출결 배치에서 테이블 신설과 함께 — docs/12 잔여) */
+    /* 13차 C P0-3: HEALTH — 방의 보호자 전원 canViewHealthInfo(VERIFIED) +
+       방의 코치 전원은 해당 원생 담당(ACTIVE assignment × ACTIVE enrollment)이어야
+       전송 가능. (#23 에서 assignment·enrollment 테이블 신설로 잔여 마감) */
     if (input.category === "HEALTH" && related) {
-      const guardianMembers = (await tx.select().from(s.chatRoomMembers).where(and(
+      const roomMembers = await tx.select().from(s.chatRoomMembers).where(and(
         eq(s.chatRoomMembers.roomId, room.id), isNull(s.chatRoomMembers.leftAt),
-      ))).filter((m) => m.role === "GUARDIAN");
+      ));
+      const coachMembers = roomMembers.filter((m) => m.role === "COACH");
+      if (coachMembers.length > 0) {
+        const enrolls = await tx.select().from(s.dbEnrollments).where(and(
+          eq(s.dbEnrollments.participantId, related),
+          eq(s.dbEnrollments.academyId, input.academyId),
+          eq(s.dbEnrollments.status, "ACTIVE"),
+        ));
+        const classIds = new Set(enrolls.map((e) => e.classId));
+        for (const cm of coachMembers) {
+          const assigns = await tx.select().from(s.classAssignments).where(and(
+            eq(s.classAssignments.coachUserId, cm.userId),
+            eq(s.classAssignments.academyId, input.academyId),
+            eq(s.classAssignments.status, "ACTIVE"),
+          ));
+          if (!assigns.some((a) => classIds.has(a.classId))) {
+            return { kind: "INVALID" as const, reason: "이 원생을 담당하지 않는 코치가 있는 방 — 건강정보 전송 불가" };
+          }
+        }
+      }
+      const guardianMembers = roomMembers.filter((m) => m.role === "GUARDIAN");
       for (const gm of guardianMembers) {
         const gd = (await tx.select().from(s.guardians).where(eq(s.guardians.userId, gm.userId)))[0];
         const link = gd && (await tx.select().from(s.guardianParticipantLinks).where(and(

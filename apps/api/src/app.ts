@@ -13,6 +13,12 @@ import { revokeGuardianLink } from "./linking/revoke";
 import {
   createClass, generateSessions, cancelSession, listClasses, listSessions,
 } from "./classes/service";
+import {
+  createParticipant, changeParticipantStatus, enrollParticipant, endEnrollment,
+} from "./students/service";
+import {
+  recordAttendance, completeSession, listSessionAttendance, createAttendanceNotice,
+} from "./attendance/service";
 import { preparePayment, processPgWebhook } from "./billing/service";
 import { requestRefund, approveRefund, processRefundWebhook } from "./billing/refunds";
 import { listGuardianInvoices, getPaymentStatus } from "./billing/queries";
@@ -262,6 +268,129 @@ export function createApp(cfg: ApiConfig) {
     if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
     if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
     return c.json({ sessionId: r.sessionId, status: "CANCELED" }, 200);
+  });
+
+  /* ── 기본선 2단계(#23): 학생 수명주기 · 반 배정 · 출결 ── */
+  const CreateParticipantBody = z.object({
+    name: z.string().min(1).max(50),
+    birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    ageLabel: z.string().min(1).max(10),
+    status: z.enum(["TRIAL", "ENROLLED"]).optional(),
+    guardianPhone: z.string().min(9).max(20).optional(),
+  }).strict();
+  app.post("/academies/:academyId/participants", guard, csrf, academyCtx, async (c) => {
+    const parsed = CreateParticipantBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await createParticipant(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind !== "OK") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ participantId: r.participantId }, 201);
+  });
+  const StatusBody = z.object({
+    status: z.enum(["TRIAL", "ENROLLED", "ON_BREAK", "WITHDRAWN"]),
+    reason: z.string().max(200).optional(),
+  }).strict();
+  app.post("/academies/:academyId/participants/:participantId/status", guard, csrf, academyCtx, async (c) => {
+    const parsed = StatusBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await changeParticipantStatus(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, participantId: c.req.param("participantId")!,
+      ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ participantId: r.participantId, status: parsed.data.status }, 200);
+  });
+  const EnrollBody = z.object({ classId: z.string().min(1).max(64) }).strict();
+  app.post("/academies/:academyId/participants/:participantId/enrollments", guard, csrf, academyCtx, async (c) => {
+    const parsed = EnrollBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await enrollParticipant(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, participantId: c.req.param("participantId")!,
+      classId: parsed.data.classId,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ enrollmentId: r.enrollmentId }, 201);
+  });
+  app.post("/academies/:academyId/enrollments/:enrollmentId/end", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await endEnrollment(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, enrollmentId: c.req.param("enrollmentId")!,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind !== "OK") return c.json({ error: "UNPROCESSABLE", reason: (r as { reason: string }).reason }, 422);
+    return c.json({ enrollmentId: r.enrollmentId, status: "ENDED" }, 200);
+  });
+
+  const AttendanceBody = z.object({
+    records: z.array(z.object({
+      participantId: z.string().min(1).max(64),
+      status: z.enum(["PRESENT", "ABSENT", "LATE", "EARLY_LEAVE", "EXCUSED"]),
+      reason: z.string().max(200).optional(),
+    }).strict()).min(1).max(50),
+  }).strict();
+  app.post("/academies/:academyId/sessions/:sessionId/attendance", guard, csrf, academyCtx, async (c) => {
+    const parsed = AttendanceBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await recordAttendance(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, sessionId: c.req.param("sessionId")!,
+      records: parsed.data.records,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ recorded: r.recorded, updated: r.updated }, 200);
+  });
+  app.get("/academies/:academyId/sessions/:sessionId/attendance", guard, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    const rows = await listSessionAttendance(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, sessionId: c.req.param("sessionId")!,
+    });
+    if (!rows) return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json({ records: rows });
+  });
+  app.post("/academies/:academyId/sessions/:sessionId/complete", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await completeSession(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, sessionId: c.req.param("sessionId")!,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason, missing: r.missing }, 409);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ sessionId: r.sessionId, status: "COMPLETED" }, 200);
+  });
+  const NoticeBody = z.object({
+    participantId: z.string().min(1).max(64),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    type: z.enum(["ABSENCE", "LATE", "EARLY_LEAVE"]),
+    reason: z.string().min(1).max(200),
+  }).strict();
+  app.post("/academies/:academyId/attendance-notices", guard, csrf, academyCtx, async (c) => {
+    const parsed = NoticeBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth");
+    const { type: noticeType, ...rest } = parsed.data;
+    const r = await createAttendanceNotice(cfg.db, {
+      actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+      noticeType, ...rest,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    return c.json({ noticeId: r.noticeId }, 201);
   });
 
   /* ── 결제 준비 (R5 Phase 5) — membership guard 첫 실전 적용 ── */

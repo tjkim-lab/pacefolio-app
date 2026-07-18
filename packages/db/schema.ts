@@ -134,12 +134,16 @@ export const guardians = pgTable("guardians", {
   uniqueIndex("uq_guardian_user").on(t.userId),   // Guardian = User 의 역할, 1:1
 ]);
 
+export const participantStatusEnum = pgEnum("participant_status", ["TRIAL", "ENROLLED", "ON_BREAK", "WITHDRAWN"]);
+
 export const participants = pgTable("participants", {
   id: text("id").primaryKey(),                    // p_xxx
   academyId: text("academy_id").notNull().references(() => academies.id), // 테넌트 축
   name: text("name").notNull(),
   birth: date("birth").notNull(),
   ageLabel: text("age_label").notNull(),
+  status: participantStatusEnum("status").notNull().default("ENROLLED"), // #23 수명주기
+  statusChangedAt: timestamp("status_changed_at", { withTimezone: true, mode: "string" }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
   version: version(),
@@ -338,6 +342,68 @@ export const classSessions = pgTable("class_sessions", {
     .where(sql`${t.participantId} IS NOT NULL`),
   foreignKey({ name: "fk_session_class_academy", columns: [t.classId, t.academyId], foreignColumns: [dbClasses.id, dbClasses.academyId] }),
   foreignKey({ name: "fk_session_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+]);
+
+/* ── 기본선 2단계(#23): 반 배정 · 출결 ──
+   enrollment = 원생↔반 배정(정원 검증 대상). 출결은 예정(보호자 통보)과
+   실제(코치 확정)를 절대 합치지 않는다(도메인 원칙 재현). */
+export const dbEnrollments = pgTable("enrollments", {
+  id: text("id").primaryKey(),                     // en_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  classId: text("class_id").notNull(),
+  participantId: text("participant_id").notNull(),
+  status: text("status").notNull(),                // ACTIVE | ENDED
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date"),
+  createdAt: createdAt(),
+}, (t) => [
+  index("ix_enrollment_class").on(t.classId),
+  index("ix_enrollment_participant").on(t.participantId),
+  // 같은 반에 동시 ACTIVE 배정 1개 — 종료 후 재배정 허용
+  uniqueIndex("uq_enrollment_active").on(t.classId, t.participantId)
+    .where(sql`${t.status} = 'ACTIVE'`),
+  foreignKey({ name: "fk_enrollment_class_academy", columns: [t.classId, t.academyId], foreignColumns: [dbClasses.id, dbClasses.academyId] }),
+  foreignKey({ name: "fk_enrollment_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+  check("ck_enrollment_status", sql`${t.status} IN ('ACTIVE', 'ENDED')`),
+]);
+
+export const attendanceRecordStatusEnum = pgEnum("attendance_record_status", [
+  "PRESENT", "ABSENT", "LATE", "EARLY_LEAVE", "EXCUSED",
+]);
+export const attendanceNoticeTypeEnum = pgEnum("attendance_notice_type", ["ABSENCE", "LATE", "EARLY_LEAVE"]);
+
+/* 실제 출결(코치 확정) — 세션×원생 1행, 수정은 같은 행 갱신+version+감사 */
+export const attendanceRecords = pgTable("attendance_records", {
+  id: text("id").primaryKey(),                     // ar_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  sessionId: text("session_id").notNull(),
+  participantId: text("participant_id").notNull(),
+  status: attendanceRecordStatusEnum("status").notNull(),
+  reason: text("reason"),                          // 결석·지각 사유(선택)
+  recordedByUserId: text("recorded_by_user_id").notNull().references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: version(),
+}, (t) => [
+  uniqueIndex("uq_attendance_session_participant").on(t.sessionId, t.participantId),
+  index("ix_attendance_participant").on(t.participantId),
+  foreignKey({ name: "fk_attendance_session_academy", columns: [t.sessionId, t.academyId], foreignColumns: [classSessions.id, classSessions.academyId] }),
+  foreignKey({ name: "fk_attendance_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+]);
+
+/* 예정 통보(보호자 접수) — 실제 출결과 별개 트랙 */
+export const dbAttendanceNotices = pgTable("attendance_notices", {
+  id: text("id").primaryKey(),                     // an_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  participantId: text("participant_id").notNull(),
+  date: date("date").notNull(),
+  type: attendanceNoticeTypeEnum("type").notNull(),
+  reason: text("reason").notNull(),
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => [
+  index("ix_notice_participant_date").on(t.participantId, t.date),
+  foreignKey({ name: "fk_notice_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
 ]);
 
 /* ── Phase 5: 청구 · 결제 (docs/06 · R5 §7 Phase 5) ──

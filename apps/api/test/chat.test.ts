@@ -101,6 +101,18 @@ before(async () => {
     { id: "inv_dodam", academyId: "a_wg", participantId: "p_dodam", enrollmentId: "e_d", billingPeriodId: "bp_q4", status: "ISSUED", total: 405000, dueDate: "2025-09-10" },
     { id: "inv_hana", academyId: "a_wg", participantId: "p_hana", enrollmentId: "e_h", billingPeriodId: "bp_q4", status: "ISSUED", total: 300000, dueDate: "2025-09-10" },
   ]);
+  // #23: HEALTH 코치 담당 검증 재료 — coach(담당 O), coach2(담당 X)
+  await db.insert(s.dbClasses).values({
+    id: "cls_p2", academyId: "a_wg", name: "플레이2", scheduleType: "FIXED_WEEKLY", capacity: 12,
+  });
+  await db.insert(s.classAssignments).values({
+    id: "ca_1", classId: "cls_p2", academyId: "a_wg", coachUserId: coach.userId,
+    status: "ACTIVE", startDate: "2024-08-01",
+  });
+  await db.insert(s.dbEnrollments).values({
+    id: "en_1", academyId: "a_wg", classId: "cls_p2", participantId: "p_dodam",
+    status: "ACTIVE", startDate: "2025-03-02",
+  });
 });
 
 /* ── ACK 수명주기: 원장 → 코치 확인 필수 전달 ── */
@@ -324,6 +336,16 @@ test("HEALTH: 원생 미지정 422 — DB CHECK(ck_chatmsg_health_participant)�
     kind: "NORMAL_CHAT", category: "HEALTH", body: "컨디션 관련",
   });
   assert.equal(r.status, 422);
+});
+
+test("#23: 담당 아닌 코치 방 → HEALTH 422 (ClassAssignment 검증 — 13차 C 잔여 마감)", async () => {
+  const dm2 = await post(owner, "/academies/a_wg/chat/dms", { type: "OWNER_COACH_DM", targetUserId: coach2.userId });
+  const room2 = ((await dm2.json()) as { roomId: string }).roomId;
+  const r = await post(owner, `/academies/a_wg/chat/rooms/${room2}/messages`, {
+    kind: "NORMAL_CHAT", category: "HEALTH", body: "도담 건강", relatedParticipantId: "p_dodam",
+  });
+  assert.equal(r.status, 422); // coach2 는 도담 담당 아님
+  // 담당 코치(coach) 방은 허용 — 기존 dmRoom 의 HEALTH 테스트가 그 증거(seed 배정)
 });
 
 test("확인 수명주기 없는 메시지에 ack → 409", async () => {
