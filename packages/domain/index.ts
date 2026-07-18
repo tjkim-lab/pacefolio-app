@@ -14,3 +14,4 @@ export * from "./notifications";
 export * from "./events";
 export * from "./consent";
 export * from "./chat";
+export * from "./scheduling";

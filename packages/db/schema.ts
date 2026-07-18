@@ -255,6 +255,91 @@ export const guardianParticipantLinks = pgTable("guardian_participant_links", {
     .where(sql`${t.isPrimaryGuardian} = true`),
 ]);
 
+/* ── 기본선 1단계(#22): 반 · 수업 일정 (경쟁 비교 반영 — docs/15) ──
+   수업 유형 3종 + 반복 일정 전개(세션 인스턴스) + 코치 담당(assignment).
+   assignment 는 채팅 HEALTH 코치 담당 검증(13차 C 잔여)의 전제 테이블. */
+export const classScheduleTypeEnum = pgEnum("class_schedule_type", [
+  "FIXED_WEEKLY", "VARIABLE_BY_WEEKDAY", "PARTICIPANT_SPECIFIC",
+]);
+export const classStatusEnum = pgEnum("class_status", ["ACTIVE", "WAITING", "CLOSED"]);
+export const classSessionStatusEnum = pgEnum("class_session_status", [
+  "SCHEDULED", "CANCELED", "EXTRA", "COMPLETED",
+]);
+
+export const dbClasses = pgTable("classes", {
+  id: text("id").primaryKey(),                     // cls_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  name: text("name").notNull(),
+  scheduleType: classScheduleTypeEnum("schedule_type").notNull(),
+  capacity: integer("capacity").notNull(),
+  room: text("room"),
+  status: classStatusEnum("status").notNull().default("ACTIVE"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: version(),
+}, (t) => [
+  uniqueIndex("uq_class_id_academy").on(t.id, t.academyId),
+  index("ix_class_academy").on(t.academyId),
+  check("ck_class_capacity", sql`${t.capacity} > 0 AND ${t.capacity} <= 200`),
+]);
+
+export const classScheduleSlots = pgTable("class_schedule_slots", {
+  id: text("id").primaryKey(),                     // slot_xxx
+  classId: text("class_id").notNull(),
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  weekday: integer("weekday").notNull(),           // 0=일 … 6=토
+  startTime: text("start_time").notNull(),         // "14:30"
+  endTime: text("end_time").notNull(),
+  participantId: text("participant_id"),           // PARTICIPANT_SPECIFIC 전용
+}, (t) => [
+  index("ix_slot_class").on(t.classId),
+  foreignKey({ name: "fk_slot_class_academy", columns: [t.classId, t.academyId], foreignColumns: [dbClasses.id, dbClasses.academyId] }),
+  foreignKey({ name: "fk_slot_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+  check("ck_slot_weekday", sql`${t.weekday} BETWEEN 0 AND 6`),
+]);
+
+/* 코치 담당 — ACTIVE 배정이 채팅·출결·건강정보의 "담당 범위" 정본 */
+export const classAssignments = pgTable("class_assignments", {
+  id: text("id").primaryKey(),                     // ca_xxx
+  classId: text("class_id").notNull(),
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  coachUserId: text("coach_user_id").notNull().references(() => users.id),
+  status: text("status").notNull(),                // ACTIVE | ENDED
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date"),
+  createdAt: createdAt(),
+}, (t) => [
+  index("ix_assignment_coach").on(t.coachUserId),
+  index("ix_assignment_class").on(t.classId),
+  foreignKey({ name: "fk_assignment_class_academy", columns: [t.classId, t.academyId], foreignColumns: [dbClasses.id, dbClasses.academyId] }),
+  check("ck_assignment_status", sql`${t.status} IN ('ACTIVE', 'ENDED')`),
+]);
+
+/* 세션 인스턴스 — 반복 일정 전개 결과. 휴강 = CANCELED(사유 보존 · 재전개 시 유지) */
+export const classSessions = pgTable("class_sessions", {
+  id: text("id").primaryKey(),                     // sess_xxx
+  classId: text("class_id").notNull(),
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  date: date("date").notNull(),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time").notNull(),
+  participantId: text("participant_id"),
+  status: classSessionStatusEnum("status").notNull().default("SCHEDULED"),
+  canceledReason: text("canceled_reason"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index("ix_session_class_date").on(t.classId, t.date),
+  uniqueIndex("uq_session_id_academy").on(t.id, t.academyId),
+  // 단체 세션 중복 방지(원생 슬롯은 원생 포함 유일)
+  uniqueIndex("uq_session_group_slot").on(t.classId, t.date, t.startTime)
+    .where(sql`${t.participantId} IS NULL`),
+  uniqueIndex("uq_session_participant_slot").on(t.classId, t.date, t.startTime, t.participantId)
+    .where(sql`${t.participantId} IS NOT NULL`),
+  foreignKey({ name: "fk_session_class_academy", columns: [t.classId, t.academyId], foreignColumns: [dbClasses.id, dbClasses.academyId] }),
+  foreignKey({ name: "fk_session_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+]);
+
 /* ── Phase 5: 청구 · 결제 (docs/06 · R5 §7 Phase 5) ──
    금액 = int4 KRW 정수 + CHECK(>0) — float 금지(R5 Phase 0).
    불변식 정본 = packages/domain/billing.ts — DB 는 기본 제약,

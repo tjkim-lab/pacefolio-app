@@ -92,6 +92,13 @@
       "when": 1784338733292,
       "tag": "0012_link-revocation",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1784340282907,
+      "tag": "0013_classes-scheduling",
+      "breakpoints": true
     }
   ]
 }

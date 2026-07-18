@@ -3,7 +3,9 @@
 유소년 스포츠·교육 아카데미 운영 플랫폼. 원더짐 = 고객 0번(내부 검증 → 시장 확장), 멀티테넌트 day 1.
 
 > **백엔드 착공 단계** (DB 착공 금지 헌법은 2026-07-16 유저 확정으로 해제 — 5차 리뷰 GO 판정 근거).
-> DB·API·인증은 실 코드가 존재하고, 웹 화면은 아직 fixture(mock) 기반이다.
+> DB·API·인증은 실 코드가 존재한다. 웹 화면은 fixture(mock) 기반이 기본이되,
+> **학부모 청구·결제는 실 API 모드**(LiveBillingProvider — API 감지 시 실 DB·결제·정산,
+> 부재 시 fixture 폴백)가 연결됐고 /stage/gate2 에서 13단계 수명주기를 실행할 수 있다.
 > 아래 "구현됨 / mock / 미구현" 구분이 이 저장소의 현재 상태 정본이며,
 > 진행 이력·검증 수준은 [STATUS.md](./STATUS.md) 참조.
 
@@ -25,7 +27,7 @@
 
 ## 현재 mock (실물처럼 보이지만 시뮬레이션)
 
-- **웹 5개 앱 화면**(`apps/web`: `/parent` 학부모 · `/coach` 코치 · `/owner` 원장 모바일 · `/pc` 원장 콘솔 · `/admin` 본사) — 공용 fixture 기반. api-client 전환 예정
+- **웹 5개 앱 화면**(`apps/web`: `/parent` 학부모 · `/coach` 코치 · `/owner` 원장 모바일 · `/pc` 원장 콘솔 · `/admin` 본사) — 공용 fixture 기반 + **학부모 청구·결제 실 API 모드**(그 외 화면은 api-client 전환 예정)
 - **PG 결제** — mockpg 시뮬레이터(실 PG 미연동). 웹 화면 쪽은 `PG_SIMULATION` 플래그
 - **OAuth provider** — FakeProvider (실 카카오 개발자 키 대기). 계약·검증 로직은 실 코드
 
@@ -55,6 +57,7 @@ docs/                 설계 문서(02~12) · ROADMAP-R2 · 리뷰 기록
 ```bash
 npm install
 npm run dev                    # 웹 http://localhost:3000 (fixture — DB 불필요)
+npm run dev:api                # API :3001 — DATABASE_URL 없으면 PGlite 자동 seed(실연결 모드)
 
 # API 서버는 PostgreSQL 16 + DATABASE_URL 필요
 DATABASE_URL=postgres://... npm run dev -w @pacefolio/api

@@ -63,6 +63,18 @@ export const VERIFICATION_METHOD = ["PHONE_OTP", "ACADEMY_INVITE_CODE", "ACADEMY
 export type VerificationMethod = (typeof VERIFICATION_METHOD)[number];
 
 export const VERIFICATION_STATUS = ["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED", "REVOKED"] as const; // REVOKED = 검증됐던 관계의 사후 철회(REJECTED=신청 거절과 구분 · 13차 D P0-2)
+
+/* 경쟁 비교(마이클럽) 반영 — 기본선 1단계 계약 선확정 (구현 = Task #22~24):
+   수업 유형 3종: 매주 동일 / 요일별 다른 시간 / 원생별 개별(소그룹·개인 레슨) */
+export const CLASS_SCHEDULE_TYPE = ["FIXED_WEEKLY", "VARIABLE_BY_WEEKDAY", "PARTICIPANT_SPECIFIC"] as const;
+export type ClassScheduleType = (typeof CLASS_SCHEDULE_TYPE)[number];
+/* 결제 서비스 온보딩 상태 — 원장 설정의 PG 가입·심사 수명주기 */
+export const PG_ONBOARDING_STATUS = ["NOT_ENROLLED", "IN_REVIEW", "AVAILABLE", "ACTIVE", "RESTRICTED"] as const;
+export type PgOnboardingStatus = (typeof PG_ONBOARDING_STATUS)[number];
+/* 수납 유형 — 온라인 PG(웹훅 확정)와 오프라인 수기 수납(이벤트+증빙)을 별도 유형으로
+   기록: "화면에서 상태만 바꾸는 수납" 금지(경쟁사 반면교사) */
+export const PAYMENT_CHANNEL = ["ONLINE_PG", "BANK_TRANSFER", "CASH", "CARD_OFFLINE"] as const;
+export type PaymentChannel = (typeof PAYMENT_CHANNEL)[number];
 export type VerificationStatus = (typeof VERIFICATION_STATUS)[number];
 
 /* --- 개인정보 공개 범위 (리뷰#2 4-2: SNS식 Everyone 금지, 시스템 정책으로 제한) --- */

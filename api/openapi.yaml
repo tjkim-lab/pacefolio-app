@@ -31,6 +31,7 @@ security:
 tags:
   - name: auth
   - name: linking
+  - name: classes
   - name: attendance
   - name: billing
   - name: consent
@@ -273,6 +274,59 @@ paths:
         '200': { description: '{ refundId, status } — 양측 완료 시 MUTUALLY_APPROVED', content: { application/json: { schema: { $ref: '#/components/schemas/Refund' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: 'APPROVAL_REJECTED — 동일인 양측 승인·결제자 아님·링크 철회(운영 심사) 등', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── 반 · 수업 일정 — 기본선 1단계(#22, docs/15) ──────────────────
+  /academies/{academyId}/classes:
+    post:
+      tags: [classes]
+      summary: >
+        반 생성(원장·데스크만) — 수업 유형 3종: FIXED_WEEKLY(매주 동일) /
+        VARIABLE_BY_WEEKDAY(요일별 시간) / PARTICIPANT_SPECIFIC(원생별 개별·원생 지정 필수).
+        슬롯 검증(domain scheduling.ts) + 담당 코치(재직 검증) ACTIVE 배정 + 감사. (구현됨)
+      parameters: [ { $ref: '#/components/parameters/AcademyId' } ]
+      responses:
+        '201': { description: '{ classId }' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    get:
+      tags: [classes]
+      summary: 반 목록 — 슬롯·담당 코치 포함(학원 멤버). (구현됨)
+      parameters: [ { $ref: '#/components/parameters/AcademyId' } ]
+      responses: { '200': { description: '{ classes: [...] }' } }
+  /academies/{academyId}/classes/{classId}/sessions/generate:
+    post:
+      tags: [classes]
+      summary: >
+        반복 일정 전개(멱등) — 구간 내 SCHEDULED 만 교체·휴강(CANCELED)·완료 보존.
+        class FOR UPDATE 로 동시 전개 직렬화. (구현됨)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: classId, in: path, required: true, schema: { type: string } }
+      responses:
+        '201': { description: '{ created, keptCanceled }' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /academies/{academyId}/classes/{classId}/sessions:
+    get:
+      tags: [classes]
+      summary: 세션 목록(from/to 필터) — (date, startTime) 정렬. (구현됨)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: classId, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: '{ sessions: [...] }' } }
+  /academies/{academyId}/sessions/{sessionId}/cancellation:
+    post:
+      tags: [classes]
+      summary: >
+        휴강(멱등) — CANCELED+사유·감사·Outbox(CLASS_SESSION_CANCELED — 회차 차감·보강·공지는
+        청구·알림 트랙 소비). 완료 수업 휴강 불가 409. 재전개에도 휴강 보존. (구현됨)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: sessionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{ sessionId, status: CANCELED }' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 완료 수업 휴강 시도 }
 
   /academies/{academyId}/guardian-links/{linkId}/revocation:
     post:

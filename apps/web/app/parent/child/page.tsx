@@ -89,7 +89,7 @@ function GrowPane() {
       <div className="space-y-4">
         <GrowCard title="마일스톤" more="코치가 기록 → 리포트에 자동 반영">
           <MilestoneRow icon="award" title="드리블 스텝2 달성 🎉" sub={`10/25(토) · ${P2_COACH} 기록`} prog={60} next={<>다음 목표 <b className="text-ink">스텝3</b>까지 2회 남았어요</>} />
-          <MilestoneRow icon="check" title="한발 서기 15초 달성" sub={`10/20(월) 18초 신기록으로 갱신 · ${P2_COACH} 기록`} prog={100} next={<><b className="text-ink">완료</b> — 다음 배지: 25초 도전</>} />
+          <MilestoneRow icon="check" title="균형 활동 12회 경험" sub={`10/20(월) 한발 서기 밸런스 게임까지 완주 · ${P2_COACH} 기록`} prog={100} next={<><b className="text-ink">완료</b> — 다음 경험: 리듬 스텝 시리즈</>} />
           <MilestoneRow icon="clock" dim title="리프팅 10회" sub="진행 중 · 지금 4회" prog={40} next={<><b className="text-ink">6회</b> 더 하면 배지를 받아요</>} />
         </GrowCard>
         <GrowCard title="이번 기간 참여" more="학원 기준에 따라 집계">

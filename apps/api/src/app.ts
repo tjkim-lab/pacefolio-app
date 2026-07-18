@@ -10,6 +10,9 @@ import type { ProviderRegistry, OAuthProviderName } from "./auth/provider";
 import { requireSession, requireCsrf, requireAcademyContext, SESSION_COOKIE, CSRF_COOKIE, type GuardEnv } from "./guard";
 import { requestGuardianLink } from "./linking/service";
 import { revokeGuardianLink } from "./linking/revoke";
+import {
+  createClass, generateSessions, cancelSession, listClasses, listSessions,
+} from "./classes/service";
 import { preparePayment, processPgWebhook } from "./billing/service";
 import { requestRefund, approveRefund, processRefundWebhook } from "./billing/refunds";
 import { listGuardianInvoices, getPaymentStatus } from "./billing/queries";
@@ -186,6 +189,79 @@ export function createApp(cfg: ApiConfig) {
     if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
     if (r.kind === "ALREADY_REVOKED") return c.json({ linkId: r.linkId, status: "REVOKED" }, 200); // 멱등
     return c.json({ linkId: r.linkId, status: "REVOKED", pendingRefunds: r.pendingRefunds }, 200);
+  });
+
+  /* ── 기본선 1단계(#22): 반 · 수업 일정 (docs/15) ── */
+  const SlotSchema = z.object({
+    weekday: z.number().int().min(0).max(6),
+    startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    participantId: z.string().min(1).max(64).optional(),
+  }).strict();
+  const CreateClassBody = z.object({
+    name: z.string().min(1).max(60),
+    scheduleType: z.enum(["FIXED_WEEKLY", "VARIABLE_BY_WEEKDAY", "PARTICIPANT_SPECIFIC"]),
+    capacity: z.number().int().min(1).max(200),
+    room: z.string().max(60).optional(),
+    coachUserId: z.string().min(1).max(64).optional(),
+    slots: z.array(SlotSchema).min(1).max(14),
+  }).strict();
+  app.post("/academies/:academyId/classes", guard, csrf, academyCtx, async (c) => {
+    const parsed = CreateClassBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth");
+    const m = c.get("membership");
+    const r = await createClass(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ classId: r.classId }, 201);
+  });
+  app.get("/academies/:academyId/classes", guard, academyCtx, async (c) => {
+    return c.json({ classes: await listClasses(cfg.db, c.req.param("academyId")!) });
+  });
+  const GenerateBody = z.object({
+    rangeStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    rangeEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  }).strict();
+  app.post("/academies/:academyId/classes/:classId/sessions/generate", guard, csrf, academyCtx, async (c) => {
+    const parsed = GenerateBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth");
+    const m = c.get("membership");
+    const r = await generateSessions(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, classId: c.req.param("classId")!,
+      ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ created: r.created, keptCanceled: r.keptCanceled }, 201);
+  });
+  app.get("/academies/:academyId/classes/:classId/sessions", guard, academyCtx, async (c) => {
+    const rows = await listSessions(cfg.db, {
+      academyId: c.req.param("academyId")!, classId: c.req.param("classId")!,
+      from: c.req.query("from"), to: c.req.query("to"),
+    });
+    return c.json({ sessions: rows });
+  });
+  const CancelBody = z.object({ reason: z.string().min(1).max(200) }).strict();
+  app.post("/academies/:academyId/sessions/:sessionId/cancellation", guard, csrf, academyCtx, async (c) => {
+    const parsed = CancelBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth");
+    const m = c.get("membership");
+    const r = await cancelSession(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, sessionId: c.req.param("sessionId")!,
+      reason: parsed.data.reason,
+    }, now());
+    if (r.kind === "NOT_FOUND") return c.json({ error: "NOT_FOUND" }, 404);
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    return c.json({ sessionId: r.sessionId, status: "CANCELED" }, 200);
   });
 
   /* ── 결제 준비 (R5 Phase 5) — membership guard 첫 실전 적용 ── */
