@@ -82,17 +82,29 @@ export async function openDm(db: Db, input: {
       title = `${p[0]?.name ?? "원생"} 보호자 1:1`;
     }
 
-    const key = dmKey(input.type, members.map((m) => m.userId), relatedParticipantId);
+    /* 13차 C-5: 보호자 DM 의 정체성 = (보호자, 원생) — 원장 목록은 방 멤버십일 뿐
+       방 정체성에 넣지 않는다(원장 증감 시 새 방 생성 방지). 코치 DM 은 양자 키. */
+    const identity = input.type === "GUARDIAN_DM" ? [input.actorUserId] : members.map((m) => m.userId);
+    const key = dmKey(input.type, identity, relatedParticipantId);
     const existing = await tx.select().from(s.chatRooms).where(and(
       eq(s.chatRooms.academyId, input.academyId), eq(s.chatRooms.dmKey, key),
     ));
     if (existing[0]) return { kind: "OK" as const, roomId: existing[0].id, created: false };
 
     const roomId = newId("cr");
-    await tx.insert(s.chatRooms).values({
+    /* 13차 C P1-3: 동시 생성 경쟁 — UNIQUE 충돌을 500 이 아니라
+       정상 find-or-create 로 수렴(onConflictDoNothing → 재조회) */
+    const inserted = await tx.insert(s.chatRooms).values({
       id: roomId, academyId: input.academyId, type: input.type, title, dmKey: key,
       relatedParticipantId, createdByUserId: input.actorUserId, createdAt: nowISO,
-    });
+    }).onConflictDoNothing({ target: [s.chatRooms.academyId, s.chatRooms.dmKey] }).returning();
+    if (!inserted[0]) {
+      const raced = await tx.select().from(s.chatRooms).where(and(
+        eq(s.chatRooms.academyId, input.academyId), eq(s.chatRooms.dmKey, key),
+      ));
+      if (raced[0]) return { kind: "OK" as const, roomId: raced[0].id, created: false };
+      return { kind: "DENIED" as const, reason: "방 생성 경쟁 실패 — 재시도 필요" };
+    }
     await tx.insert(s.chatRoomMembers).values(members.map((m) => ({
       id: newId("crm"), roomId, academyId: input.academyId,
       userId: m.userId, role: m.role, joinedAt: nowISO,
@@ -121,8 +133,9 @@ export async function postMessage(db: Db, input: {
   msgKind: ChatMessageKind;
   category: ChatCategory;
   body: string;
-  contextCard?: string;
+  invoiceId?: string;          // 13차 C P0-1: BILLING = 참조만 — 카드는 서버가 생성
   relatedParticipantId?: string;
+  clientMessageId?: string;    // 13차 C P1-5: 전송 멱등(모바일 재시도)
 }, nowISO: string): Promise<PostMessageResult> {
   return db.transaction(async (tx) => {
     const room = (await tx.select().from(s.chatRooms).where(and(
@@ -134,10 +147,82 @@ export async function postMessage(db: Db, input: {
     if (!canPostToRoom({ roomType: room.type, senderRoles: input.actorRoles })) {
       return { kind: "FORBIDDEN" as const, reason: "공지형 학원방은 학원만 발송 — 보호자는 질문 thread" };
     }
-    const related = input.relatedParticipantId ?? room.relatedParticipantId ?? null;
+
+    /* 13차 C P1-5: 전송 멱등 — 같은 clientMessageId 재시도 = 기존 메시지 반환 */
+    if (input.clientMessageId) {
+      const dup = (await tx.select().from(s.chatMessages).where(and(
+        eq(s.chatMessages.academyId, input.academyId),
+        eq(s.chatMessages.senderUserId, input.actorUserId),
+        eq(s.chatMessages.clientMessageId, input.clientMessageId),
+      )))[0];
+      if (dup) return { kind: "OK" as const, messageId: dup.id, status: dup.status as ChatMessageStatus };
+    }
+
+    /* 13차 C P0-2: 방 원생 ≠ 메시지 원생 금지 — 방 컨텍스트가 정본.
+       원생 방(GUARDIAN_DM)에서는 클라이언트 override 를 아예 거부. */
+    let related: string | null;
+    if (room.relatedParticipantId) {
+      if (input.relatedParticipantId && input.relatedParticipantId !== room.relatedParticipantId) {
+        return { kind: "INVALID" as const, reason: "메시지 원생이 방 원생과 불일치 — 방 컨텍스트가 정본" };
+      }
+      related = room.relatedParticipantId;
+    } else {
+      related = input.relatedParticipantId ?? null;
+    }
+
+    /* 13차 C P0-1: BILLING 카드 = 서버 생성. 클라이언트는 invoiceId 참조만.
+       검증: 청구서 존재·학원 일치·방 원생 일치 · 발신 보호자는 canPay(원장/데스크는 역할). */
+    let serverCard: string | null = null;
+    if (input.category === "BILLING") {
+      if (!input.invoiceId) {
+        return { kind: "INVALID" as const, reason: "금액은 invoiceId 참조로만 — 카드는 서버가 청구서에서 생성" };
+      }
+      const inv = (await tx.select().from(s.invoices).where(and(
+        eq(s.invoices.id, input.invoiceId), eq(s.invoices.academyId, input.academyId),
+      )))[0];
+      if (!inv) return { kind: "INVALID" as const, reason: "청구서 없음(학원 불일치 포함)" };
+      if (!related || inv.participantId !== related) {
+        return { kind: "INVALID" as const, reason: "이 방 원생의 청구서가 아님" };
+      }
+      const staff = input.actorRoles.includes("OWNER") || input.actorRoles.includes("DESK");
+      if (!staff) {
+        const gd = (await tx.select().from(s.guardians).where(eq(s.guardians.userId, input.actorUserId)))[0];
+        const link = gd && (await tx.select().from(s.guardianParticipantLinks).where(and(
+          eq(s.guardianParticipantLinks.guardianId, gd.id),
+          eq(s.guardianParticipantLinks.participantId, related),
+          eq(s.guardianParticipantLinks.academyId, input.academyId),
+        )))[0];
+        if (!link?.canPay) {
+          return { kind: "FORBIDDEN" as const, reason: "금액정보는 결제 권한(canPay) 보호자·학원만" };
+        }
+      }
+      serverCard = JSON.stringify({
+        invoiceId: inv.id, total: inv.total, status: inv.status, dueDate: inv.dueDate,
+      }); // DB 정본에서 생성 — 클라이언트 금액 위조 불가
+    }
+
+    /* 13차 C P0-3(1차): HEALTH — 방의 보호자 전원이 canViewHealthInfo 여야 전송 가능.
+       (코치 담당 ClassAssignment 검증은 출결 배치에서 테이블 신설과 함께 — docs/12 잔여) */
+    if (input.category === "HEALTH" && related) {
+      const guardianMembers = (await tx.select().from(s.chatRoomMembers).where(and(
+        eq(s.chatRoomMembers.roomId, room.id), isNull(s.chatRoomMembers.leftAt),
+      ))).filter((m) => m.role === "GUARDIAN");
+      for (const gm of guardianMembers) {
+        const gd = (await tx.select().from(s.guardians).where(eq(s.guardians.userId, gm.userId)))[0];
+        const link = gd && (await tx.select().from(s.guardianParticipantLinks).where(and(
+          eq(s.guardianParticipantLinks.guardianId, gd.id),
+          eq(s.guardianParticipantLinks.participantId, related),
+          eq(s.guardianParticipantLinks.academyId, input.academyId),
+        )))[0];
+        if (!link?.canViewHealthInfo) {
+          return { kind: "INVALID" as const, reason: "건강정보 열람 권한(canViewHealthInfo) 없는 보호자가 있는 방 — 전송 불가" };
+        }
+      }
+    }
+
     const v = validateChatCategory({
       category: input.category, roomType: room.type,
-      relatedParticipantId: related, hasContextCard: !!input.contextCard,
+      relatedParticipantId: related, hasContextCard: !!serverCard,
     });
     if (!v.ok) return { kind: "INVALID" as const, reason: v.reason };
 
@@ -146,8 +231,9 @@ export async function postMessage(db: Db, input: {
     await tx.insert(s.chatMessages).values({
       id: messageId, roomId: room.id, academyId: input.academyId,
       senderUserId: input.actorUserId, kind: input.msgKind, category: input.category,
-      status, body: input.body, contextCard: input.contextCard ?? null,
-      relatedParticipantId: related, createdAt: nowISO,
+      status, body: input.body, contextCard: serverCard,
+      relatedParticipantId: related, clientMessageId: input.clientMessageId ?? null,
+      createdAt: nowISO,
     });
     // 수신자 ack 행 — READ ≠ ACKNOWLEDGED 를 행 단위로 기록
     const others = await tx.select().from(s.chatRoomMembers).where(and(
@@ -159,16 +245,14 @@ export async function postMessage(db: Db, input: {
         id: newId("ack"), messageId, academyId: input.academyId, userId: m.userId,
       })));
     }
-    // 필수 확인·민감 카테고리는 감사 대상 (본문 원문은 감사에 미포함 — 최소화)
-    if (requiresAck(input.msgKind) || input.category !== "GENERAL") {
-      await recordAudit(tx, {
-        academyId: input.academyId, actorUserId: input.actorUserId, actorRole: member.role,
-        action: "chat.message.sent", targetType: "ChatMessage", targetId: messageId,
-        detail: { kind: input.msgKind, category: input.category, roomType: room.type,
-          relatedParticipantId: related ?? undefined },
-        success: true,
-      }, nowISO);
-    }
+    /* 13차 C: 발송은 전부 감사(docs/12 계약 — 본문 원문은 감사에 미포함) */
+    await recordAudit(tx, {
+      academyId: input.academyId, actorUserId: input.actorUserId, actorRole: member.role,
+      action: "chat.message.sent", targetType: "ChatMessage", targetId: messageId,
+      detail: { kind: input.msgKind, category: input.category, roomType: room.type,
+        relatedParticipantId: related ?? undefined },
+      success: true,
+    }, nowISO);
     await recordOutbox(tx, {
       academyId: input.academyId, eventType: "CHAT_MESSAGE_SENT",
       payload: { messageId, roomId: room.id, kind: input.msgKind, category: input.category },
@@ -197,6 +281,10 @@ export async function markRead(db: Db, input: {
     if (!msg) return { kind: "FORBIDDEN" as const, reason: "메시지 없음" };
     const member = await activeMember(tx, msg.roomId, input.actorUserId);
     if (!member) return { kind: "FORBIDDEN" as const, reason: "방 멤버가 아니에요" };
+    /* 13차 C P1-2: 발신자의 자기 read = 멱등 no-op — 메시지 상태를 바꾸지 않는다 */
+    if (msg.senderUserId === input.actorUserId) {
+      return { kind: "OK" as const, status: msg.status as ChatMessageStatus };
+    }
     await tx.update(s.chatMessageAcks).set({ readAt: nowISO }).where(and(
       eq(s.chatMessageAcks.messageId, msg.id),
       eq(s.chatMessageAcks.userId, input.actorUserId),
@@ -218,7 +306,11 @@ export async function acknowledge(db: Db, input: {
   actorUserId: string; academyId: string; messageId: string;
 }, nowISO: string): Promise<AckResult> {
   return db.transaction(async (tx) => {
-    const msg = await loadMessage(tx, input.academyId, input.messageId);
+    /* 13차 C P1-4: message row FOR UPDATE — 다인방 동시 ACK 에서 pending 집계
+       경쟁 직렬화(둘 다 "1명 남음"을 읽고 둘 다 READ 에 머무는 문제 차단) */
+    const msg = (await tx.select().from(s.chatMessages).where(and(
+      eq(s.chatMessages.id, input.messageId), eq(s.chatMessages.academyId, input.academyId),
+    )).for("update"))[0];
     if (!msg) return { kind: "FORBIDDEN" as const, reason: "메시지 없음" };
     if (!requiresAck(msg.kind as ChatMessageKind)) {
       return { kind: "CONFLICT" as const, reason: "확인 수명주기가 없는 메시지" };
@@ -227,6 +319,14 @@ export async function acknowledge(db: Db, input: {
     if (!member) return { kind: "FORBIDDEN" as const, reason: "방 멤버가 아니에요" };
     if (msg.senderUserId === input.actorUserId) {
       return { kind: "CONFLICT" as const, reason: "발신자는 자기 메시지를 확인 처리할 수 없어요" };
+    }
+    /* 13차 C-12: 같은 사용자의 중복 ACK = 멱등 성공(모바일 응답 유실 재시도) */
+    const myAck = (await tx.select().from(s.chatMessageAcks).where(and(
+      eq(s.chatMessageAcks.messageId, msg.id),
+      eq(s.chatMessageAcks.userId, input.actorUserId),
+    )))[0];
+    if (myAck?.acknowledgedAt) {
+      return { kind: "OK" as const, status: msg.status as ChatMessageStatus };
     }
     const cur = msg.status as ChatMessageStatus;
     if (!canTransitionChatStatus(cur, "ACKNOWLEDGED") && cur !== "SENT" && cur !== "DELIVERED") {
@@ -308,19 +408,55 @@ export async function listRooms(db: Db, input: { actorUserId: string; academyId:
 
 export async function listMessages(db: Db, input: {
   actorUserId: string; academyId: string; roomId: string;
-}) {
+}, nowISO: string) {
   return db.transaction(async (tx) => {
     const member = await activeMember(tx, input.roomId, input.actorUserId);
     if (!member) return null;
     const msgs = await tx.select().from(s.chatMessages).where(and(
       eq(s.chatMessages.roomId, input.roomId),
       eq(s.chatMessages.academyId, input.academyId),
-    )).orderBy(asc(s.chatMessages.createdAt));
-    return msgs.map((m) => ({
-      messageId: m.id, senderUserId: m.senderUserId, kind: m.kind, category: m.category,
-      status: m.status, body: m.deletedAt ? "(삭제된 메시지 — 원문 보존)" : m.body,
-      contextCard: m.contextCard, relatedParticipantId: m.relatedParticipantId,
-      resolvedNote: m.resolvedNote, createdAt: m.createdAt,
-    }));
+    )).orderBy(asc(s.chatMessages.createdAt), asc(s.chatMessages.id)); // 동률 안정 정렬
+
+    /* 13차 C P0-3(조회 재인가): 보호자는 조회 시점에도 canViewHealthInfo 를
+       재확인 — 권한이 철회됐으면 HEALTH 본문·카드를 가림(멤버십은 유지) */
+    let healthAllowed = true;
+    if (member.role === "GUARDIAN" && msgs.some((m) => m.category === "HEALTH")) {
+      const gd = (await tx.select().from(s.guardians).where(eq(s.guardians.userId, input.actorUserId)))[0];
+      const pid = msgs.find((m) => m.category === "HEALTH")?.relatedParticipantId;
+      const link = gd && pid ? (await tx.select().from(s.guardianParticipantLinks).where(and(
+        eq(s.guardianParticipantLinks.guardianId, gd.id),
+        eq(s.guardianParticipantLinks.participantId, pid),
+        eq(s.guardianParticipantLinks.academyId, input.academyId),
+      )))[0] : undefined;
+      healthAllowed = !!link?.canViewHealthInfo;
+    }
+
+    /* 13차 C P0-4: 민감(BILLING·HEALTH) 메시지 열람 = 서버 감사 행
+       (UI 시스템 메시지가 아니라 AuditLog — 원장 포함 전 역할) */
+    const sensitive = msgs.filter((m) => m.category !== "GENERAL" && !m.deletedAt);
+    if (sensitive.length > 0) {
+      await recordAudit(tx, {
+        academyId: input.academyId, actorUserId: input.actorUserId, actorRole: member.role,
+        action: "chat.sensitive_message.viewed", targetType: "ChatRoom", targetId: input.roomId,
+        detail: {
+          count: sensitive.length,
+          categories: [...new Set(sensitive.map((m) => m.category))],
+        },
+        success: true,
+      }, nowISO);
+    }
+
+    return msgs.map((m) => {
+      const redactHealth = m.category === "HEALTH" && !healthAllowed;
+      return {
+        messageId: m.id, senderUserId: m.senderUserId, kind: m.kind, category: m.category,
+        status: m.status,
+        body: m.deletedAt ? "(삭제된 메시지 — 원문 보존)"
+          : redactHealth ? "(건강정보 — 열람 권한이 없어요)" : m.body,
+        contextCard: redactHealth ? null : m.contextCard,
+        relatedParticipantId: m.relatedParticipantId,
+        resolvedNote: m.resolvedNote, createdAt: m.createdAt,
+      };
+    });
   });
 }

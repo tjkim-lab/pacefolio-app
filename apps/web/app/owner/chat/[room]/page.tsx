@@ -3,7 +3,7 @@
 /* 원장 앱 — 소통: 대화방 (docs/12-communication.md)
    - 일반 대화 버블 + "업무 전달 카드"(후속 조치 연결) 구분 표현
    - 코치↔학부모 대화(watch)는 열람 모드 → 참여 / 이관 진입 (이력 기록)
-   - 금액은 전송 단계에서 차단 (헌법 — _state MONEY_RE) */
+   - 금액 자유 텍스트는 전송 단계 차단 — 서버 청구서 카드로만(docs/12 개정 · _state MONEY_RE) */
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";

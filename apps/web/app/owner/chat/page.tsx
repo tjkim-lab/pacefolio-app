@@ -54,8 +54,8 @@ export default function OwnerChatList() {
         <div className="flex items-start gap-2.5 rounded-xl border border-line px-3.5 py-3 text-[12.5px] font-medium leading-relaxed text-ink2">
           <span className="mt-0.5 shrink-0 text-brand"><IconChat size={18} /></span>
           <span>
-            <b className="text-ink">금액·건강정보는 채팅에 담기지 않아요</b> — 수납은 청구서로,
-            건강 메모는 원생 카드에서만 관리돼요. 밤 9시 이후 학부모 메시지는 다음 날 아침 8시에
+            <b className="text-ink">금액은 자유 텍스트로 담기지 않아요</b> — 서버가 만든 청구서
+            카드로만 공유돼요(조건부 허용 · docs/12 개정). 건강정보는 해당 보호자·담당·원장 범위에서만. 밤 9시 이후 학부모 메시지는 다음 날 아침 8시에
             전달돼요 (긴급 결석·안전·차량 제외).
           </span>
         </div>

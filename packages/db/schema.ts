@@ -520,7 +520,8 @@ export const chatMessages = pgTable("chat_messages", {
   category: chatCategoryEnum("category").notNull().default("GENERAL"),
   status: chatMessageStatusEnum("status").notNull(),
   body: text("body").notNull(),
-  contextCard: text("context_card"),               // 서버 생성 카드(JSON 직렬화) — BILLING 필수
+  contextCard: text("context_card"),               // ⚠️ 서버만 생성(13차 C P0-1) — 클라이언트 입력 금지
+  clientMessageId: text("client_message_id"),      // 13차 C P1-5: 전송 멱등(모바일 재시도 중복 방지)
   relatedParticipantId: text("related_participant_id"),
   resolvedNote: text("resolved_note"),
   resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "string" }),
@@ -530,6 +531,7 @@ export const chatMessages = pgTable("chat_messages", {
 }, (t) => [
   index("ix_chatmsg_room_created").on(t.roomId, t.createdAt),
   uniqueIndex("uq_chatmsg_id_academy").on(t.id, t.academyId),
+  uniqueIndex("uq_chatmsg_client_id").on(t.academyId, t.senderUserId, t.clientMessageId), // 전송 멱등
   foreignKey({ name: "fk_chatmsg_room_academy", columns: [t.roomId, t.academyId], foreignColumns: [chatRooms.id, chatRooms.academyId] }),
   foreignKey({ name: "fk_chatmsg_participant_academy", columns: [t.relatedParticipantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
   // 민감 카테고리 불변식 — 서비스가 막아도 DB 가 최종 방어

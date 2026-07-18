@@ -90,6 +90,17 @@ before(async () => {
     canViewSchedule: true, canViewAttendance: true, canViewHealthInfo: true,
     canReceivePhotos: true, canPay: true, canRequestRefund: true,
   });
+  // 13차 C P0-1: BILLING 카드의 정본 청구서 + 두 번째 원생(불일치 검증용)
+  await db.insert(s.participants).values({
+    id: "p_hana", academyId: "a_wg", name: "이하나", birth: "2018-05-05", ageLabel: "7세",
+  });
+  await db.insert(s.billingPeriods).values({
+    id: "bp_q4", academyId: "a_wg", periodStart: "2025-09-01", periodEnd: "2025-11-30", cycleMonths: 3,
+  });
+  await db.insert(s.invoices).values([
+    { id: "inv_dodam", academyId: "a_wg", participantId: "p_dodam", enrollmentId: "e_d", billingPeriodId: "bp_q4", status: "ISSUED", total: 405000, dueDate: "2025-09-10" },
+    { id: "inv_hana", academyId: "a_wg", participantId: "p_hana", enrollmentId: "e_h", billingPeriodId: "bp_q4", status: "ISSUED", total: 300000, dueDate: "2025-09-10" },
+  ]);
 });
 
 /* ── ACK 수명주기: 원장 → 코치 확인 필수 전달 ── */
@@ -195,24 +206,117 @@ test("보호자 DM 개설: VERIFIED 링크 필요 — 원생 컨텍스트 귀속
   momRoom = ((await r.json()) as { roomId: string }).roomId;
 });
 
-test("BILLING: context card 없으면 422 / DM+card = 201 (자유 텍스트 금액 반복 금지)", async () => {
-  const noCard = await post(mom, `/academies/a_wg/chat/rooms/${momRoom}/messages`, {
+test("13차 C P0-1: BILLING 카드 = 서버 생성 — 클라이언트 contextCard 는 422(strict)", async () => {
+  const clientCard = await post(owner, `/academies/a_wg/chat/rooms/${momRoom}/messages`, {
+    kind: "NORMAL_CHAT", category: "BILLING", body: "카드 위조 시도",
+    contextCard: JSON.stringify({ invoiceId: "가짜", total: 99999999 }),
+  });
+  assert.equal(clientCard.status, 422); // contextCard 입력 필드 자체가 계약에서 제거됨
+  const noRef = await post(mom, `/academies/a_wg/chat/rooms/${momRoom}/messages`, {
     kind: "NORMAL_CHAT", category: "BILLING", body: "수강료 문의드려요",
   });
-  assert.equal(noCard.status, 422);
-  const withCard = await post(owner, `/academies/a_wg/chat/rooms/${momRoom}/messages`, {
-    kind: "NORMAL_CHAT", category: "BILLING", body: "9월 청구서 안내드려요",
-    contextCard: JSON.stringify({ invoiceId: "inv_dodam_q4", total: 405000, due: "9/5" }),
+  assert.equal(noRef.status, 422); // invoiceId 참조 필수
+});
+
+test("13차 C P0-1: invoiceId 참조 → 서버가 DB 정본으로 카드 생성(금액 위조 불가)", async () => {
+  const r = await post(owner, `/academies/a_wg/chat/rooms/${momRoom}/messages`, {
+    kind: "NORMAL_CHAT", category: "BILLING", body: "9월 청구서 안내드려요", invoiceId: "inv_dodam",
   });
-  assert.equal(withCard.status, 201);
+  assert.equal(r.status, 201);
+  const { messageId } = (await r.json()) as { messageId: string };
+  const row = (await db.select().from(s.chatMessages).where(eq(s.chatMessages.id, messageId)))[0];
+  const card = JSON.parse(row.contextCard ?? "{}") as { invoiceId: string; total: number };
+  assert.equal(card.invoiceId, "inv_dodam");
+  assert.equal(card.total, 405000); // 서버 DB 값 — 클라이언트가 준 값이 아님
+});
+
+test("13차 C P0-1: 가짜 invoiceId 422 · 다른 원생 청구서 422 (방 원생 정본)", async () => {
+  const fake = await post(owner, `/academies/a_wg/chat/rooms/${momRoom}/messages`, {
+    kind: "NORMAL_CHAT", category: "BILLING", body: "x", invoiceId: "inv_ghost",
+  });
+  assert.equal(fake.status, 422);
+  const otherKid = await post(owner, `/academies/a_wg/chat/rooms/${momRoom}/messages`, {
+    kind: "NORMAL_CHAT", category: "BILLING", body: "x", invoiceId: "inv_hana", // 도담 방에 하나 청구서
+  });
+  assert.equal(otherKid.status, 422);
+});
+
+test("13차 C P0-2: 방 원생 ≠ 메시지 원생 — override 422", async () => {
+  const r = await post(owner, `/academies/a_wg/chat/rooms/${momRoom}/messages`, {
+    kind: "NORMAL_CHAT", category: "HEALTH", body: "다른 원생 건강정보 주입 시도",
+    relatedParticipantId: "p_hana", // 도담 방
+  });
+  assert.equal(r.status, 422);
 });
 
 test("BILLING 은 보호자 DM 밖 금지: 코치 DM 에서 422", async () => {
   const r = await post(owner, `/academies/a_wg/chat/rooms/${dmRoom}/messages`, {
-    kind: "NORMAL_CHAT", category: "BILLING", body: "금액 이야기",
-    contextCard: JSON.stringify({ invoiceId: "x" }),
+    kind: "NORMAL_CHAT", category: "BILLING", body: "금액 이야기", invoiceId: "inv_dodam",
   });
   assert.equal(r.status, 422);
+});
+
+test("13차 C P0-3: canViewHealthInfo=false 보호자 방 → HEALTH 전송 422", async () => {
+  const dad = await login("chatdad");
+  await db.insert(s.academyMemberships).values({
+    id: "m_cd", userId: dad.userId, academyId: "a_wg", roles: ["GUARDIAN"], status: "ACTIVE", joinedAt: "2025-03-02",
+  });
+  await db.insert(s.guardians).values({ id: "gd_cd", userId: dad.userId });
+  await db.insert(s.guardianParticipantLinks).values({
+    id: "gl_cd", guardianId: "gd_cd", participantId: "p_dodam", academyId: "a_wg",
+    relationshipType: "FATHER", isPrimaryGuardian: false, verificationStatus: "VERIFIED",
+    canViewSchedule: true, canViewAttendance: true, canViewHealthInfo: false, // 권한 없음
+    canReceivePhotos: false, canPay: false, canRequestRefund: false,
+  });
+  const dm = await post(dad, "/academies/a_wg/chat/dms", { type: "GUARDIAN_DM", participantId: "p_dodam" });
+  assert.equal(dm.status, 201);
+  const room = ((await dm.json()) as { roomId: string }).roomId;
+  const r = await post(owner, `/academies/a_wg/chat/rooms/${room}/messages`, {
+    kind: "NORMAL_CHAT", category: "HEALTH", body: "컨디션 공유",
+  });
+  assert.equal(r.status, 422); // 권한 없는 보호자가 있는 방 — 전송 자체 차단
+});
+
+test("13차 C P0-4: 민감 메시지 조회 = 서버 감사 행(chat.sensitive_message.viewed)", async () => {
+  const before = (await db.select().from(s.auditLogs)
+    .where(eq(s.auditLogs.action, "chat.sensitive_message.viewed"))).length;
+  const r = await get(owner, `/academies/a_wg/chat/rooms/${momRoom}/messages`);
+  assert.equal(r.status, 200);
+  const after = await db.select().from(s.auditLogs)
+    .where(eq(s.auditLogs.action, "chat.sensitive_message.viewed"));
+  assert.equal(after.length, before + 1);
+  assert.equal(after[after.length - 1].targetId, momRoom);
+});
+
+test("13차 C P1-2: 발신자 자기 read = 멱등 no-op(상태 불변)", async () => {
+  const sent = await post(owner, `/academies/a_wg/chat/rooms/${dmRoom}/messages`, {
+    kind: "NORMAL_CHAT", body: "자기 read 검증",
+  });
+  const { messageId } = (await sent.json()) as { messageId: string };
+  const r = await post(owner, `/academies/a_wg/chat/messages/${messageId}/read`);
+  assert.equal(r.status, 200);
+  const row = (await db.select().from(s.chatMessages).where(eq(s.chatMessages.id, messageId)))[0];
+  assert.equal(row.status, "SENT"); // 발신자 read 로 READ 전진 금지
+});
+
+test("13차 C P1-5: clientMessageId 전송 멱등 — 재시도 = 같은 메시지", async () => {
+  const body = { kind: "NORMAL_CHAT" as const, body: "멱등 전송", clientMessageId: "cmid-1" };
+  const r1 = await post(owner, `/academies/a_wg/chat/rooms/${dmRoom}/messages`, body);
+  const r2 = await post(owner, `/academies/a_wg/chat/rooms/${dmRoom}/messages`, body);
+  assert.equal(r1.status, 201);
+  assert.equal(r2.status, 201);
+  const id1 = ((await r1.json()) as { messageId: string }).messageId;
+  const id2 = ((await r2.json()) as { messageId: string }).messageId;
+  assert.equal(id1, id2); // 중복 생성 없음
+});
+
+test("13차 C: 발송 Outbox 행 생성 + ACK 재시도 멱등(200)", async () => {
+  const outbox = await db.select().from(s.outboxEvents)
+    .where(eq(s.outboxEvents.eventType, "CHAT_MESSAGE_SENT"));
+  assert.ok(outbox.length >= 1); // 발송마다 outbox 합류
+  // 이미 확인한 ackMsg 재확인 = 멱등 성공(409 아님 — 모바일 응답 유실 재시도)
+  const again = await post(coach, `/academies/a_wg/chat/messages/${ackMsg}/ack`);
+  assert.equal(again.status, 200);
 });
 
 test("HEALTH: 원생 미지정 422 — DB CHECK(ck_chatmsg_health_participant)도 동일 불변식", async () => {

@@ -283,8 +283,10 @@ export function createApp(cfg: ApiConfig) {
     kind: z.enum(["NORMAL_CHAT", "NOTICE", "ACK_REQUIRED", "URGENT_ACK_REQUIRED", "OPERATIONAL_TASK"]),
     category: z.enum(["GENERAL", "BILLING", "HEALTH"]).default("GENERAL"),
     body: z.string().min(1).max(2000),
-    contextCard: z.string().min(1).max(2000).optional(), // 서버 카드(JSON) — BILLING 필수
+    // 13차 C P0-1: contextCard 클라이언트 입력 제거 — BILLING 은 invoiceId 참조만(카드 = 서버 생성)
+    invoiceId: z.string().min(1).max(64).optional(),
     relatedParticipantId: z.string().min(1).max(64).optional(),
+    clientMessageId: z.string().min(1).max(64).optional(), // P1-5 전송 멱등
   }).strict();
   app.post("/academies/:academyId/chat/rooms/:roomId/messages", guard, csrf, academyCtx, async (c) => {
     const parsed = ChatMsgBody.safeParse(await c.req.json().catch(() => null));
@@ -315,7 +317,7 @@ export function createApp(cfg: ApiConfig) {
     const msgs = await listMessages(cfg.db, {
       actorUserId: auth.userId, academyId: c.req.param("academyId")!,
       roomId: c.req.param("roomId")!,
-    });
+    }, now());
     if (!msgs) return c.json({ error: "FORBIDDEN" }, 403);
     return c.json({ messages: msgs });
   });

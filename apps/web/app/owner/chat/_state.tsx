@@ -6,7 +6,8 @@
    계약(docs/12-communication.md) 반영:
    - watch방(코치↔학부모)은 열람 모드로 열리고, 열람·참여가 기록으로 남는다
    - 참여 / 이관(원장이 이어받기) 두 진입
-   - 헌법: 금액은 채팅 payload 금지 — 전송 단계에서 차단 */
+   - docs/12 개정(12차): 금액 = 자유 텍스트 금지·서버 청구서 카드로만(조건부 허용) —
+     자유 텍스트 차단은 유지, 카드 전송은 실 API(BILLING+invoiceId) 연결 시 */
 
 import {
   createContext,
@@ -118,7 +119,7 @@ export function OwnerChatProvider({ children }: { children: ReactNode }) {
       const t = text.trim();
       if (!t) return "empty";
       if (MONEY_RE.test(t)) {
-        showToast("금액은 채팅에 담을 수 없어요 — 수납 탭 청구서로 안내돼요");
+        showToast("금액은 자유 텍스트로 보낼 수 없어요 — 청구서 카드로 공유돼요(수납 탭)");
         return "blocked";
       }
       setMessages((m) => ({ ...m, [room]: [...m[room], { side: "me", text: t, time: "오후 2:10" }] }));

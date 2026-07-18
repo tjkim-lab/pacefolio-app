@@ -314,3 +314,49 @@ test("hardening: 링크 철회 tx 커밋 전 도착한 승인 → 잠금 대기 
     client.release();
   }
 });
+
+/* ═══ 13차 C P1-4: 다인방 동시 ACK — message FOR UPDATE 직렬화 ═══
+   수신자 2명이 동시에 확인하면 각 tx 가 "미확인 1명 남음"을 읽고 둘 다
+   READ 에 머무는 집계 경쟁이 가능 — 잠금으로 마지막 확인이 반드시
+   ACKNOWLEDGED 를 만든다. */
+import { acknowledge } from "../src/chat/service";
+
+test("13차 C: 수신자 2명 동시 ACK → 정확히 ACKNOWLEDGED + 양쪽 시각 기록", { skip }, async () => {
+  const w = await setup();
+  const mk = async (n: string) => {
+    const uid = rid("u");
+    await w.db.insert(s2.users).values({ id: uid, name: n, phone: "010-0" });
+    return uid;
+  };
+  const sender = await mk("발신원장"); const r1 = await mk("수신1"); const r2 = await mk("수신2");
+  const roomId = rid("cr");
+  await w.db.insert(s2.chatRooms).values({
+    id: roomId, academyId: w.academyId, type: "CLASS_COACHES", title: "동시ACK",
+    createdByUserId: sender, createdAt: NOW(),
+  });
+  await w.db.insert(s2.chatRoomMembers).values([
+    { id: rid("crm"), roomId, academyId: w.academyId, userId: sender, role: "OWNER", joinedAt: NOW() },
+    { id: rid("crm"), roomId, academyId: w.academyId, userId: r1, role: "COACH", joinedAt: NOW() },
+    { id: rid("crm"), roomId, academyId: w.academyId, userId: r2, role: "COACH", joinedAt: NOW() },
+  ]);
+  const msgId = rid("cm");
+  await w.db.insert(s2.chatMessages).values({
+    id: msgId, roomId, academyId: w.academyId, senderUserId: sender,
+    kind: "ACK_REQUIRED", category: "GENERAL", status: "SENT", body: "동시 확인 경쟁",
+    createdAt: NOW(),
+  });
+  await w.db.insert(s2.chatMessageAcks).values([
+    { id: rid("ack"), messageId: msgId, academyId: w.academyId, userId: r1 },
+    { id: rid("ack"), messageId: msgId, academyId: w.academyId, userId: r2 },
+  ]);
+  const results = await Promise.all([
+    acknowledge(w.db, { actorUserId: r1, academyId: w.academyId, messageId: msgId }, NOW()),
+    acknowledge(w.db, { actorUserId: r2, academyId: w.academyId, messageId: msgId }, NOW()),
+  ]);
+  assert.ok(results.every((r) => r.kind === "OK"), JSON.stringify(results));
+  // 최종 상태 = 정확히 ACKNOWLEDGED (READ 잔류 금지) + 양쪽 acknowledgedAt 기록
+  const msg = (await w.db.select().from(s2.chatMessages).where(eq2(s2.chatMessages.id, msgId)))[0];
+  assert.equal(msg.status, "ACKNOWLEDGED");
+  const acks = await w.db.select().from(s2.chatMessageAcks).where(eq2(s2.chatMessageAcks.messageId, msgId));
+  assert.equal(acks.filter((a) => a.acknowledgedAt).length, 2);
+});

@@ -378,3 +378,51 @@ test("트랜잭션: 실패 시 전체 rollback (Phase 0 완료 기준)", async (
   const ghost = await db.select().from(s.users);
   assert.ok(!ghost.some((u) => u.id === "u_tx"), "트랜잭션 실패 시 u_tx 는 존재하면 안 됨");
 });
+
+test("13차 C-4: 채팅 교차 테넌트 — DB 복합 FK 직접 우회 insert 거부 4종", async () => {
+  await seedTwoAcademies();
+  await db.insert(s.users).values({ id: "u_chat", name: "채팅유저", phone: "010-chat" }).onConflictDoNothing();
+  await db.insert(s.chatRooms).values({
+    id: "cr_a", academyId: "a_wg", type: "OWNER_COACH_DM", title: "A방",
+    createdByUserId: "u_chat", createdAt: "2026-07-18T00:00:00Z",
+  }).onConflictDoNothing();
+  // ① A학원 방 + B학원 academyId 멤버
+  await rejectsWith(
+    db.insert(s.chatRoomMembers).values({
+      id: "crm_x", roomId: "cr_a", academyId: "a_other", userId: "u_chat",
+      role: "OWNER", joinedAt: "2026-07-18T00:00:00Z",
+    }),
+    /fk_chatmember_room_academy|foreign key/i,
+  );
+  // ② A학원 방 + B학원 academyId 메시지
+  await rejectsWith(
+    db.insert(s.chatMessages).values({
+      id: "cm_x", roomId: "cr_a", academyId: "a_other", senderUserId: "u_chat",
+      kind: "NORMAL_CHAT", category: "GENERAL", status: "SENT", body: "교차",
+      createdAt: "2026-07-18T00:00:00Z",
+    }),
+    /fk_chatmsg_room_academy|foreign key/i,
+  );
+  // ③ A학원 방 메시지 + B학원 원생 컨텍스트
+  await db.insert(s.chatMessages).values({
+    id: "cm_a", roomId: "cr_a", academyId: "a_wg", senderUserId: "u_chat",
+    kind: "NORMAL_CHAT", category: "GENERAL", status: "SENT", body: "정상",
+    createdAt: "2026-07-18T00:00:00Z",
+  }).onConflictDoNothing();
+  await rejectsWith(
+    db.insert(s.chatMessages).values({
+      id: "cm_y", roomId: "cr_a", academyId: "a_wg", senderUserId: "u_chat",
+      kind: "NORMAL_CHAT", category: "GENERAL", status: "SENT", body: "교차 원생",
+      relatedParticipantId: "p_b", // B학원 원생
+      createdAt: "2026-07-18T00:00:00Z",
+    }),
+    /fk_chatmsg_participant_academy|foreign key/i,
+  );
+  // ④ A학원 메시지 + B학원 academyId ACK
+  await rejectsWith(
+    db.insert(s.chatMessageAcks).values({
+      id: "ack_x", messageId: "cm_a", academyId: "a_other", userId: "u_chat",
+    }),
+    /fk_chatack_message_academy|foreign key/i,
+  );
+});

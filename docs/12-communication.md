@@ -65,12 +65,21 @@ ChatMessage     id · roomId · senderUserId · body · attachments?(PhotoAsset 
 ## 구현 순서 제안
 1. P0(데이터 정합) — ✅ 완료: 임시 이름 제거·이름/호칭 분리·정합성 자동 테스트
 2. P1 설계 확정 — ✅ 완료: domain `chat.ts`(유형·상태머신·민감 카테고리 규칙·dmKey)
-3. P1 백엔드 — ✅ **1차 완료 (배치 14, 2026-07-18)**: migration 0010(방·멤버·메시지·ACK,
-   복합 FK + HEALTH/BILLING DB CHECK) + API 7종(DM 개설 find-or-create ·
-   메시지 · 읽음/확인/처리 분리 · 방/메시지 조회) + 감사·Outbox 합류 +
-   통합 테스트 14종(ACK 수명주기·비멤버 403·교차 테넌트·BILLING card 강제·
-   HEALTH 원생 필수). **잔여**: 단체방(COACH_ALL·CLASS_*·공지형 학원방 발송),
-   긴급 반복 알림·EXPIRED worker(notification 트랙), OpenAPI 등재
+3. P1 백엔드 — ✅ **1차 완료 + 13차 C 보강 (2026-07-18)**: migration 0010·0011 +
+   API 7종 + 통합 테스트 22종 + 도메인 표 테스트 + DB 교차 테넌트 직접 부정 4종 +
+   실 PG 동시 ACK 테스트. 13차 C P0 반영:
+   ① BILLING 카드 = **서버 생성만**(클라이언트는 invoiceId 참조 — 위조 불가·canPay 검증)
+   ② 방 원생 = 메시지 원생 강제(override 422) ③ HEALTH = 방 보호자 전원
+   canViewHealthInfo(전송) + 조회 시점 재인가(철회 시 본문 가림)
+   ④ 민감 열람 = 서버 AuditLog(chat.sensitive_message.viewed) · 발송 전체 감사
+   ⑤ 발신자 자기 read no-op · DM 생성 onConflict 수렴 · clientMessageId 전송 멱등 ·
+   ACK 중복 멱등 + message FOR UPDATE 직렬화 · OpenAPI 7종 등재.
+   **정책 명시**: DRAFT 는 클라이언트 로컬 상태(서버 미저장) / 읽음은 receipt 행(readAt)이
+   기록 자체이므로 AuditLog 별도 미기록.
+   **잔여(P1~P2)**: 코치→원장·원장→보호자 DM 방향 / 단체방(COACH_ALL·CLASS_*·공지형
+   발송) / 코치 담당(ClassAssignment) HEALTH 검증 — 출결 배치에서 테이블 신설과 함께 /
+   긴급 반복 알림·EXPIRED worker / receipt 요약·pagination / 담당자(assignee) 권한 /
+   수정·취소·신고·차단 / 원장 UI 실 API 연결
 4. P1 화면: **owner 앱에 소통 탭 신설** — ✅ 구동 목업 완료 (2026-07-17, `apps/web/app/owner/chat/`):
    하단탭 진입(안읽음 뱃지) · 대화 목록(코치 전체/반 담당/1:1 + 학부모 1:1 원생 컨텍스트 +
    코치↔학부모 관리 열람) · 대화방(업무 전달 카드 완료 전이 · 열람→참여/이관 confirm ·
