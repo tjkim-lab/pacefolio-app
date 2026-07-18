@@ -643,6 +643,63 @@ paths:
         '200': { description: 'url(단기)·contentType' }
         '404': { description: 없음 또는 권한 없음 }
 
+  # ── 휴무·회차·일할(#38 — PC draft 정본화 1): "숫자 직접 수정 금지" ──
+  /academies/{academyId}/closures:
+    post:
+      tags: [classes]
+      summary: 휴무 event 등록 — 범위 내 SCHEDULED 세션 취소(closureId 추적)·회차 재계산, staff 만
+      parameters: [{ $ref: '#/components/parameters/AcademyId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [scope, dateStart, dateEnd, closureType, reason, deductSessions], properties: { scope: { type: string, enum: [ACADEMY, CLASS] }, classId: { type: string }, dateStart: { type: string, format: date }, dateEnd: { type: string, format: date }, closureType: { type: string }, reason: { type: string }, deductSessions: { type: boolean } } } } }
+      responses:
+        '201': { description: 'closureId·canceledSessions' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: 기간 역전·반 불일치 }
+    get:
+      tags: [classes]
+      summary: 휴무 목록(최근 100)
+      parameters: [{ $ref: '#/components/parameters/AcademyId' }]
+      responses:
+        '200': { description: closures 배열 }
+  /academies/{academyId}/closures/{closureId}/revocation:
+    post:
+      tags: [classes]
+      summary: 휴무 철회 — 이 이벤트가 취소한 세션만 SCHEDULED 복원(다른 사유 취소 불변)·멱등
+      parameters:
+        - { $ref: '#/components/parameters/AcademyId' }
+        - { name: closureId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 'restoredSessions' }
+        '404': { description: 이벤트 없음 }
+  /academies/{academyId}/classes/{classId}/session-stats:
+    get:
+      tags: [classes]
+      summary: 회차 집계 — DB 세션 정본(CANCELED 모수 제외), total·completed·canceled·remaining
+      parameters:
+        - { $ref: '#/components/parameters/AcademyId' }
+        - { name: classId, in: path, required: true, schema: { type: string } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: 집계 }
+  /academies/{academyId}/classes/{classId}/proration-quote:
+    post:
+      tags: [billing]
+      summary: >
+        중간입회 일할 견적 — 헌법: 일할 = 남은회차/전체회차 × 요금. staff 만.
+        세션 전개 시 DB_SESSIONS 정본, 미전개 시 SLOT_CALENDAR(시간표+유효 휴무, payment-engine 정합)
+      parameters:
+        - { $ref: '#/components/parameters/AcademyId' }
+        - { name: classId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [periodStart, periodEnd, joinDate, baseFee], properties: { periodStart: { type: string, format: date }, periodEnd: { type: string, format: date }, joinDate: { type: string, format: date }, baseFee: { type: integer } } } } }
+      responses:
+        '200': { description: 'totalSessions·remainingSessions·amount·basis' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: 유효 회차 0·시간표 없음 등 }
+
   /academies/{academyId}/notifications:
     get:
       tags: [notices]
@@ -837,6 +894,95 @@ paths:
         '204': { description: 폐기됨 }
         '404': { description: 대상 없음 또는 비관리자(은닉) }
         '422': { description: 사유 누락 }
+
+  # ── 프로그램 스튜디오 PS1 (docs/20·21·22) — 원장의 프로그램 저작.
+  #    불변식: DRAFT 만 편집 · PUBLISHED 직접 수정 금지(복제로만) ·
+  #    이름은 식별자가 아니다(Activity 불변 ID + Revision) · 변이 = OWNER(PS1).
+  /academies/{academyId}/programs:
+    post:
+      tags: [program-studio]
+      summary: 프로그램 생성 — 진행 방식 복수 조합, 첫 DRAFT 버전 자동 생성
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [name, modes], properties: {
+          name: { type: string, maxLength: 80 }, description: { type: string },
+          targetAgeLabel: { type: string },
+          modes: { type: array, items: { type: string, enum: [EXPERIENCE, SKILL_MASTERY, SEASONAL, MEASUREMENT, COURSE] }, minItems: 1 } } } } }
+      responses:
+        '201': { description: 생성 — programId·versionId(첫 DRAFT) }
+        '403': { description: OWNER 아님 }
+        '422': { description: 방식 중복·미지값 }
+    get:
+      tags: [program-studio]
+      summary: 프로그램 목록 — 방식·버전 요약 포함(학원 멤버 조회)
+      responses: { '200': { description: programs[] } }
+  /academies/{academyId}/programs/{programId}:
+    patch:
+      tags: [program-studio]
+      summary: 프로그램 정보 수정·보관(archive) — 버전 콘텐츠와 별개
+      responses: { '200': { description: 수정됨 }, '404': { description: 없음(교차 테넌트 포함) } }
+  /academies/{academyId}/programs/{programId}/versions:
+    post:
+      tags: [program-studio]
+      summary: 새 버전(DRAFT) — basedOnVersionId 지정 시 레벨·커리큘럼 딥카피(게시본 수정 경로)
+      responses: { '201': { description: versionId }, '422': { description: 복제 원본 없음 } }
+  /academies/{academyId}/versions/{versionId}:
+    get:
+      tags: [program-studio]
+      summary: 버전 상세 — 레벨·구조·회차·회차별 활동(개정판 이름 포함)
+      responses: { '200': { description: 상세 }, '404': { description: 없음 } }
+  /academies/{academyId}/versions/{versionId}/publish:
+    post:
+      tags: [program-studio]
+      summary: 게시 — DRAFT→PUBLISHED(멱등) · outbox PROGRAM_VERSION_PUBLISHED
+      responses: { '200': { description: 게시됨 }, '422': { description: 전이 불가 } }
+  /academies/{academyId}/versions/{versionId}/levels:
+    post:
+      tags: [program-studio]
+      summary: 단계 생성 — 단계명은 데이터(enum 아님) · DRAFT 만
+      responses: { '201': { description: levelId }, '422': { description: 게시본 편집 시도·이름 중복 } }
+  /academies/{academyId}/versions/{versionId}/levels/{levelId}:
+    patch: { tags: [program-studio], summary: 단계 수정(DRAFT 만), responses: { '200': { description: 수정됨 } } }
+    delete: { tags: [program-studio], summary: 단계 삭제(DRAFT 만), responses: { '200': { description: 삭제됨 } } }
+  /academies/{academyId}/growth-domains:
+    post:
+      tags: [program-studio]
+      summary: 성장 영역 생성(FMS 등 — 테넌트 소유 데이터, 템플릿은 seed 복사)
+      responses: { '201': { description: domainId } }
+    get: { tags: [program-studio], summary: 성장 영역 목록, responses: { '200': { description: domains[] } } }
+  /academies/{academyId}/growth-domains/{domainId}:
+    patch: { tags: [program-studio], summary: 성장 영역 수정(active 토글 포함 — 삭제 대신 비활성), responses: { '200': { description: 수정됨 } } }
+  /academies/{academyId}/activities:
+    post:
+      tags: [program-studio]
+      summary: 활동 생성 — Activity(불변 ID) + Revision 1(콘텐츠) 동시 생성
+      responses: { '201': { description: activityId·revisionId } }
+    get: { tags: [program-studio], summary: 활동 목록(현재 개정판·성장영역 태그 포함), responses: { '200': { description: activities[] } } }
+  /academies/{academyId}/activities/{activityId}:
+    patch:
+      tags: [program-studio]
+      summary: 활동 수정 — 게시 커리큘럼이 참조 중이면 자동 새 개정판(과거 기록 보존)
+      responses: { '200': { description: revisionId·newRevision } }
+  /academies/{academyId}/activities/{activityId}/archive:
+    post: { tags: [program-studio], summary: 활동 보관 — 신규 배치 금지·기존 참조 유지(멱등), responses: { '200': { description: 보관됨 } } }
+  /academies/{academyId}/activities/{activityId}/growth-tags:
+    put:
+      tags: [program-studio]
+      summary: 현재 개정판의 성장영역 태그 세트 교체 — PRIMARY 정확히 1
+      responses: { '200': { description: 교체됨 }, '422': { description: PRIMARY 위반·중복·영역 없음 } }
+  /academies/{academyId}/versions/{versionId}/sections:
+    post: { tags: [program-studio], summary: 커리큘럼 구조 생성(분기·시즌 등 임의 계층 · DRAFT 만), responses: { '201': { description: sectionId } } }
+  /academies/{academyId}/versions/{versionId}/sections/{sectionId}:
+    delete: { tags: [program-studio], summary: 구조 삭제(하위·회차 없을 때 · DRAFT 만), responses: { '200': { description: 삭제됨 } } }
+  /academies/{academyId}/versions/{versionId}/sessions:
+    post: { tags: [program-studio], summary: 회차(주차) 생성 — 주차 수 제한 없음(DRAFT 만), responses: { '201': { description: curriculumSessionId } } }
+  /academies/{academyId}/versions/{versionId}/sessions/{curriculumSessionId}:
+    delete: { tags: [program-studio], summary: 회차 삭제(DRAFT 만), responses: { '200': { description: 삭제됨 } } }
+  /academies/{academyId}/curriculum-sessions/{curriculumSessionId}/activities:
+    put:
+      tags: [program-studio]
+      summary: 회차 활동 세트 교체 — 개정판 ID 로 연결·ARCHIVED 배치 금지·활동 수 고정 없음(DRAFT 만)
+      responses: { '200': { description: 교체됨 }, '422': { description: 게시본·보관 활동·중복 배치 } }
 
 components:
   securitySchemes:

@@ -16,3 +16,5 @@ export * from "./consent";
 export * from "./chat";
 export * from "./scheduling";
 export * from "./photo";
+export * from "./program-studio";
+export * from "./proration";

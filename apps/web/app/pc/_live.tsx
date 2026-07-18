@@ -29,6 +29,14 @@ interface OwnerLiveCtx {
   classes: { classId: string; name: string }[]; // AudienceFilter 1단계 — 반 칩의 정본
   refreshNotices: () => Promise<void>;
   refreshSummary: () => Promise<void>;
+  /* #38: 휴무 event → 서버 세션 취소·회차 재계산 / 중간입회 일할 견적(헌법 수식) */
+  createClosure: (body: {
+    scope: "ACADEMY" | "CLASS"; classId?: string; dateStart: string; dateEnd: string;
+    closureType: string; reason: string; deductSessions: boolean;
+  }) => Promise<{ ok: boolean; message: string; canceledSessions?: number }>;
+  prorationQuote: (classId: string, body: {
+    periodStart: string; periodEnd: string; joinDate: string; baseFee: number;
+  }) => Promise<{ ok: boolean; message: string; quote?: { totalSessions: number; remainingSessions: number; amount: number; basis: string } }>;
   /* #31: 코치 전달사항 — DM 개설→ACK_REQUIRED 전송, READ/ACK 은 서버 상태 재조회 */
   coaches: CoachMember[];
   sendCoachDirective: (coachUserId: string, body: string, urgent: boolean) =>
@@ -131,6 +139,34 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
     return { ok: true, recipients: r.recipients, message: `보호자 ${r.recipients}명에게 발송했어요` };
   }, [academyId, refreshNotices]);
 
+  const createClosure = useCallback(async (body: {
+    scope: "ACADEMY" | "CLASS"; classId?: string; dateStart: string; dateEnd: string;
+    closureType: string; reason: string; deductSessions: boolean;
+  }) => {
+    if (!academyId) return { ok: false, message: "학원 컨텍스트 없음" };
+    try {
+      const r = await api.createClosure(academyId, body);
+      return {
+        ok: true, canceledSessions: r.canceledSessions,
+        message: `휴무 등록 — 세션 ${r.canceledSessions}회 취소·회차 재계산됨(감사 기록)`,
+      };
+    } catch (e) {
+      return { ok: false, message: e instanceof ApiError ? `등록 실패(${e.status}: ${e.code})` : "등록 실패 — 네트워크 확인" };
+    }
+  }, [academyId]);
+
+  const prorationQuote = useCallback(async (classId: string, body: {
+    periodStart: string; periodEnd: string; joinDate: string; baseFee: number;
+  }) => {
+    if (!academyId) return { ok: false, message: "학원 컨텍스트 없음" };
+    try {
+      const q = await api.prorationQuote(academyId, classId, body);
+      return { ok: true, message: "서버 견적", quote: q };
+    } catch (e) {
+      return { ok: false, message: e instanceof ApiError ? `견적 실패(${e.status}: ${e.code})` : "견적 실패 — 네트워크 확인" };
+    }
+  }, [academyId]);
+
   const sendCoachDirective = useCallback(async (coachUserId: string, body: string, urgent: boolean) => {
     if (!academyId) return { ok: false, message: "학원 컨텍스트 없음" };
     try {
@@ -163,6 +199,7 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
     <Ctx.Provider value={{
       state, errorMsg, academyId, notices, summary, publish, classes,
       refreshNotices, refreshSummary, coaches, sendCoachDirective, refreshDirective,
+      createClosure, prorationQuote,
     }}>
       {children}
     </Ctx.Provider>

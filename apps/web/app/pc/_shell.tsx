@@ -11,6 +11,7 @@ import {
   IconWhistle,
   IconSpark,
   IconSettings,
+  IconBook,
 } from "@/components/ui/icons";
 import { academy } from "@/lib/mock/data";
 
@@ -18,6 +19,7 @@ const nav: NavItem[] = [
   { href: "/pc", label: "대시보드", icon: IconChart },
   { href: "/pc/students", label: "원생", icon: IconUsers },
   { href: "/pc/lessons", label: "수업 관리", icon: IconCalendar },
+  { href: "/pc/programs", label: "프로그램", icon: IconBook },
   { href: "/pc/payments", label: "수납", icon: IconCard },
   { href: "/pc/notice", label: "공지 · 소통", icon: IconChat },
   { href: "/pc/coaches", label: "강사", icon: IconWhistle },

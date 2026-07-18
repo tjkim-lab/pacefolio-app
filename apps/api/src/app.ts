@@ -22,6 +22,13 @@ import {
   createParticipant, changeParticipantStatus, enrollParticipant, endEnrollment,
 } from "./students/service";
 import {
+  createProgram, listPrograms, updateProgram, createVersion, publishVersion, getVersionDetail,
+  createLevel, updateLevel, deleteLevel,
+  createGrowthDomain, listGrowthDomains, updateGrowthDomain,
+  createActivity, listActivities, updateActivity, archiveActivity, setActivityGrowthTags,
+  createSection, deleteSection, createCurriculumSession, deleteCurriculumSession, setSessionActivities,
+} from "./programs/service";
+import {
   recordAttendance, completeSession, listSessionAttendance, createAttendanceNotice,
 } from "./attendance/service";
 import {
@@ -30,6 +37,9 @@ import {
 import { publishNotice, markNoticeRead, listNotices } from "./notices/service";
 import { reportIncident, listIncidents } from "./safety/service";
 import { listMyNotifications, markNotificationRead } from "./notifications/service";
+import {
+  createClosure, revokeClosure, listClosures, getSessionStats, prorationQuote,
+} from "./closures/service";
 import {
   upsertPhotoConsent, revokePhotoConsent, getPhotoConsent,
   createPhotoUpload, finalizePhoto, getPhotoDownload,
@@ -297,6 +307,231 @@ export function createApp(cfg: ApiConfig) {
     if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
     if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
     return c.json({ sessionId: r.sessionId, status: "CANCELED" }, 200);
+  });
+
+  /* ── 프로그램 스튜디오 PS1 (docs/20·21·22) — 원장의 프로그램 저작 ── */
+  const jsonBody = async (c: Context) => c.req.json().catch(() => null);
+  const studioResult = (c: Context, r: { kind: string; reason?: string } | undefined, created?: Record<string, unknown>) => {
+    if (!r) return c.json({ error: "INTERNAL" }, 500); // 도달 불가 방어(tx 타입 보수화)
+    if (r.kind === "NOT_FOUND") return c.json({ error: "NOT_FOUND" }, 404);
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ ...r, ...(created ?? {}) }, r.kind === "CREATED" ? 201 : 200);
+  };
+  const actor = (c: Context<GuardEnv>) => ({
+    actorUserId: c.get("auth").userId, actorRoles: c.get("membership").roles,
+    academyId: c.req.param("academyId")!,
+  });
+
+  const ActivityContentShape = {
+    name: z.string().min(1).max(120),
+    description: z.string().max(4000).optional(),
+    instructions: z.string().max(8000).optional(),
+    easyVariation: z.string().max(2000).optional(),
+    standardVariation: z.string().max(2000).optional(),
+    challengeVariation: z.string().max(2000).optional(),
+    coachingPoints: z.string().max(4000).optional(),
+    safetyNotes: z.string().max(4000).optional(),
+    difficultyLabel: z.string().max(40).optional(),
+    recommendedAgeLabel: z.string().max(40).optional(),
+    recommendedMinutes: z.number().int().min(1).max(600).optional(),
+    participantFormat: z.string().max(60).optional(),
+    spaceRequirement: z.string().max(120).optional(),
+  };
+
+  const CreateProgramBody = z.object({
+    name: z.string().min(1).max(80),
+    description: z.string().max(2000).optional(),
+    targetAgeLabel: z.string().max(40).optional(),
+    modes: z.array(z.string()).min(1).max(5),
+  }).strict();
+  app.post("/academies/:academyId/programs", guard, csrf, academyCtx, async (c) => {
+    const p = CreateProgramBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await createProgram(cfg.db, { ...actor(c), ...p.data }, now()));
+  });
+  app.get("/academies/:academyId/programs", guard, academyCtx, async (c) => {
+    return c.json({ programs: await listPrograms(cfg.db, c.req.param("academyId")!) });
+  });
+  const UpdateProgramBody = z.object({
+    name: z.string().min(1).max(80).optional(),
+    description: z.string().max(2000).optional(),
+    targetAgeLabel: z.string().max(40).optional(),
+    archived: z.boolean().optional(),
+  }).strict();
+  app.patch("/academies/:academyId/programs/:programId", guard, csrf, academyCtx, async (c) => {
+    const p = UpdateProgramBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await updateProgram(cfg.db, {
+      ...actor(c), programId: c.req.param("programId")!, ...p.data,
+    }, now()));
+  });
+  const CreateVersionBody = z.object({
+    versionLabel: z.string().min(1).max(40),
+    basedOnVersionId: z.string().max(64).optional(),
+  }).strict();
+  app.post("/academies/:academyId/programs/:programId/versions", guard, csrf, academyCtx, async (c) => {
+    const p = CreateVersionBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await createVersion(cfg.db, {
+      ...actor(c), programId: c.req.param("programId")!, ...p.data,
+    }, now()));
+  });
+  app.post("/academies/:academyId/versions/:versionId/publish", guard, csrf, academyCtx, async (c) => {
+    return studioResult(c, await publishVersion(cfg.db, {
+      ...actor(c), versionId: c.req.param("versionId")!,
+    }, now()));
+  });
+  app.get("/academies/:academyId/versions/:versionId", guard, academyCtx, async (c) => {
+    const detail = await getVersionDetail(cfg.db, c.req.param("academyId")!, c.req.param("versionId")!);
+    if (!detail) return c.json({ error: "NOT_FOUND" }, 404);
+    return c.json(detail);
+  });
+
+  const LevelBody = z.object({
+    name: z.string().min(1).max(60),
+    code: z.string().max(20).optional(),
+    description: z.string().max(2000).optional(),
+    targetAgeLabel: z.string().max(40).optional(),
+    sortOrder: z.number().int().min(0).max(9999).optional(),
+    color: z.string().max(9).optional(),
+  }).strict();
+  app.post("/academies/:academyId/versions/:versionId/levels", guard, csrf, academyCtx, async (c) => {
+    const p = LevelBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await createLevel(cfg.db, {
+      ...actor(c), versionId: c.req.param("versionId")!, ...p.data,
+    }, now()));
+  });
+  app.patch("/academies/:academyId/versions/:versionId/levels/:levelId", guard, csrf, academyCtx, async (c) => {
+    const p = LevelBody.partial().strict().safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await updateLevel(cfg.db, {
+      ...actor(c), versionId: c.req.param("versionId")!, levelId: c.req.param("levelId")!, ...p.data,
+    }, now()));
+  });
+  app.delete("/academies/:academyId/versions/:versionId/levels/:levelId", guard, csrf, academyCtx, async (c) => {
+    return studioResult(c, await deleteLevel(cfg.db, {
+      ...actor(c), versionId: c.req.param("versionId")!, levelId: c.req.param("levelId")!,
+    }, now()));
+  });
+
+  const GrowthDomainBody = z.object({
+    name: z.string().min(1).max(60),
+    parentId: z.string().max(64).optional(),
+    code: z.string().max(30).optional(),
+    description: z.string().max(2000).optional(),
+    category: z.string().max(40).optional(),
+    color: z.string().max(9).optional(),
+    icon: z.string().max(8).optional(),
+    reportVisible: z.boolean().optional(),
+    sortOrder: z.number().int().min(0).max(9999).optional(),
+  }).strict();
+  app.post("/academies/:academyId/growth-domains", guard, csrf, academyCtx, async (c) => {
+    const p = GrowthDomainBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await createGrowthDomain(cfg.db, { ...actor(c), ...p.data }, now()));
+  });
+  app.get("/academies/:academyId/growth-domains", guard, academyCtx, async (c) => {
+    return c.json({ domains: await listGrowthDomains(cfg.db, c.req.param("academyId")!) });
+  });
+  app.patch("/academies/:academyId/growth-domains/:domainId", guard, csrf, academyCtx, async (c) => {
+    const p = GrowthDomainBody.partial().extend({ active: z.boolean().optional() }).strict()
+      .safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const { parentId: _ignored, ...rest } = p.data; // 부모 이동은 후속(계층 사이클 검증 필요)
+    return studioResult(c, await updateGrowthDomain(cfg.db, {
+      ...actor(c), domainId: c.req.param("domainId")!, ...rest,
+    }, now()));
+  });
+
+  const CreateActivityBody = z.object(ActivityContentShape).strict();
+  app.post("/academies/:academyId/activities", guard, csrf, academyCtx, async (c) => {
+    const p = CreateActivityBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await createActivity(cfg.db, { ...actor(c), ...p.data }, now()));
+  });
+  app.get("/academies/:academyId/activities", guard, academyCtx, async (c) => {
+    return c.json({ activities: await listActivities(cfg.db, c.req.param("academyId")!) });
+  });
+  app.patch("/academies/:academyId/activities/:activityId", guard, csrf, academyCtx, async (c) => {
+    const p = z.object(ActivityContentShape).partial().strict().safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await updateActivity(cfg.db, {
+      ...actor(c), activityId: c.req.param("activityId")!, ...p.data,
+    }, now()));
+  });
+  app.post("/academies/:academyId/activities/:activityId/archive", guard, csrf, academyCtx, async (c) => {
+    return studioResult(c, await archiveActivity(cfg.db, {
+      ...actor(c), activityId: c.req.param("activityId")!,
+    }, now()));
+  });
+  const GrowthTagsBody = z.object({
+    tags: z.array(z.object({
+      growthDomainId: z.string().min(1).max(64),
+      role: z.enum(["PRIMARY", "SECONDARY"]),
+    })).max(30),
+  }).strict();
+  app.put("/academies/:academyId/activities/:activityId/growth-tags", guard, csrf, academyCtx, async (c) => {
+    const p = GrowthTagsBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await setActivityGrowthTags(cfg.db, {
+      ...actor(c), activityId: c.req.param("activityId")!, tags: p.data.tags,
+    }, now()));
+  });
+
+  const SectionBody = z.object({
+    sectionType: z.string().min(1).max(30),
+    name: z.string().min(1).max(60),
+    parentSectionId: z.string().max(64).optional(),
+    sortOrder: z.number().int().min(0).max(9999).optional(),
+  }).strict();
+  app.post("/academies/:academyId/versions/:versionId/sections", guard, csrf, academyCtx, async (c) => {
+    const p = SectionBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await createSection(cfg.db, {
+      ...actor(c), versionId: c.req.param("versionId")!, ...p.data,
+    }, now()));
+  });
+  app.delete("/academies/:academyId/versions/:versionId/sections/:sectionId", guard, csrf, academyCtx, async (c) => {
+    return studioResult(c, await deleteSection(cfg.db, {
+      ...actor(c), versionId: c.req.param("versionId")!, sectionId: c.req.param("sectionId")!,
+    }, now()));
+  });
+  const CurriculumSessionBody = z.object({
+    sectionId: z.string().min(1).max(64),
+    name: z.string().min(1).max(60),
+    sequence: z.number().int().min(1).max(9999),
+    theme: z.string().max(120).optional(),
+    objective: z.string().max(2000).optional(),
+  }).strict();
+  app.post("/academies/:academyId/versions/:versionId/sessions", guard, csrf, academyCtx, async (c) => {
+    const p = CurriculumSessionBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await createCurriculumSession(cfg.db, {
+      ...actor(c), versionId: c.req.param("versionId")!, ...p.data,
+    }, now()));
+  });
+  app.delete("/academies/:academyId/versions/:versionId/sessions/:curriculumSessionId", guard, csrf, academyCtx, async (c) => {
+    return studioResult(c, await deleteCurriculumSession(cfg.db, {
+      ...actor(c), versionId: c.req.param("versionId")!,
+      curriculumSessionId: c.req.param("curriculumSessionId")!,
+    }, now()));
+  });
+  const SessionActivitiesBody = z.object({
+    activities: z.array(z.object({
+      activityId: z.string().min(1).max(64),
+      required: z.boolean().optional(),
+      recommendedMinutes: z.number().int().min(1).max(600).optional(),
+    })).max(50), // 3개 고정 아님 — 상한만(운영 안전)
+  }).strict();
+  app.put("/academies/:academyId/curriculum-sessions/:curriculumSessionId/activities", guard, csrf, academyCtx, async (c) => {
+    const p = SessionActivitiesBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await setSessionActivities(cfg.db, {
+      ...actor(c), curriculumSessionId: c.req.param("curriculumSessionId")!,
+      activities: p.data.activities,
+    }, now()));
   });
 
   /* ── 기본선 3단계(#24): 학원 생성 · 직원 초대 ── */
@@ -624,6 +859,68 @@ export function createApp(cfg: ApiConfig) {
         return c.json({ error: "ACTIVE_PAYMENT_ATTEMPT_EXISTS", paymentId: r.paymentId }, 409);
       case "DENIED": return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
     }
+  });
+
+  /* ── 휴무 이벤트(#38) — "숫자 직접 수정 금지": event 등록 → 서버가 세션·회차 재계산 ── */
+  const ClosureBody = z.object({
+    scope: z.enum(["ACADEMY", "CLASS"]),
+    classId: z.string().min(1).max(64).optional(),
+    dateStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    dateEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    closureType: z.string().min(1).max(40),
+    reason: z.string().min(1).max(300),
+    deductSessions: z.boolean(),
+  }).strict();
+  app.post("/academies/:academyId/closures", guard, csrf, academyCtx, async (c) => {
+    const parsed = ClosureBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await createClosure(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ closureId: r.closureId, canceledSessions: r.canceledSessions }, 201);
+  });
+  app.get("/academies/:academyId/closures", guard, academyCtx, async (c) =>
+    c.json({ closures: await listClosures(cfg.db, c.req.param("academyId")!) }));
+  app.post("/academies/:academyId/closures/:closureId/revocation", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await revokeClosure(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, closureId: c.req.param("closureId")!,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "NOT_FOUND" }, 404);
+    return c.json({ closureId: r.closureId, restoredSessions: r.canceledSessions }, 200);
+  });
+  app.get("/academies/:academyId/classes/:classId/session-stats", guard, academyCtx, async (c) => {
+    const from = c.req.query("from"); const to = c.req.query("to");
+    if (!from || !to) return c.json({ error: "INVALID_BODY", reason: "from·to 필수" }, 422);
+    return c.json(await getSessionStats(cfg.db, {
+      academyId: c.req.param("academyId")!, classId: c.req.param("classId")!,
+      from, to, asOf: now().slice(0, 10),
+    }));
+  });
+  const QuoteBody = z.object({
+    periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    joinDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    baseFee: z.number().int().positive(),
+  }).strict();
+  app.post("/academies/:academyId/classes/:classId/proration-quote", guard, csrf, academyCtx, async (c) => {
+    const m = c.get("membership");
+    if (!m.roles.includes("OWNER") && !m.roles.includes("DESK")) {
+      return c.json({ error: "FORBIDDEN" }, 403);
+    }
+    const parsed = QuoteBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const r = await prorationQuote(cfg.db, {
+      academyId: c.req.param("academyId")!, classId: c.req.param("classId")!, ...parsed.data,
+    });
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json(r);
   });
 
   /* 인앱 알림(파일럿 P0) — outbox 소비 결과, 내 것만 */

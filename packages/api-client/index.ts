@@ -94,6 +94,13 @@ const BillingSummary = z.object({
   billedKrw: z.number().int(), capturedKrw: z.number().int(),
 });
 
+/* 휴무·일할(#38 — PC draft 정본화 1) */
+const ClosureCreate = z.object({ closureId: z.string(), canceledSessions: z.number().int() });
+const ProrationQuote = z.object({
+  totalSessions: z.number().int(), remainingSessions: z.number().int(),
+  amount: z.number().int(), basis: z.enum(["DB_SESSIONS", "SLOT_CALENDAR"]),
+});
+
 /* 소통 실연결(#31) — 원장 전달사항·코치 ACK (Batch 14 chat 계약) */
 const MemberList = z.object({
   members: z.array(z.object({ userId: z.string(), name: z.string(), roles: z.array(z.string()) })),
@@ -200,6 +207,78 @@ function cookieCsrf(): string | undefined {
   return doc.cookie.split("; ").find((c: string) => c.startsWith("pf_csrf="))?.split("=")[1];
 }
 
+/* ── 프로그램 스튜디오 스키마 (PS2) ── */
+const ProgramList = z.object({
+  programs: z.array(z.object({
+    programId: z.string(), name: z.string(), description: z.string().optional(),
+    targetAgeLabel: z.string().optional(), ownershipType: z.string(), visibility: z.string(),
+    archivedAt: z.string().optional(),
+    modes: z.array(z.string()),
+    versions: z.array(z.object({
+      versionId: z.string(), versionLabel: z.string(), status: z.string(),
+      publishedAt: z.string().optional(),
+    })),
+  })),
+});
+export type StudioProgram = z.infer<typeof ProgramList>["programs"][number];
+const ProgramCreate = z.object({ kind: z.string(), programId: z.string(), versionId: z.string() });
+const VersionCreate = z.object({ kind: z.string(), versionId: z.string() });
+const VersionPublish = z.object({ kind: z.string(), versionId: z.string() });
+const VersionDetail = z.object({
+  versionId: z.string(), programId: z.string(), versionLabel: z.string(), status: z.string(),
+  basedOnVersionId: z.string().optional(), publishedAt: z.string().optional(),
+  levels: z.array(z.object({
+    levelId: z.string(), name: z.string(), code: z.string().optional(),
+    description: z.string().optional(), targetAgeLabel: z.string().optional(),
+    sortOrder: z.number(), color: z.string().optional(),
+  })),
+  sections: z.array(z.object({
+    sectionId: z.string(), parentSectionId: z.string().optional(),
+    sectionType: z.string(), name: z.string(), sortOrder: z.number(),
+  })),
+  sessions: z.array(z.object({
+    curriculumSessionId: z.string(), sectionId: z.string(), name: z.string(),
+    sequence: z.number(), theme: z.string().optional(), objective: z.string().optional(),
+    activities: z.array(z.object({
+      activityRevisionId: z.string(), name: z.string(), sortOrder: z.number(),
+      required: z.boolean(), recommendedMinutes: z.number().optional(),
+    })),
+  })),
+});
+export type StudioVersionDetail = z.infer<typeof VersionDetail>;
+const LevelCreate = z.object({ kind: z.string(), levelId: z.string() });
+const GrowthDomainList = z.object({
+  domains: z.array(z.object({
+    domainId: z.string(), parentId: z.string().optional(), code: z.string().optional(),
+    name: z.string(), description: z.string().optional(), category: z.string().optional(),
+    color: z.string().optional(), icon: z.string().optional(),
+    reportVisible: z.boolean(), active: z.boolean(), sortOrder: z.number(),
+  })),
+});
+export type StudioGrowthDomain = z.infer<typeof GrowthDomainList>["domains"][number];
+const GrowthDomainCreate = z.object({ kind: z.string(), domainId: z.string() });
+const StudioActivityList = z.object({
+  activities: z.array(z.object({
+    activityId: z.string(), status: z.string(), currentRevisionId: z.string().optional(),
+    revisionNumber: z.number().optional(), name: z.string(),
+    description: z.string().optional(), difficultyLabel: z.string().optional(),
+    recommendedAgeLabel: z.string().optional(), recommendedMinutes: z.number().optional(),
+    growthTags: z.array(z.object({ growthDomainId: z.string(), role: z.string() })),
+  })),
+});
+export type StudioActivity = z.infer<typeof StudioActivityList>["activities"][number];
+export interface StudioActivityContent {
+  name: string; description?: string; instructions?: string;
+  easyVariation?: string; standardVariation?: string; challengeVariation?: string;
+  coachingPoints?: string; safetyNotes?: string; difficultyLabel?: string;
+  recommendedAgeLabel?: string; recommendedMinutes?: number;
+  participantFormat?: string; spaceRequirement?: string;
+}
+const StudioActivityCreate = z.object({ kind: z.string(), activityId: z.string(), revisionId: z.string() });
+const StudioActivityUpdate = z.object({ kind: z.string(), revisionId: z.string(), newRevision: z.boolean() });
+const SectionCreate = z.object({ kind: z.string(), sectionId: z.string() });
+const CurriculumSessionCreate = z.object({ kind: z.string(), curriculumSessionId: z.string() });
+
 export function createApiClient(cfg: ApiClientConfig = {}) {
   const base = cfg.baseUrl ?? "";
   const fetchFn: FetchLike = cfg.fetchFn ?? ((i, init) => fetch(i, init));
@@ -271,6 +350,21 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
     completeSession: (academyId: string, sessionId: string) =>
       call(SessionComplete, `/academies/${academyId}/sessions/${sessionId}/complete`, {
         method: "POST", csrf: true,
+      }),
+    /* 휴무·일할(#38) — "숫자 직접 수정 금지": event 등록 → 서버 재계산 */
+    createClosure: (academyId: string, body: {
+      scope: "ACADEMY" | "CLASS"; classId?: string;
+      dateStart: string; dateEnd: string;
+      closureType: string; reason: string; deductSessions: boolean;
+    }) =>
+      call(ClosureCreate, `/academies/${academyId}/closures`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    prorationQuote: (academyId: string, classId: string, body: {
+      periodStart: string; periodEnd: string; joinDate: string; baseFee: number;
+    }) =>
+      call(ProrationQuote, `/academies/${academyId}/classes/${classId}/proration-quote`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
       }),
     /* 원장 공지·수납 관제(#25) */
     publishNotice: (academyId: string, body: { title: string; body: string; audience: string; classId?: string }) =>
@@ -362,6 +456,80 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       call(AdminSupportViewRevoke, `/admin/support-views/${supportViewId}/revocation`, {
         method: "POST", csrf: true, body: JSON.stringify(reason ? { reason } : {}),
       }),
+    /* ── 프로그램 스튜디오 PS2 (docs/20·21·22) — 원장의 프로그램 저작 ── */
+    listPrograms: (academyId: string) =>
+      call(ProgramList, `/academies/${academyId}/programs`),
+    createProgram: (academyId: string, body: {
+      name: string; description?: string; targetAgeLabel?: string; modes: string[];
+    }) =>
+      call(ProgramCreate, `/academies/${academyId}/programs`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    createProgramVersion: (academyId: string, programId: string, body: {
+      versionLabel: string; basedOnVersionId?: string;
+    }) =>
+      call(VersionCreate, `/academies/${academyId}/programs/${programId}/versions`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    publishProgramVersion: (academyId: string, versionId: string) =>
+      call(VersionPublish, `/academies/${academyId}/versions/${versionId}/publish`, {
+        method: "POST", csrf: true,
+      }),
+    getProgramVersion: (academyId: string, versionId: string) =>
+      call(VersionDetail, `/academies/${academyId}/versions/${versionId}`),
+    createProgramLevel: (academyId: string, versionId: string, body: {
+      name: string; code?: string; targetAgeLabel?: string; sortOrder?: number; color?: string;
+    }) =>
+      call(LevelCreate, `/academies/${academyId}/versions/${versionId}/levels`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    listGrowthDomains: (academyId: string) =>
+      call(GrowthDomainList, `/academies/${academyId}/growth-domains`),
+    createGrowthDomain: (academyId: string, body: {
+      name: string; parentId?: string; category?: string; icon?: string; sortOrder?: number;
+    }) =>
+      call(GrowthDomainCreate, `/academies/${academyId}/growth-domains`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    listStudioActivities: (academyId: string) =>
+      call(StudioActivityList, `/academies/${academyId}/activities`),
+    createStudioActivity: (academyId: string, body: StudioActivityContent) =>
+      call(StudioActivityCreate, `/academies/${academyId}/activities`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    updateStudioActivity: (academyId: string, activityId: string, body: Partial<StudioActivityContent>) =>
+      call(StudioActivityUpdate, `/academies/${academyId}/activities/${activityId}`, {
+        method: "PATCH", csrf: true, body: JSON.stringify(body),
+      }),
+    archiveStudioActivity: (academyId: string, activityId: string) =>
+      call(z.object({ kind: z.string() }), `/academies/${academyId}/activities/${activityId}/archive`, {
+        method: "POST", csrf: true,
+      }),
+    setActivityGrowthTags: (academyId: string, activityId: string, tags: {
+      growthDomainId: string; role: "PRIMARY" | "SECONDARY";
+    }[]) =>
+      call(z.object({ kind: z.string() }), `/academies/${academyId}/activities/${activityId}/growth-tags`, {
+        method: "PUT", csrf: true, body: JSON.stringify({ tags }),
+      }),
+    createCurriculumSection: (academyId: string, versionId: string, body: {
+      sectionType: string; name: string; parentSectionId?: string; sortOrder?: number;
+    }) =>
+      call(SectionCreate, `/academies/${academyId}/versions/${versionId}/sections`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    createCurriculumSession: (academyId: string, versionId: string, body: {
+      sectionId: string; name: string; sequence: number; theme?: string; objective?: string;
+    }) =>
+      call(CurriculumSessionCreate, `/academies/${academyId}/versions/${versionId}/sessions`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    setCurriculumSessionActivities: (academyId: string, curriculumSessionId: string, activities: {
+      activityId: string; required?: boolean; recommendedMinutes?: number;
+    }[]) =>
+      call(z.object({ kind: z.string(), count: z.number().optional() }),
+        `/academies/${academyId}/curriculum-sessions/${curriculumSessionId}/activities`, {
+          method: "PUT", csrf: true, body: JSON.stringify({ activities }),
+        }),
   };
 }
 

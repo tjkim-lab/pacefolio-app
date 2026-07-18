@@ -334,6 +334,7 @@ export const classSessions = pgTable("class_sessions", {
   participantId: text("participant_id"),
   status: classSessionStatusEnum("status").notNull().default("SCHEDULED"),
   canceledReason: text("canceled_reason"),
+  closureId: text("closure_id"),                   // #38: 휴무 이벤트가 취소한 세션 추적(복원 근거)
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
@@ -725,6 +726,27 @@ export const supportViews = pgTable("support_views", {
   check("ck_support_view_window", sql`${t.expiresAt} > ${t.issuedAt}`),
 ]);
 
+/* ── 휴무 이벤트(#38 — PC draft 정본화 1): "숫자 직접 수정 금지, event 가 회차를 재계산" ── */
+export const closureEvents = pgTable("closure_events", {
+  id: text("id").primaryKey(),                     // ce_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  scope: text("scope").notNull(),                  // ACADEMY | CLASS
+  classId: text("class_id"),                       // scope=CLASS 일 때
+  dateStart: date("date_start").notNull(),
+  dateEnd: date("date_end").notNull(),
+  closureType: text("closure_type").notNull(),     // 공휴일·시설점검·학원휴무 등(화면 서술)
+  reason: text("reason").notNull(),
+  deductSessions: boolean("deduct_sessions").notNull(), // true = 회차 차감(세션 취소·청구 모수 제외)
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }), // 철회 = 세션 복원(이력 보존)
+  createdAt: createdAt(),
+}, (t) => [
+  index("ix_closure_academy_date").on(t.academyId, t.dateStart),
+  check("ck_closure_range", sql`${t.dateEnd} >= ${t.dateStart}`),
+  check("ck_closure_scope", sql`${t.scope} IN ('ACADEMY','CLASS')`),
+  foreignKey({ name: "fk_closure_class_academy", columns: [t.classId, t.academyId], foreignColumns: [dbClasses.id, dbClasses.academyId] }),
+]);
+
 /* ── 기본선 3단계(#24): 공지 — 발행·읽음 추적(미열람 명단의 서버 정본) ── */
 export const dbNotices = pgTable("notices", {
   id: text("id").primaryKey(),                     // nt_xxx
@@ -878,6 +900,225 @@ export const chatMessageAcks = pgTable("chat_message_acks", {
   uniqueIndex("uq_chatack_message_user").on(t.messageId, t.userId),
   index("ix_chatack_user").on(t.userId),
   foreignKey({ name: "fk_chatack_message_academy", columns: [t.messageId, t.academyId], foreignColumns: [chatMessages.id, chatMessages.academyId] }),
+]);
+
+/* ── 프로그램 스튜디오 PS1 (docs/20·21·22) ──
+   원장이 직접 만드는 범용 프로그램 저작 시스템 — 비즈니스 콘텐츠(단계명·영역명·
+   활동명)는 전부 데이터. enum 은 시스템 상태만. 이름은 식별자가 아니다:
+   Activity(불변 ID) + ActivityRevision(개정되는 콘텐츠) — 커리큘럼·기록은
+   revisionId 를 참조해 이름이 바뀌어도 과거가 안 바뀐다. */
+export const programVersionStatusEnum = pgEnum("program_version_status", [
+  "DRAFT", "IN_REVIEW", "PUBLISHED", "ARCHIVED",
+]);
+export const programModeEnum = pgEnum("program_mode", [
+  "EXPERIENCE", "SKILL_MASTERY", "SEASONAL", "MEASUREMENT", "COURSE",
+]);
+export const activityStatusEnum = pgEnum("activity_status", ["ACTIVE", "ARCHIVED"]);
+export const growthTagRoleEnum = pgEnum("growth_tag_role", ["PRIMARY", "SECONDARY"]);
+
+export const programs = pgTable("programs", {
+  id: text("id").primaryKey(),                     // prog_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  name: text("name").notNull(),
+  description: text("description"),
+  targetAgeLabel: text("target_age_label"),
+  /* 상품화 준비(docs/20 §6) — 1차는 값만 확보 */
+  ownershipType: text("ownership_type").notNull().default("PRIVATE_ACADEMY"),
+  visibility: text("visibility").notNull().default("PRIVATE"),
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  archivedAt: timestamp("archived_at", { withTimezone: true, mode: "string" }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: version(),
+}, (t) => [
+  uniqueIndex("uq_program_id_academy").on(t.id, t.academyId),
+  index("ix_program_academy").on(t.academyId),
+  check("ck_program_ownership", sql`${t.ownershipType} IN ('PRIVATE_ACADEMY','PLATFORM_TEMPLATE','MARKETPLACE_PRODUCT','INSTALLED_COPY')`),
+  check("ck_program_visibility", sql`${t.visibility} IN ('PRIVATE','UNLISTED','PUBLIC')`),
+]);
+
+/* 진행 방식 — 프로그램당 복수 조합(EXPERIENCE+SKILL_MASTERY 등) */
+export const programModes = pgTable("program_modes", {
+  id: text("id").primaryKey(),                     // pmode_xxx
+  programId: text("program_id").notNull(),
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  mode: programModeEnum("mode").notNull(),
+}, (t) => [
+  uniqueIndex("uq_program_mode").on(t.programId, t.mode),
+  foreignKey({ name: "fk_pmode_program_academy", columns: [t.programId, t.academyId], foreignColumns: [programs.id, programs.academyId] }),
+]);
+
+/* 게시 단위 — DRAFT 만 편집 가능 · PUBLISHED 직접 수정 금지(서비스 불변식) */
+export const programVersions = pgTable("program_versions", {
+  id: text("id").primaryKey(),                     // pv_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  programId: text("program_id").notNull(),
+  versionLabel: text("version_label").notNull(),
+  status: programVersionStatusEnum("status").notNull().default("DRAFT"),
+  basedOnVersionId: text("based_on_version_id"),   // 복제 계보
+  publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" }),
+  publishedByUserId: text("published_by_user_id"),
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: version(),
+}, (t) => [
+  uniqueIndex("uq_pv_id_academy").on(t.id, t.academyId),
+  index("ix_pv_program").on(t.programId),
+  foreignKey({ name: "fk_pv_program_academy", columns: [t.programId, t.academyId], foreignColumns: [programs.id, programs.academyId] }),
+]);
+
+/* 단계 — 학원이 직접 생성(PLAY 1·2·3, S/C/B/A, Level 1~10 은 전부 이 테이블의 행) */
+export const programLevels = pgTable("program_levels", {
+  id: text("id").primaryKey(),                     // plv_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  programVersionId: text("program_version_id").notNull(),
+  name: text("name").notNull(),
+  code: text("code"),
+  description: text("description"),
+  targetAgeLabel: text("target_age_label"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  color: text("color"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex("uq_plv_id_academy").on(t.id, t.academyId),
+  uniqueIndex("uq_plv_version_name").on(t.programVersionId, t.name),
+  foreignKey({ name: "fk_plv_version_academy", columns: [t.programVersionId, t.academyId], foreignColumns: [programVersions.id, programVersions.academyId] }),
+]);
+
+/* 성장 영역(FMS 등) — 테넌트 소유(docs/21 결정 3: 템플릿은 seed 복사) */
+export const growthDomains = pgTable("growth_domains", {
+  id: text("id").primaryKey(),                     // gro_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  parentId: text("parent_id"),                     // 대분류(Locomotor) → 소분류(Running)
+  code: text("code"),
+  name: text("name").notNull(),
+  description: text("description"),
+  category: text("category"),
+  color: text("color"),
+  icon: text("icon"),
+  reportVisible: boolean("report_visible").notNull().default(true),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: version(),
+}, (t) => [
+  uniqueIndex("uq_gro_id_academy").on(t.id, t.academyId),
+  index("ix_gro_academy").on(t.academyId),
+  foreignKey({ name: "fk_gro_parent_academy", columns: [t.parentId, t.academyId], foreignColumns: [t.id, t.academyId] }),
+]);
+
+/* 활동 원본 — 불변 ID. 이름·설명은 revision 콘텐츠(이 테이블엔 이름 없음).
+   currentRevisionId = FK 없는 포인터(순환 회피) — 정합은 서비스 tx 유지. */
+export const activities = pgTable("activities", {
+  id: text("id").primaryKey(),                     // act_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  status: activityStatusEnum("status").notNull().default("ACTIVE"),
+  currentRevisionId: text("current_revision_id"),
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  archivedAt: timestamp("archived_at", { withTimezone: true, mode: "string" }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: version(),
+}, (t) => [
+  uniqueIndex("uq_act_id_academy").on(t.id, t.academyId),
+  index("ix_act_academy_status").on(t.academyId, t.status),
+]);
+
+/* 활동 개정판 — 게시/수업에 사용된 뒤의 변경은 새 개정판(과거 기록 보존) */
+export const activityRevisions = pgTable("activity_revisions", {
+  id: text("id").primaryKey(),                     // arv_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  activityId: text("activity_id").notNull(),
+  revisionNumber: integer("revision_number").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  instructions: text("instructions"),
+  easyVariation: text("easy_variation"),
+  standardVariation: text("standard_variation"),
+  challengeVariation: text("challenge_variation"),
+  coachingPoints: text("coaching_points"),
+  safetyNotes: text("safety_notes"),
+  difficultyLabel: text("difficulty_label"),
+  recommendedAgeLabel: text("recommended_age_label"),
+  recommendedMinutes: integer("recommended_minutes"),
+  participantFormat: text("participant_format"),
+  spaceRequirement: text("space_requirement"),
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex("uq_arv_id_academy").on(t.id, t.academyId),
+  uniqueIndex("uq_arv_activity_number").on(t.activityId, t.revisionNumber),
+  foreignKey({ name: "fk_arv_activity_academy", columns: [t.activityId, t.academyId], foreignColumns: [activities.id, activities.academyId] }),
+]);
+
+/* 개정판 × 성장영역 — 대표(PRIMARY) 1 + 보조(SECONDARY) N (중복 태그 금지) */
+export const activityRevisionGrowthTags = pgTable("activity_revision_growth_tags", {
+  id: text("id").primaryKey(),                     // argt_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  activityRevisionId: text("activity_revision_id").notNull(),
+  growthDomainId: text("growth_domain_id").notNull(),
+  role: growthTagRoleEnum("role").notNull(),
+}, (t) => [
+  uniqueIndex("uq_argt_revision_domain").on(t.activityRevisionId, t.growthDomainId),
+  index("ix_argt_domain").on(t.growthDomainId),
+  foreignKey({ name: "fk_argt_revision_academy", columns: [t.activityRevisionId, t.academyId], foreignColumns: [activityRevisions.id, activityRevisions.academyId] }),
+  foreignKey({ name: "fk_argt_domain_academy", columns: [t.growthDomainId, t.academyId], foreignColumns: [growthDomains.id, growthDomains.academyId] }),
+]);
+
+/* 커리큘럼 구조 — 연간/분기/시즌 등 임의 계층(주차 수 고정 없음) */
+export const curriculumSections = pgTable("curriculum_sections", {
+  id: text("id").primaryKey(),                     // csec_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  programVersionId: text("program_version_id").notNull(),
+  parentSectionId: text("parent_section_id"),
+  sectionType: text("section_type").notNull(),     // YEAR|QUARTER|SEASON|UNIT 등 서술 값
+  name: text("name").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: createdAt(),
+}, (t) => [
+  uniqueIndex("uq_csec_id_academy").on(t.id, t.academyId),
+  index("ix_csec_version").on(t.programVersionId),
+  foreignKey({ name: "fk_csec_version_academy", columns: [t.programVersionId, t.academyId], foreignColumns: [programVersions.id, programVersions.academyId] }),
+  foreignKey({ name: "fk_csec_parent_academy", columns: [t.parentSectionId, t.academyId], foreignColumns: [t.id, t.academyId] }),
+]);
+
+/* 회차(주차) — "1분기 1주 차" */
+export const curriculumSessions = pgTable("curriculum_sessions", {
+  id: text("id").primaryKey(),                     // cses_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  programVersionId: text("program_version_id").notNull(),
+  sectionId: text("section_id").notNull(),
+  name: text("name").notNull(),
+  sequence: integer("sequence").notNull(),
+  theme: text("theme"),
+  objective: text("objective"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex("uq_cses_id_academy").on(t.id, t.academyId),
+  index("ix_cses_section_seq").on(t.sectionId, t.sequence),
+  foreignKey({ name: "fk_cses_version_academy", columns: [t.programVersionId, t.academyId], foreignColumns: [programVersions.id, programVersions.academyId] }),
+  foreignKey({ name: "fk_cses_section_academy", columns: [t.sectionId, t.academyId], foreignColumns: [curriculumSections.id, curriculumSections.academyId] }),
+]);
+
+/* 회차 × 활동 — 이름이 아니라 확정된 개정판(revisionId)을 연결(활동 3개 고정 없음) */
+export const curriculumSessionActivities = pgTable("curriculum_session_activities", {
+  id: text("id").primaryKey(),                     // csa_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  curriculumSessionId: text("curriculum_session_id").notNull(),
+  activityRevisionId: text("activity_revision_id").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  required: boolean("required").notNull().default(true),
+  recommendedMinutes: integer("recommended_minutes"),
+}, (t) => [
+  index("ix_csa_session").on(t.curriculumSessionId),
+  index("ix_csa_revision").on(t.activityRevisionId),
+  foreignKey({ name: "fk_csa_session_academy", columns: [t.curriculumSessionId, t.academyId], foreignColumns: [curriculumSessions.id, curriculumSessions.academyId] }),
+  foreignKey({ name: "fk_csa_revision_academy", columns: [t.activityRevisionId, t.academyId], foreignColumns: [activityRevisions.id, activityRevisions.academyId] }),
 ]);
 
 export const refundAllocations = pgTable("refund_allocations", {

@@ -60,7 +60,37 @@ function PCPaymentsBody() {
   const [mj, setMj] = useState(MJ_OPTS[0]);
   const [mjDisc, setMjDisc] = useState(MJ_DISCOUNTS[0]);
   const [mjSaved, setMjSaved] = useState(false);
-  const mjBase = Math.round((mj.r / mjCls.total) * mjCls.fee);
+  /* #38 READY: 서버 견적 — 일할 = 남은회차/전체회차 × 요금(헌법 수식, DB 세션 정본) */
+  const [mjClassId, setMjClassId] = useState("");
+  const [mjJoin, setMjJoin] = useState("");
+  const [mjFee, setMjFee] = useState(480000);
+  const [mjQuote, setMjQuote] = useState<{ totalSessions: number; remainingSessions: number; amount: number; basis: string } | null>(null);
+  const [mjBusy, setMjBusy] = useState(false);
+  const quarterRange = () => {
+    // 헌법: 분기 달력고정(3·6·9·12 시작). 오늘이 속한 분기 반환
+    const today = new Date();
+    const m = today.getMonth() + 1;
+    const startMonth = m >= 12 ? 12 : m >= 9 ? 9 : m >= 6 ? 6 : m >= 3 ? 3 : 12;
+    const y = startMonth === 12 && m < 3 ? today.getFullYear() - 1 : today.getFullYear();
+    const endMonth = startMonth + 2;
+    const lastDay = new Date(Date.UTC(y, endMonth, 0)).getUTCDate();
+    const p = (n: number) => String(n).padStart(2, "0");
+    return { start: `${y}-${p(startMonth)}-01`, end: `${y}-${p(endMonth)}-${p(lastDay)}` };
+  };
+  const runQuote = () => {
+    if (!mjClassId || !mjJoin || mjBusy) { if (!mjClassId || !mjJoin) toast("반·첫 수업일을 선택해주세요"); return; }
+    setMjBusy(true);
+    const q = quarterRange();
+    void ownerLive.prorationQuote(mjClassId, {
+      periodStart: q.start, periodEnd: q.end, joinDate: mjJoin, baseFee: mjFee,
+    }).then((r) => {
+      setMjBusy(false);
+      if (!r.ok || !r.quote) { toast(r.message); return; }
+      setMjQuote(r.quote);
+      setMjSaved(false);
+    });
+  };
+  const mjBase = mjQuote ? mjQuote.amount : Math.round((mj.r / mjCls.total) * mjCls.fee);
   const mjAmt = Math.round((mjBase * (100 - mjDisc.pct)) / 100 / 10) * 10; // 10원 반올림 정책 고정
 
   // 부분 발송 (그룹별 단계)
@@ -96,10 +126,37 @@ function PCPaymentsBody() {
     setTimeout(() => { setCycleSaving(false); setCycleSaved(true); setCycleCur(cycle); toast("다음 수납 기간부터 적용 — 확정된 청구는 그대로예요"); }, 700);
   };
 
+  /* #38: READY = 실 휴무 event(서버 세션 취소·회차 재계산). 날짜는 READY 전용 입력 */
+  const [offDate, setOffDate] = useState("");
+  const [offClassId, setOffClassId] = useState<string>(""); // "" = 전체 학원
+  const [offBusy, setOffBusy] = useState(false);
   const registerOff = () => {
-    const label = `${offType} · ${offScope} · 12/27 (토)${offDeduct ? " · 회차 차감" : " · 차감 없음"}`;
+    if (ownerLive.state === "READY") {
+      if (!offDate) { toast("휴무 날짜를 선택해주세요"); return; }
+      if (offBusy) return;
+      setOffBusy(true);
+      void (async () => {
+        const r = await ownerLive.createClosure({
+          scope: offClassId ? "CLASS" : "ACADEMY",
+          classId: offClassId || undefined,
+          dateStart: offDate, dateEnd: offDate,
+          closureType: offType, reason: `${offType} 휴무`, deductSessions: offDeduct,
+        });
+        setOffBusy(false);
+        toast(r.message);
+        if (!r.ok) return;
+        const scopeLabel = offClassId
+          ? ownerLive.classes.find((c) => c.classId === offClassId)?.name ?? "반"
+          : "전체 학원";
+        setOffEvents((l) => [...l,
+          `${offType} · ${scopeLabel} · ${offDate}${offDeduct ? " · 회차 차감" : " · 차감 없음"} · 세션 ${r.canceledSessions}회 취소(서버)`,
+        ]);
+      })();
+      return;
+    }
+    const label = `${offType} · ${offScope} · 12/27 (토)${offDeduct ? " · 회차 차감" : " · 차감 없음"} (데모)`;
     setOffEvents((l) => [...l, label]);
-    toast("휴무 등록 — 계산기가 회차를 재계산해요. 확정된 청구서는 자동 변경 없음(수정 청구·차기 이월)");
+    toast("휴무 등록(데모) — 계산기가 회차를 재계산해요. 확정된 청구서는 자동 변경 없음(수정 청구·차기 이월)");
   };
 
   const reviewGroup = (id: string) => {
@@ -183,7 +240,18 @@ function PCPaymentsBody() {
                 ))}
               </div>
               <div className="mt-1.5 flex gap-1.5 flex-wrap items-center">
-                {OFF_SCOPES.map((s) => (
+                {ownerLive.state === "READY" ? (
+                  <>
+                    <button onClick={() => setOffClassId("")}
+                      className={`px-2 py-1 rounded-lg text-[11px] font-semibold border ${offClassId === "" ? "border-accent bg-accent-weak text-brand" : "border-line text-ink2"}`}>전체 학원</button>
+                    {ownerLive.classes.map((c) => (
+                      <button key={c.classId} onClick={() => setOffClassId(c.classId)}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-semibold border ${offClassId === c.classId ? "border-accent bg-accent-weak text-brand" : "border-line text-ink2"}`}>{c.name}</button>
+                    ))}
+                    <input type="date" value={offDate} onChange={(e) => setOffDate(e.target.value)}
+                      className="border border-line rounded-lg px-2 py-1 text-[11px] font-semibold text-ink bg-fill" />
+                  </>
+                ) : OFF_SCOPES.map((s) => (
                   <button key={s} onClick={() => setOffScope(s)}
                     className={`px-2 py-1 rounded-lg text-[11px] font-semibold border ${offScope === s ? "border-accent bg-accent-weak text-brand" : "border-line text-ink2"}`}>{s}</button>
                 ))}
@@ -192,8 +260,10 @@ function PCPaymentsBody() {
                   회차 차감
                 </label>
               </div>
-              <Button variant="ghost" full className="mt-2 h-9 text-[12px]" onClick={registerOff}>
-                예시 등록 — 12/27(토) {offType} ({offScope})
+              <Button variant="ghost" full className="mt-2 h-9 text-[12px]" onClick={registerOff} disabled={offBusy}>
+                {ownerLive.state === "READY"
+                  ? offBusy ? "서버 등록 중..." : `휴무 등록 — ${offDate || "날짜 선택"} · ${offType}`
+                  : `예시 등록 — 12/27(토) ${offType} (${offScope})`}
               </Button>
               {offEvents.map((e, i) => (
                 <div key={i} className="mt-1.5 text-[11px] font-semibold text-ink2 bg-fill rounded-lg px-2.5 py-1.5">
@@ -207,16 +277,35 @@ function PCPaymentsBody() {
           <Panel title="중간입회 계산기" hnote="반을 고르면 요일·시간은 자동 — 중복 입력 없음">
             <div className="text-[11px] font-bold text-ink3 mb-1">① 반 선택</div>
             <div className="flex gap-2 flex-wrap">
-              {MJ_CLASSES.map((o) => (
-                <DChip key={o.nm} title={o.nm} sub={`${o.days} · ${o.total}회 / ${fmt(o.fee)}원`} active={mjCls.nm === o.nm} onClick={() => { setMjCls(o); setMjSaved(false); }} />
-              ))}
+              {ownerLive.state === "READY"
+                ? ownerLive.classes.map((c) => (
+                    <DChip key={c.classId} title={c.name} sub="서버 시간표 기준" active={mjClassId === c.classId}
+                      onClick={() => { setMjClassId(c.classId); setMjQuote(null); setMjSaved(false); }} />
+                  ))
+                : MJ_CLASSES.map((o) => (
+                    <DChip key={o.nm} title={o.nm} sub={`${o.days} · ${o.total}회 / ${fmt(o.fee)}원`} active={mjCls.nm === o.nm} onClick={() => { setMjCls(o); setMjSaved(false); }} />
+                  ))}
             </div>
             <div className="text-[11px] font-bold text-ink3 mb-1 mt-2.5">② 첫 수업일</div>
-            <div className="flex gap-2 flex-wrap">
-              {MJ_OPTS.map((o) => (
-                <DChip key={o.date} title={o.date} sub={o.sub} active={mj.r === o.r} onClick={() => { setMj(o); setMjSaved(false); }} />
-              ))}
-            </div>
+            {ownerLive.state === "READY" ? (
+              <div className="flex gap-2 flex-wrap items-center">
+                <input type="date" value={mjJoin} onChange={(e) => { setMjJoin(e.target.value); setMjQuote(null); }}
+                  className="border border-line rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-ink bg-fill" />
+                <label className="text-[11px] font-semibold text-ink3">분기료(원)</label>
+                <input type="number" value={mjFee} onChange={(e) => { setMjFee(Number(e.target.value) || 0); setMjQuote(null); }}
+                  className="w-[110px] border border-line rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-ink bg-fill tabular-nums" />
+                <button onClick={runQuote} disabled={mjBusy}
+                  className="px-3 py-1.5 rounded-lg text-[12px] font-bold bg-accent-strong text-white disabled:opacity-50">
+                  {mjBusy ? "계산 중..." : "서버 견적"}
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2 flex-wrap">
+                {MJ_OPTS.map((o) => (
+                  <DChip key={o.date} title={o.date} sub={o.sub} active={mj.r === o.r} onClick={() => { setMj(o); setMjSaved(false); }} />
+                ))}
+              </div>
+            )}
             <div className="text-[11px] font-bold text-ink3 mb-1 mt-2.5">③ 할인 (MAX 하나)</div>
             <div className="flex gap-2 flex-wrap">
               {MJ_DISCOUNTS.map((d) => (
@@ -224,7 +313,15 @@ function PCPaymentsBody() {
               ))}
             </div>
             <div className="bg-fill rounded-xl px-3.5 py-3 text-[12.5px] font-bold mt-2.5 tabular-nums leading-loose">
-              <div>남은 실제 수업 <b className="text-brand">{mj.r}회</b> ÷ {mjCls.total}회 × {fmt(mjCls.fee)}원 = {fmt(mjBase)}원</div>
+              {ownerLive.state === "READY" && mjQuote ? (
+                <div>남은 실제 수업 <b className="text-brand">{mjQuote.remainingSessions}회</b> ÷ {mjQuote.totalSessions}회 × {fmt(mjFee)}원 = {fmt(mjQuote.amount)}원
+                  <small className="text-ink3 font-medium ml-1">({mjQuote.basis === "DB_SESSIONS" ? "서버 세션 정본" : "시간표+휴무 달력"})</small>
+                </div>
+              ) : ownerLive.state === "READY" ? (
+                <div className="text-ink3 font-medium">반·첫 수업일 선택 후 <b className="text-ink">서버 견적</b>을 누르면 실제 수업 캘린더(휴무 반영) 기준으로 계산돼요.</div>
+              ) : (
+                <div>남은 실제 수업 <b className="text-brand">{mj.r}회</b> ÷ {mjCls.total}회 × {fmt(mjCls.fee)}원 = {fmt(mjBase)}원 <small className="text-ink3 font-medium">(데모)</small></div>
+              )}
               {mjDisc.pct > 0 && <div>{mjDisc.nm} 적용 −{mjDisc.pct}%</div>}
               <div className="border-t border-line2 mt-1 pt-1">최종 청구액 <b className="text-brand text-[14px]">{fmt(mjAmt)}원</b> <small className="text-ink3 font-medium">(10원 단위 반올림 고정)</small></div>
             </div>

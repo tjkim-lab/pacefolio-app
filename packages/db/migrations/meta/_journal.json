@@ -155,6 +155,20 @@
       "when": 1784387696291,
       "tag": "0021_in-app-notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1784391481962,
+      "tag": "0022_program-studio",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784392095071,
+      "tag": "0023_closure-events",
+      "breakpoints": true
     }
   ]
 }
