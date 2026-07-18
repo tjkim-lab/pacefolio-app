@@ -582,6 +582,65 @@ export const outboxEvents = pgTable("outbox_events", {
   index("ix_outbox_unpublished").on(t.publishedAt, t.createdAt), // publisher 폴링
 ]);
 
+/* ── 사진 파이프라인 사전 코어(#19 — 스토리지 사업자 결정과 무관) ──
+   동의 정본 = domain consent.ts(PhotoConsentRecord·canSendPhotoAsset).
+   grants 는 목적×대상 쌍 JSON — 발송·공개 시점마다 서버 재검증(R2 P0-9). */
+export const photoAssetStatusEnum = pgEnum("photo_asset_status", ["PENDING_UPLOAD", "UPLOADED", "DELETED"]);
+
+export const photoConsents = pgTable("photo_consents", {
+  id: text("id").primaryKey(),                     // pc_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  participantId: text("participant_id").notNull(),
+  guardianId: text("guardian_id").notNull().references(() => guardians.id), // 동의 주체(법정대리인)
+  policyVersion: text("policy_version").notNull(),
+  grants: text("grants").notNull(),                // JSON [{purpose,audience}] — 교차조합 금지(도메인 검증)
+  channel: text("channel").notNull(),              // 앱/서면 등 획득 채널(증적)
+  consentedAt: timestamp("consented_at", { withTimezone: true, mode: "string" }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: version(),
+}, (t) => [
+  uniqueIndex("uq_photo_consent_participant").on(t.academyId, t.participantId), // 원생당 1정본(갱신형)
+  foreignKey({ name: "fk_pconsent_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+]);
+
+export const photoAssets = pgTable("photo_assets", {
+  id: text("id").primaryKey(),                     // ph_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  sessionId: text("session_id"),                   // 수업 컨텍스트(선택)
+  uploadedByUserId: text("uploaded_by_user_id").notNull().references(() => users.id),
+  storageKey: text("storage_key").notNull(),       // 어댑터 무관 키 — 사업자 결정 후에도 불변
+  contentType: text("content_type").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  status: photoAssetStatusEnum("status").notNull(),
+  purpose: text("purpose"),                        // finalize 시 확정(도메인 enum 검증)
+  audience: text("audience"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: version(),
+}, (t) => [
+  uniqueIndex("uq_photo_storage_key").on(t.storageKey),
+  uniqueIndex("uq_photo_id_academy").on(t.id, t.academyId),
+  index("ix_photo_academy_created").on(t.academyId, t.createdAt),
+  check("ck_photo_byte_size", sql`${t.byteSize} > 0 AND ${t.byteSize} <= 26214400`), // 25MB 상한
+  foreignKey({ name: "fk_photo_session_academy", columns: [t.sessionId, t.academyId], foreignColumns: [classSessions.id, classSessions.academyId] }),
+]);
+
+/* 사진 속 등장 원생 — 동의 게이트(canSendPhotoAsset)의 근거 */
+export const photoAssetParticipants = pgTable("photo_asset_participants", {
+  id: text("id").primaryKey(),                     // pap_xxx
+  photoId: text("photo_id").notNull(),
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  participantId: text("participant_id").notNull(),
+}, (t) => [
+  uniqueIndex("uq_pap_photo_participant").on(t.photoId, t.participantId),
+  index("ix_pap_participant").on(t.participantId),
+  foreignKey({ name: "fk_pap_photo_academy", columns: [t.photoId, t.academyId], foreignColumns: [photoAssets.id, photoAssets.academyId] }),
+  foreignKey({ name: "fk_pap_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+]);
+
 /* ── 안전사고 기록(#32 — E 리뷰 C2): 코치 현장 기록의 서버 정본 ──
    발생 시각 = 서버 기록(클라이언트 고정 시각 금지). 민감 기록 — 열람·기록 전부 감사. */
 export const incidentTypeEnum = pgEnum("incident_type", ["MINOR_INJURY", "CONDITION", "CLASS_HALT", "SAFETY_ACCIDENT", "OTHER"]);

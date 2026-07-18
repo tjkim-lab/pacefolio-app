@@ -51,6 +51,8 @@ const app = createApp({
   // dev 는 기본 시크릿으로 mockpg 개방(Gate 2 시뮬) — 프로덕션은 env 없으면 404(fail-closed 유지)
   mockPgSecret: process.env.PACEFOLIO_MOCKPG_SECRET ?? (isProd ? undefined : "dev-mockpg-secret"),
   webhookVerifiers: {}, // 실 PG adapter 연동 시 provider 별 raw-body 서명 verifier 등록
+  // #19: 스토리지 어댑터 — 사업자 결정 전엔 dev 인메모리만(프로덕션 미주입 = 사진 라우트 501)
+  storage: isProd ? undefined : (await import("./storage/adapter")).createDevMemoryStorage(),
 });
 
 const port = Number(process.env.PORT ?? 3001);

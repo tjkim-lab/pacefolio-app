@@ -1,6 +1,6 @@
 /* PACEFOLIO API — Hono 앱 조립 (api/openapi.yaml auth 섹션 구현)
    테스트는 app.request() 인메모리 — 서버 기동 불필요(PGlite 조합). */
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
 import type { Db } from "./sessions/service";
@@ -29,6 +29,11 @@ import {
 } from "./billing/issue";
 import { publishNotice, markNoticeRead, listNotices } from "./notices/service";
 import { reportIncident, listIncidents } from "./safety/service";
+import {
+  upsertPhotoConsent, revokePhotoConsent, getPhotoConsent,
+  createPhotoUpload, finalizePhoto, getPhotoDownload,
+} from "./photos/service";
+import type { StorageAdapter } from "./storage/adapter";
 import { createAcademy, inviteMember, acceptInvite, listMembers } from "./academies/service";
 import { preparePayment, processPgWebhook } from "./billing/service";
 import { requestRefund, approveRefund, processRefundWebhook } from "./billing/refunds";
@@ -57,6 +62,8 @@ export interface ApiConfig {
   enableMockPg?: boolean;
   /** mockpg 전용 공유 시크릿 — enableMockPg 시 필수(없으면 mockpg 도 404) */
   mockPgSecret?: string;
+  /** 사진 스토리지 어댑터(#19) — 미주입 시 사진 라우트 501(사업자 결정 대기, fail-closed) */
+  storage?: StorageAdapter;
 }
 
 const PROVIDER_NAMES: readonly OAuthProviderName[] = ["kakao", "naver", "google", "apple"];
@@ -615,6 +622,133 @@ export function createApp(cfg: ApiConfig) {
         return c.json({ error: "ACTIVE_PAYMENT_ATTEMPT_EXISTS", paymentId: r.paymentId }, 409);
       case "DENIED": return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
     }
+  });
+
+  /* ── 사진 파이프라인 사전 코어(#19) — 동의는 초안 계약(GET/PUT+If-Match·revocations) 구현 ── */
+  const ConsentBody = z.object({
+    grants: z.array(z.object({
+      purpose: z.enum(["INDIVIDUAL_DELIVERY", "CLASS_SHARE", "INTERNAL_RECORD", "ACADEMY_PROMOTION", "EXTERNAL_AD", "SNS_POST"]),
+      audience: z.enum(["GUARDIAN_ONLY", "CLASS_MEMBERS", "ACADEMY_INTERNAL", "PUBLIC"]),
+    })).max(24),
+    policyVersion: z.string().min(1).max(20),
+    channel: z.string().min(1).max(40),
+  }).strict();
+
+  app.get("/academies/:academyId/participants/:participantId/photo-consent", guard, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await getPhotoConsent(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, participantId: c.req.param("participantId")!,
+    });
+    if (!r) return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json(r);
+  });
+
+  app.put("/academies/:academyId/participants/:participantId/photo-consent", guard, csrf, academyCtx, async (c) => {
+    const parsed = ConsentBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const ifMatch = c.req.header("if-match");
+    const auth = c.get("auth");
+    const r = await upsertPhotoConsent(cfg.db, {
+      actorUserId: auth.userId,
+      academyId: c.req.param("academyId")!, participantId: c.req.param("participantId")!,
+      ...parsed.data,
+      ifMatchVersion: ifMatch !== undefined ? Number(ifMatch) : undefined,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "INVALID_BODY", reason: r.reason }, 422);
+    if (r.kind === "VERSION_CONFLICT") return c.json({ error: "VERSION_CONFLICT", currentVersion: r.currentVersion }, 409);
+    return c.json({ consentId: r.consentId, version: r.version }, 200);
+  });
+
+  app.post("/academies/:academyId/participants/:participantId/photo-consent/revocations", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth");
+    const r = await revokePhotoConsent(cfg.db, {
+      actorUserId: auth.userId,
+      academyId: c.req.param("academyId")!, participantId: c.req.param("participantId")!,
+    }, now());
+    if (r.kind !== "OK") {
+      if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+      return c.json({ error: "NOT_FOUND" }, 404);
+    }
+    return c.json({ consentId: r.consentId }, 201);
+  });
+
+  /* 사진 자산 — 어댑터 미주입 = 501(사업자 결정 대기, 침묵 저장 금지) */
+  const requireStorage = (c: Context<GuardEnv>) =>
+    cfg.storage ? null : c.json({ error: "STORAGE_NOT_CONFIGURED" }, 501);
+
+  const PhotoUploadBody = z.object({
+    sessionId: z.string().min(1).max(64).optional(),
+    contentType: z.string().min(1).max(100),
+    byteSize: z.number().int().positive(),
+  }).strict();
+  app.post("/academies/:academyId/photos", guard, csrf, academyCtx, async (c) => {
+    const blocked = requireStorage(c); if (blocked) return blocked;
+    const parsed = PhotoUploadBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await createPhotoUpload(cfg.db, cfg.storage!, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ photoId: r.photoId, upload: r.upload }, 201);
+  });
+
+  const PhotoFinalizeBody = z.object({
+    participantIds: z.array(z.string().min(1).max(64)).max(50),
+    purpose: z.enum(["INDIVIDUAL_DELIVERY", "CLASS_SHARE", "INTERNAL_RECORD", "ACADEMY_PROMOTION", "EXTERNAL_AD", "SNS_POST"]),
+    audience: z.enum(["GUARDIAN_ONLY", "CLASS_MEMBERS", "ACADEMY_INTERNAL", "PUBLIC"]),
+  }).strict();
+  app.post("/academies/:academyId/photos/:photoId/finalize", guard, csrf, academyCtx, async (c) => {
+    const blocked = requireStorage(c); if (blocked) return blocked;
+    const parsed = PhotoFinalizeBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await finalizePhoto(cfg.db, cfg.storage!, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, photoId: c.req.param("photoId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    if (r.kind === "CONSENT_BLOCKED") {
+      // "동의 없는 원생 제외"의 서버 강제 — 차단 명단 반환(제거 또는 추가 동의 유도)
+      return c.json({ error: "CONSENT_REQUIRED", blockedParticipantIds: r.blockedParticipantIds }, 422);
+    }
+    return c.json({ photoId: r.photoId }, 200);
+  });
+
+  app.get("/academies/:academyId/photos/:photoId/url", guard, academyCtx, async (c) => {
+    const blocked = requireStorage(c); if (blocked) return blocked;
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await getPhotoDownload(cfg.db, cfg.storage!, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, photoId: c.req.param("photoId")!,
+    }, now());
+    if (!r) return c.json({ error: "NOT_FOUND" }, 404); // 권한 없음 포함 — 존재 은닉
+    return c.json(r);
+  });
+
+  /* dev 전용 스토리지 표면(비영속) — devLogin 과 같은 게이트, 프로덕션 404 */
+  app.put("/dev-storage/:key", async (c) => {
+    if (!cfg.enableDevLogin || process.env.NODE_ENV === "production") return c.json({ error: "NOT_FOUND" }, 404);
+    const st = cfg.storage as (StorageAdapter & { objects?: Map<string, { contentType: string; byteSize: number }> }) | undefined;
+    if (!st?.objects) return c.json({ error: "NOT_FOUND" }, 404);
+    const body = await c.req.arrayBuffer();
+    st.objects.set(decodeURIComponent(c.req.param("key")!), {
+      contentType: c.req.header("content-type") ?? "application/octet-stream",
+      byteSize: body.byteLength,
+    });
+    return c.body(null, 204);
+  });
+  app.get("/dev-storage/:key", async (c) => {
+    if (!cfg.enableDevLogin || process.env.NODE_ENV === "production") return c.json({ error: "NOT_FOUND" }, 404);
+    const st = cfg.storage as (StorageAdapter & { objects?: Map<string, { contentType: string; byteSize: number }> }) | undefined;
+    const obj = st?.objects?.get(decodeURIComponent(c.req.param("key")!));
+    if (!obj) return c.json({ error: "NOT_FOUND" }, 404);
+    return c.body("dev-object", 200, { "content-type": obj.contentType });
   });
 
   /* 안전사고 기록(#32) — 발생 시각 = 서버, 기록·열람 전부 감사 */

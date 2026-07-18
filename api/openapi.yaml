@@ -522,7 +522,7 @@ paths:
   /academies/{academyId}/participants/{participantId}/photo-consent:
     get:
       tags: [consent]
-      summary: 현재 동의 상태(grants) 조회 (계약 초안 — 미구현)
+      summary: 현재 동의 상태(grants) 조회 — staff·VERIFIED 보호자(#19 구현)
       parameters:
         - $ref: '#/components/parameters/AcademyId'
         - $ref: '#/components/parameters/ParticipantId'
@@ -530,7 +530,7 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PhotoConsentRecord' } } } }
     put:
       tags: [consent]
-      summary: 동의 갱신 — 목적×대상 grant 쌍 + 정책버전. If-Match 로 동시수정 방지. (계약 초안 — 미구현)
+      summary: 동의 갱신 — 목적×대상 grant 쌍 + 정책버전. If-Match(version) 불일치 = 409. VERIFIED 보호자만(#19 구현)
       parameters:
         - $ref: '#/components/parameters/AcademyId'
         - $ref: '#/components/parameters/ParticipantId'
@@ -544,7 +544,7 @@ paths:
   /academies/{academyId}/participants/{participantId}/photo-consent/revocations:
     post:
       tags: [consent]
-      summary: 동의 철회 — 이후 모든 발송 차단(canSendPhoto). 발송시점 재검증은 서버 의무. (계약 초안 — 미구현)
+      summary: 동의 철회 — 이후 발송·finalize 차단(canSendPhotoAsset 재검증). 멱등(#19 구현)
       parameters:
         - $ref: '#/components/parameters/AcademyId'
         - $ref: '#/components/parameters/ParticipantId'
@@ -575,6 +575,44 @@ paths:
         - { name: deletionRequestId, in: path, required: true, schema: { type: string } }
       responses:
         '204': { description: 취소됨 }
+
+  # ── 사진 파이프라인 사전 코어(#19) — 스토리지 어댑터 미주입 시 전부 501(fail-closed) ──
+  /academies/{academyId}/photos:
+    post:
+      tags: [photos]
+      summary: 업로드 의도 — 코치·staff. PENDING_UPLOAD 자산 + 어댑터 업로드 타깃(presigned 계약)
+      parameters: [{ $ref: '#/components/parameters/AcademyId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [contentType, byteSize], properties: { sessionId: { type: string }, contentType: { type: string, example: image/jpeg }, byteSize: { type: integer, maximum: 26214400 } } } } }
+      responses:
+        '201': { description: 'photoId + upload{url,method,headers,expiresAt}' }
+        '501': { description: STORAGE_NOT_CONFIGURED — 사업자 결정 대기 }
+  /academies/{academyId}/photos/{photoId}/finalize:
+    post:
+      tags: [photos]
+      summary: >
+        확정 — 등장 원생 태그 + 목적×대상. 동의 게이트(canSendPhotoAsset)가 서버에서 강제:
+        미동의 원생 있으면 422 CONSENT_REQUIRED + blockedParticipantIds(제거 또는 추가 동의 유도)
+      parameters:
+        - { $ref: '#/components/parameters/AcademyId' }
+        - { name: photoId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [participantIds, purpose, audience], properties: { participantIds: { type: array, items: { type: string } }, purpose: { type: string }, audience: { type: string } } } } }
+      responses:
+        '200': { description: UPLOADED 확정 }
+        '422': { description: 'CONSENT_REQUIRED(+blockedParticipantIds) 또는 검증 실패' }
+  /academies/{academyId}/photos/{photoId}/url:
+    get:
+      tags: [photos]
+      summary: 열람 URL — staff·업로더·보호자(자기 자녀 태그+canReceivePhotos, 열람 감사). 권한 없음 = 404 은닉
+      parameters:
+        - { $ref: '#/components/parameters/AcademyId' }
+        - { name: photoId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 'url(단기)·contentType' }
+        '404': { description: 없음 또는 권한 없음 }
 
   /academies/{academyId}/incidents:
     post:

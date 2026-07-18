@@ -30,7 +30,7 @@
 |---|---|---|
 | 코치·원장 소통 실연결 | 공지 ACK·전달사항·READ/ACK/RESOLVE 를 Batch 14 chat API 로 — setTimeout 가짜 상태 제거 | P0-3 일부, P1 |
 | 안전사고 기록 백엔드 | incidents 테이블 + AuditLog + 원장 알림 Outbox + C2 IncidentSheet 연결(고정 시각 제거) | C2 안전 FAIL |
-| 리포트·사진 파이프라인 | 스토리지·signed URL·동의 서버 조회·발송 멱등 — **#19 와 묶음**(스토리지 결정 대기) | C3 FAIL |
+| 리포트·사진 파이프라인 | **사전 코어 완료**: 동의 영속화(PUT+If-Match·철회)·photo_assets·어댑터 경계(dev 구현)·**동의 게이트 서버 강제**(finalize 422+차단 명단)·열람 권한+감사·미주입 501. 잔여 = 실 사업자 어댑터 1개 + 코치 C3 화면 연결(스토리지 결정 대기) | C3 FAIL → 코어 해소 |
 | UI_ONLY 정직 표시 | fixture 화면 데모 배지·"(데모)" 토스트 일관 규약 — **디자인 터미널과 협의**(비주얼 규약) | P0-1 |
 | Playwright E2E | 핵심 여정(출석 저장 차단·결제 완료 판정·정지 차단 등) 브라우저 검증 | §7, 13B P1-1 |
 | AudienceFilter 공용 확장 | 공지·수납·대회·CSV 재사용(현재 원생 화면만) | P1 |
