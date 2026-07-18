@@ -855,6 +855,44 @@ paths:
       responses:
         '204': { description: 해제됨 }
         '404': { description: 학원 없음 또는 비관리자(은닉) }
+  /admin/academies/{academyId}/subscription/status:
+    post:
+      tags: [admin]
+      summary: 구독 상태 전이(#39-④) — 상태머신 강제(TRIAL·PAST_DUE 도달 경로), ledger 기록·멱등
+      parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [TRIAL, ACTIVE, PAST_DUE, CANCELED] }, reason: { type: string, maxLength: 300 } } } } }
+      responses:
+        '200': { description: 전이됨 }
+        '404': { description: 구독 없음 또는 비관리자(은닉) }
+        '409': { description: 상태머신 밖 전이 }
+  /admin/academies/{academyId}/subscription/ledger:
+    get:
+      tags: [admin]
+      summary: 구독 이력 ledger(#39-④) — append-only(플랜·가격·상태 전 변화), 최근 100
+      parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: ledger 배열 }
+  /admin/naver/search:
+    get:
+      tags: [admin]
+      summary: 네이버 검색 래퍼(#39-⑥ HQ-2) — blog|news|webkr. env 미설정 = 501 fail-closed
+      parameters:
+        - { name: type, in: query, required: true, schema: { type: string, enum: [blog, news, webkr] } }
+        - { name: q, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 네이버 응답 원문 }
+        '501': { description: NAVER_NOT_CONFIGURED }
+        '502': { description: UPSTREAM_FAILED }
+  /admin/naver/datalab:
+    post:
+      tags: [admin]
+      summary: 데이터랩 검색어 트렌드(#39-⑥) — 키워드 그룹 1~5. 성장판·매거진 키워드 검증용
+      responses:
+        '200': { description: 트렌드 결과 }
+        '501': { description: NAVER_NOT_CONFIGURED }
+
   /admin/support-views:
     get:
       tags: [admin]

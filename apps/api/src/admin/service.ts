@@ -8,7 +8,8 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import {
   SUBSCRIPTION_PRICE_KRW, SUBSCRIPTION_PLAN, SUPPORT_VIEW_RESOURCES,
-  type SubscriptionPlan, type SupportViewResource,
+  canTransitionSubscriptionStatus,
+  type SubscriptionPlan, type SubscriptionStatus, type SupportViewResource,
 } from "@pacefolio/domain";
 import { newId } from "../crypto";
 import { recordAudit } from "../audit";
@@ -126,7 +127,65 @@ export async function listAcademiesOverview(db: Db) {
   });
 }
 
-/* ── ② 구독 — 학원당 1행, 지정 = upsert(가격 스냅샷) ───── */
+/* ── ② 구독 — 학원당 1행, 지정 = upsert(가격 스냅샷) ─────
+   #39-④: 모든 변화는 append-only ledger 행으로(감사 detail 이 아니라 구조화 이력) */
+
+type LedgerEntry = {
+  academyId: string; subscriptionId: string; eventType: string;
+  fromPlan?: string | null; toPlan?: string | null;
+  fromPriceKrw?: number | null; toPriceKrw?: number | null;
+  fromStatus?: string | null; toStatus?: string | null;
+  actorUserId: string; reason?: string;
+};
+async function recordLedger(tx: Db, e: LedgerEntry, nowISO: string) {
+  await tx.insert(s.subscriptionLedger).values({
+    id: newId("sl"), academyId: e.academyId, subscriptionId: e.subscriptionId,
+    eventType: e.eventType,
+    fromPlan: e.fromPlan ?? null, toPlan: e.toPlan ?? null,
+    fromPriceKrw: e.fromPriceKrw ?? null, toPriceKrw: e.toPriceKrw ?? null,
+    fromStatus: e.fromStatus ?? null, toStatus: e.toStatus ?? null,
+    actorUserId: e.actorUserId, reason: e.reason, createdAt: nowISO,
+  });
+}
+
+/** 상태 전이(#39-④) — 죽은 상태(TRIAL·PAST_DUE) 도달 경로. 상태머신 강제. */
+export async function setSubscriptionStatus(db: Db, input: {
+  actorUserId: string; academyId: string; status: SubscriptionStatus; reason?: string;
+}, nowISO: string): Promise<AdminResult<{ subscriptionId: string }> | { kind: "CONFLICT"; reason: string }> {
+  return db.transaction(async (tx) => {
+    const sub = (await tx.select().from(s.academySubscriptions)
+      .where(eq(s.academySubscriptions.academyId, input.academyId)).for("update"))[0];
+    if (!sub) return { kind: "NOT_FOUND" as const };
+    const from = sub.status as SubscriptionStatus;
+    if (from === input.status) return { kind: "OK" as const, subscriptionId: sub.id }; // 멱등
+    if (!canTransitionSubscriptionStatus(from, input.status)) {
+      return { kind: "CONFLICT" as const, reason: `상태 전이 불가: ${from} → ${input.status}` };
+    }
+    await tx.update(s.academySubscriptions).set({
+      status: input.status,
+      canceledAt: input.status === "CANCELED" ? nowISO : null,
+      updatedAt: nowISO, version: sql`${s.academySubscriptions.version} + 1`,
+    }).where(eq(s.academySubscriptions.id, sub.id));
+    await recordLedger(tx, {
+      academyId: input.academyId, subscriptionId: sub.id, eventType: "STATUS_CHANGED",
+      fromStatus: from, toStatus: input.status,
+      actorUserId: input.actorUserId, reason: input.reason,
+    }, nowISO);
+    await recordAudit(tx, {
+      academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
+      action: "subscription.status_changed", targetType: "AcademySubscription", targetId: sub.id,
+      reason: input.reason, detail: { from, to: input.status }, success: true,
+    }, nowISO);
+    return { kind: "OK" as const, subscriptionId: sub.id };
+  });
+}
+
+export async function listSubscriptionLedger(db: Db, academyId: string) {
+  return db.select().from(s.subscriptionLedger)
+    .where(eq(s.subscriptionLedger.academyId, academyId))
+    .orderBy(desc(s.subscriptionLedger.createdAt))
+    .limit(100);
+}
 
 export async function setSubscription(db: Db, input: {
   actorUserId: string; academyId: string; plan: SubscriptionPlan;
@@ -159,6 +218,14 @@ export async function setSubscription(db: Db, input: {
         startedAt: nowISO, createdAt: nowISO, updatedAt: nowISO,
       });
     }
+    await recordLedger(tx, {
+      academyId: input.academyId, subscriptionId,
+      eventType: prev ? (prev.status === "CANCELED" ? "REACTIVATED" : "PLAN_CHANGED") : "CREATED",
+      fromPlan: prev?.plan ?? null, toPlan: input.plan,
+      fromPriceKrw: prev?.priceKrwMonthly ?? null, toPriceKrw: price,
+      fromStatus: prev?.status ?? null, toStatus: "ACTIVE",
+      actorUserId: input.actorUserId,
+    }, nowISO);
     await recordAudit(tx, {
       academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
       action: "subscription.set", targetType: "AcademySubscription", targetId: subscriptionId,
@@ -185,6 +252,13 @@ export async function cancelSubscription(db: Db, input: {
         status: "CANCELED", canceledAt: nowISO, updatedAt: nowISO,
         version: sql`${s.academySubscriptions.version} + 1`,
       }).where(eq(s.academySubscriptions.id, sub.id));
+      await recordLedger(tx, {
+        academyId: input.academyId, subscriptionId: sub.id, eventType: "CANCELED",
+        fromPlan: sub.plan, toPlan: sub.plan,
+        fromPriceKrw: sub.priceKrwMonthly, toPriceKrw: sub.priceKrwMonthly,
+        fromStatus: sub.status, toStatus: "CANCELED",
+        actorUserId: input.actorUserId, reason: input.reason,
+      }, nowISO);
       await recordAudit(tx, {
         academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
         action: "subscription.canceled", targetType: "AcademySubscription", targetId: sub.id,

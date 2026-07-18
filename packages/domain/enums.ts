@@ -90,6 +90,17 @@ export const SUBSCRIPTION_PRICE_KRW: Record<SubscriptionPlan, number> = {
 };
 export const SUBSCRIPTION_STATUS = ["TRIAL", "ACTIVE", "PAST_DUE", "CANCELED"] as const;
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUS)[number];
+/* #39-④: 죽은 상태(TRIAL·PAST_DUE) 도달 경로 = 상태머신 + admin 전이 API.
+   자동 전이(체험 만료·미납 판정)는 구독 실 결제 연동 후 워커로. */
+const SUBSCRIPTION_NEXT: Record<SubscriptionStatus, readonly SubscriptionStatus[]> = {
+  TRIAL: ["ACTIVE", "CANCELED"],
+  ACTIVE: ["PAST_DUE", "CANCELED"],
+  PAST_DUE: ["ACTIVE", "CANCELED"],
+  CANCELED: ["ACTIVE"], // 재활성 — 이력은 ledger 보존
+};
+export function canTransitionSubscriptionStatus(from: SubscriptionStatus, to: SubscriptionStatus): boolean {
+  return SUBSCRIPTION_NEXT[from].includes(to);
+}
 
 /* SupportView 열람 범위의 정본 = authorization.ts SUPPORT_VIEW_RESOURCES (중복 정의 금지 — 세션 리뷰) */
 

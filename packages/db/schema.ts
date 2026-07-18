@@ -709,6 +709,26 @@ export const academySubscriptions = pgTable("academy_subscriptions", {
   check("ck_subscription_price", sql`${t.priceKrwMonthly} > 0 AND ${t.priceKrwMonthly} <= 10000000`),
 ]);
 
+/* 구독 이력 ledger(#39-④) — append-only. 플랜·가격·상태의 모든 변화가 행으로 남는다
+   (감사 detail 이 아니라 구조화 이력 — 정산·CS·grandfather 근거) */
+export const subscriptionLedger = pgTable("subscription_ledger", {
+  id: text("id").primaryKey(),                     // sl_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  subscriptionId: text("subscription_id").notNull().references(() => academySubscriptions.id),
+  eventType: text("event_type").notNull(),         // CREATED|PLAN_CHANGED|STATUS_CHANGED|CANCELED|REACTIVATED
+  fromPlan: text("from_plan"),
+  toPlan: text("to_plan"),
+  fromPriceKrw: integer("from_price_krw"),
+  toPriceKrw: integer("to_price_krw"),
+  fromStatus: text("from_status"),
+  toStatus: text("to_status"),
+  actorUserId: text("actor_user_id").notNull().references(() => users.id),
+  reason: text("reason"),
+  createdAt: createdAt(),
+}, (t) => [
+  index("ix_subledger_academy_created").on(t.academyId, t.createdAt),
+]);
+
 /* SupportView — 플랫폼 관리자의 테넌트 내부 열람은 세션 단위로만
    (domain authorization.ts 설계의 DB 정본): 사유 필수 · 시간 제한 · 철회 가능 · 전 이력 감사 */
 export const supportViews = pgTable("support_views", {

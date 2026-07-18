@@ -10,9 +10,12 @@ import type { ProviderRegistry, OAuthProviderName } from "./auth/provider";
 import { requireSession, requireCsrf, requireAcademyContext, requireAcademyAlive, requirePlatformAdmin, SESSION_COOKIE, CSRF_COOKIE, type GuardEnv } from "./guard";
 import {
   getPlatformOverview, listAcademiesOverview, setSubscription, cancelSubscription,
+  setSubscriptionStatus, listSubscriptionLedger,
   issueSupportView, revokeSupportView, listSupportViews,
   suspendAcademy, unsuspendAcademy, adminRevokeUserSessions,
 } from "./admin/service";
+import { rateLimit } from "./rate-limit";
+import { naverFromEnv } from "./naver/service";
 import { requestGuardianLink } from "./linking/service";
 import { revokeGuardianLink } from "./linking/revoke";
 import {
@@ -83,6 +86,15 @@ export function createApp(cfg: ApiConfig) {
   const now = cfg.now ?? (() => new Date().toISOString());
   const secure = cfg.secureCookies ?? true;
   const app = new Hono<GuardEnv>();
+  /* #39-⑤ 오류 형식 표준(§24): 전 오류 = { error: CODE(, reason) } JSON.
+     미처리 예외는 원문 비노출(로그만) — 스택·내부 메시지 유출 금지 */
+  app.onError((err, c) => {
+    console.error(`[api] unhandled: ${err instanceof Error ? err.message : err}`);
+    return c.json({ error: "INTERNAL" }, 500);
+  });
+  app.notFound((c) => c.json({ error: "NOT_FOUND" }, 404));
+  /* #39-⑤ rate limit(§32): 인증 표면 무차별 대입 방지 — IP 기준 슬라이딩 윈도 */
+  const authLimit = rateLimit({ windowMs: 60_000, max: 30, keyPrefix: "auth" });
   const guard = requireSession(cfg.db, now);
   const csrf = requireCsrf(cfg.allowedOrigins);
   const academyCtx = requireAcademyContext(cfg.db, now);
@@ -101,7 +113,7 @@ export function createApp(cfg: ApiConfig) {
   };
 
   /* ── 인증 시작 ── */
-  app.post("/auth/:provider/start", async (c) => {
+  app.post("/auth/:provider/start", authLimit, async (c) => {
     const name = c.req.param("provider") as OAuthProviderName;
     if (!PROVIDER_NAMES.includes(name)) return c.json({ error: "UNKNOWN_PROVIDER" }, 404);
     const provider = cfg.providers[name];
@@ -111,7 +123,7 @@ export function createApp(cfg: ApiConfig) {
   });
 
   /* ── OAuth callback — state 원자적 소비 → code 교환 → 세션 발급 ── */
-  app.get("/auth/:provider/callback", async (c) => {
+  app.get("/auth/:provider/callback", authLimit, async (c) => {
     const name = c.req.param("provider") as OAuthProviderName;
     const provider = cfg.providers[name];
     if (!provider) return c.json({ error: "PROVIDER_NOT_CONFIGURED" }, 501);
@@ -133,7 +145,7 @@ export function createApp(cfg: ApiConfig) {
      게이트: enableDevLogin && NODE_ENV !== production — 프로덕션은 404
      (PG_SIMULATION 과 같은 패턴). 결정적 userId = 이름 기반 seed 사용자 재사용. */
   const DevLoginBody = z.object({ name: z.string().min(1).max(30) }).strict();
-  app.post("/auth/dev/login", async (c) => {
+  app.post("/auth/dev/login", authLimit, async (c) => {
     if (!cfg.enableDevLogin || process.env.NODE_ENV === "production") {
       return c.json({ error: "NOT_FOUND" }, 404);
     }
@@ -1396,6 +1408,56 @@ export function createApp(cfg: ApiConfig) {
     reason: z.string().min(1).max(500),
     minutes: z.number().int().min(5).max(60).optional(),
   }).strict();
+  /* #39-④: 구독 상태 전이(상태머신 강제) + append-only ledger 조회 */
+  const SubStatusBody = z.object({
+    status: z.enum(["TRIAL", "ACTIVE", "PAST_DUE", "CANCELED"]),
+    reason: z.string().max(300).optional(),
+  }).strict();
+  app.post("/admin/academies/:academyId/subscription/status", guard, adminOnly, csrf, async (c) => {
+    const parsed = SubStatusBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const r = await setSubscriptionStatus(cfg.db, {
+      actorUserId: c.get("auth").userId,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "NOT_FOUND") return c.json({ error: "NOT_FOUND" }, 404);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    if (r.kind === "INVALID") return c.json({ error: "INVALID_BODY" }, 422);
+    return c.json({ subscriptionId: r.subscriptionId }, 200);
+  });
+  app.get("/admin/academies/:academyId/subscription/ledger", guard, adminOnly, async (c) =>
+    c.json({ ledger: await listSubscriptionLedger(cfg.db, c.req.param("academyId")!) }));
+
+  /* #39-⑥(HQ-2): 네이버 검색·데이터랩 — 본부 전용, env 미설정 = 501 fail-closed */
+  const naver = naverFromEnv();
+  app.get("/admin/naver/search", guard, adminOnly, async (c) => {
+    if (!naver) return c.json({ error: "NAVER_NOT_CONFIGURED" }, 501);
+    const type = c.req.query("type"); const q = c.req.query("q");
+    if (!q || !["blog", "news", "webkr"].includes(type ?? "")) {
+      return c.json({ error: "INVALID_BODY", reason: "type=blog|news|webkr, q 필수" }, 422);
+    }
+    try {
+      return c.json({ result: await naver.search(type as "blog", q) });
+    } catch { return c.json({ error: "UPSTREAM_FAILED" }, 502); }
+  });
+  const DatalabBody = z.object({
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    timeUnit: z.enum(["date", "week", "month"]),
+    keywordGroups: z.array(z.object({
+      groupName: z.string().min(1).max(40),
+      keywords: z.array(z.string().min(1).max(40)).min(1).max(5),
+    })).min(1).max(5),
+  }).strict();
+  app.post("/admin/naver/datalab", guard, adminOnly, csrf, async (c) => {
+    if (!naver) return c.json({ error: "NAVER_NOT_CONFIGURED" }, 501);
+    const parsed = DatalabBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    try {
+      return c.json({ result: await naver.datalabTrend(parsed.data) });
+    } catch { return c.json({ error: "UPSTREAM_FAILED" }, 502); }
+  });
+
   app.get("/admin/support-views", guard, adminOnly, async (c) =>
     c.json({ supportViews: await listSupportViews(cfg.db) }));
 
