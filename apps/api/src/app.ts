@@ -12,6 +12,9 @@ import { requestGuardianLink } from "./linking/service";
 import { preparePayment, processPgWebhook } from "./billing/service";
 import { requestRefund, approveRefund, processRefundWebhook } from "./billing/refunds";
 import { listGuardianInvoices } from "./billing/queries";
+import {
+  openDm, postMessage, markRead, acknowledge, resolveMessage, listRooms, listMessages,
+} from "./chat/service";
 import { sha256Hex } from "./crypto";
 
 export interface ApiConfig {
@@ -243,6 +246,101 @@ export function createApp(cfg: ApiConfig) {
     }, now());
     if (r.kind === "DENIED") return c.json({ error: "APPROVAL_REJECTED", reason: r.reason }, 409);
     return c.json({ refundId: r.refundId, status: r.status }, 200);
+  });
+
+  /* ── 배치 14: 소통(채팅) — docs/12 개정 계약 (DM·ACK 수명주기·민감 카테고리) ── */
+  const DmBody = z.object({
+    type: z.enum(["OWNER_COACH_DM", "GUARDIAN_DM"]),
+    targetUserId: z.string().min(1).max(64).optional(),
+    participantId: z.string().min(1).max(64).optional(),
+  }).strict();
+  app.post("/academies/:academyId/chat/dms", guard, csrf, academyCtx, async (c) => {
+    const parsed = DmBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth");
+    const m = c.get("membership");
+    const r = await openDm(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "DENIED") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    return c.json({ roomId: r.roomId, created: r.created }, r.created ? 201 : 200);
+  });
+
+  const ChatMsgBody = z.object({
+    kind: z.enum(["NORMAL_CHAT", "NOTICE", "ACK_REQUIRED", "URGENT_ACK_REQUIRED", "OPERATIONAL_TASK"]),
+    category: z.enum(["GENERAL", "BILLING", "HEALTH"]).default("GENERAL"),
+    body: z.string().min(1).max(2000),
+    contextCard: z.string().min(1).max(2000).optional(), // 서버 카드(JSON) — BILLING 필수
+    relatedParticipantId: z.string().min(1).max(64).optional(),
+  }).strict();
+  app.post("/academies/:academyId/chat/rooms/:roomId/messages", guard, csrf, academyCtx, async (c) => {
+    const parsed = ChatMsgBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth");
+    const m = c.get("membership");
+    const { kind: msgKind, ...rest } = parsed.data;
+    const r = await postMessage(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, roomId: c.req.param("roomId")!,
+      msgKind, ...rest,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ messageId: r.messageId, status: r.status }, 201);
+  });
+
+  app.get("/academies/:academyId/chat/rooms", guard, academyCtx, async (c) => {
+    const auth = c.get("auth");
+    const rooms = await listRooms(cfg.db, {
+      actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+    });
+    return c.json({ rooms });
+  });
+
+  app.get("/academies/:academyId/chat/rooms/:roomId/messages", guard, academyCtx, async (c) => {
+    const auth = c.get("auth");
+    const msgs = await listMessages(cfg.db, {
+      actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+      roomId: c.req.param("roomId")!,
+    });
+    if (!msgs) return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json({ messages: msgs });
+  });
+
+  app.post("/academies/:academyId/chat/messages/:messageId/read", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth");
+    const r = await markRead(cfg.db, {
+      actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+      messageId: c.req.param("messageId")!,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    return c.json({ status: r.status }, 200);
+  });
+  app.post("/academies/:academyId/chat/messages/:messageId/ack", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth");
+    const r = await acknowledge(cfg.db, {
+      actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+      messageId: c.req.param("messageId")!,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    return c.json({ status: r.status }, 200);
+  });
+
+  const ResolveBody = z.object({ note: z.string().min(1).max(1000) }).strict();
+  app.post("/academies/:academyId/chat/messages/:messageId/resolve", guard, csrf, academyCtx, async (c) => {
+    const parsed = ResolveBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth");
+    const r = await resolveMessage(cfg.db, {
+      actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+      messageId: c.req.param("messageId")!, note: parsed.data.note,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    return c.json({ status: r.status }, 200);
   });
 
   /* ── PG 웹훅 — 서명 검증은 provider 연동 시(지금은 시뮬 헤더 게이트) ── */

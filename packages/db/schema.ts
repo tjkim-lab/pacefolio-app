@@ -467,6 +467,89 @@ export const refunds = pgTable("refunds", {
   foreignKey({ name: "fk_refund_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
 ]);
 
+/* ── 배치 14: 소통(채팅) — docs/12 개정 계약 (방·멤버·메시지·ACK) ──
+   테넌트: 전부 academyId + 복합 FK. 읽음 = lastReadAt(멤버) + ack 행(메시지별).
+   READ ≠ ACKNOWLEDGED ≠ RESOLVED 를 스키마가 그대로 표현. */
+export const chatRoomTypeEnum = pgEnum("chat_room_type", [
+  "OWNER_COACH_DM", "COACH_ALL", "CLASS_COACHES", "GUARDIAN_DM", "CLASS_GUARDIANS", "ACADEMY_NOTICE",
+]);
+export const chatMessageKindEnum = pgEnum("chat_message_kind", [
+  "NORMAL_CHAT", "NOTICE", "ACK_REQUIRED", "URGENT_ACK_REQUIRED", "OPERATIONAL_TASK",
+]);
+export const chatMessageStatusEnum = pgEnum("chat_message_status", [
+  "SENT", "DELIVERED", "READ", "ACKNOWLEDGED", "RESOLVED", "CANCELLED", "EXPIRED",
+]);
+export const chatCategoryEnum = pgEnum("chat_category", ["GENERAL", "BILLING", "HEALTH"]);
+
+export const chatRooms = pgTable("chat_rooms", {
+  id: text("id").primaryKey(),                     // cr_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  type: chatRoomTypeEnum("type").notNull(),
+  title: text("title").notNull(),
+  dmKey: text("dm_key"),                           // DM 중복 방지(도메인 dmKey)
+  relatedParticipantId: text("related_participant_id"), // GUARDIAN_DM 원생 컨텍스트
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => [
+  uniqueIndex("uq_chatroom_id_academy").on(t.id, t.academyId),
+  uniqueIndex("uq_chatroom_dmkey").on(t.academyId, t.dmKey),
+  foreignKey({ name: "fk_chatroom_participant_academy", columns: [t.relatedParticipantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+]);
+
+export const chatRoomMembers = pgTable("chat_room_members", {
+  id: text("id").primaryKey(),                     // crm_xxx
+  roomId: text("room_id").notNull(),
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  userId: text("user_id").notNull().references(() => users.id),
+  role: text("role").notNull(),                    // OWNER | COACH | GUARDIAN | DESK
+  joinedAt: timestamp("joined_at", { withTimezone: true, mode: "string" }).notNull(),
+  leftAt: timestamp("left_at", { withTimezone: true, mode: "string" }),   // 퇴장 이력 보존
+  lastReadAt: timestamp("last_read_at", { withTimezone: true, mode: "string" }),
+}, (t) => [
+  uniqueIndex("uq_chatmember_room_user").on(t.roomId, t.userId),
+  index("ix_chatmember_user").on(t.userId),
+  foreignKey({ name: "fk_chatmember_room_academy", columns: [t.roomId, t.academyId], foreignColumns: [chatRooms.id, chatRooms.academyId] }),
+]);
+
+export const chatMessages = pgTable("chat_messages", {
+  id: text("id").primaryKey(),                     // cm_xxx
+  roomId: text("room_id").notNull(),
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  senderUserId: text("sender_user_id").notNull().references(() => users.id),
+  kind: chatMessageKindEnum("kind").notNull(),
+  category: chatCategoryEnum("category").notNull().default("GENERAL"),
+  status: chatMessageStatusEnum("status").notNull(),
+  body: text("body").notNull(),
+  contextCard: text("context_card"),               // 서버 생성 카드(JSON 직렬화) — BILLING 필수
+  relatedParticipantId: text("related_participant_id"),
+  resolvedNote: text("resolved_note"),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "string" }),
+  createdAt: createdAt(),
+  editedAt: timestamp("edited_at", { withTimezone: true, mode: "string" }),
+  deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "string" }), // soft — 원문 보존
+}, (t) => [
+  index("ix_chatmsg_room_created").on(t.roomId, t.createdAt),
+  uniqueIndex("uq_chatmsg_id_academy").on(t.id, t.academyId),
+  foreignKey({ name: "fk_chatmsg_room_academy", columns: [t.roomId, t.academyId], foreignColumns: [chatRooms.id, chatRooms.academyId] }),
+  foreignKey({ name: "fk_chatmsg_participant_academy", columns: [t.relatedParticipantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+  // 민감 카테고리 불변식 — 서비스가 막아도 DB 가 최종 방어
+  check("ck_chatmsg_health_participant", sql`${t.category} <> 'HEALTH' OR ${t.relatedParticipantId} IS NOT NULL`),
+  check("ck_chatmsg_billing_card", sql`${t.category} <> 'BILLING' OR ${t.contextCard} IS NOT NULL`),
+]);
+
+export const chatMessageAcks = pgTable("chat_message_acks", {
+  id: text("id").primaryKey(),                     // ack_xxx
+  messageId: text("message_id").notNull(),
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  userId: text("user_id").notNull().references(() => users.id),
+  readAt: timestamp("read_at", { withTimezone: true, mode: "string" }),
+  acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true, mode: "string" }),
+}, (t) => [
+  uniqueIndex("uq_chatack_message_user").on(t.messageId, t.userId),
+  index("ix_chatack_user").on(t.userId),
+  foreignKey({ name: "fk_chatack_message_academy", columns: [t.messageId, t.academyId], foreignColumns: [chatMessages.id, chatMessages.academyId] }),
+]);
+
 export const refundAllocations = pgTable("refund_allocations", {
   id: text("id").primaryKey(),                    // ra_xxx
   refundId: text("refund_id").notNull().references(() => refunds.id),

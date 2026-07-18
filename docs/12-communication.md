@@ -64,8 +64,13 @@ ChatMessage     id · roomId · senderUserId · body · attachments?(PhotoAsset 
 
 ## 구현 순서 제안
 1. P0(데이터 정합) — ✅ 완료: 임시 이름 제거·이름/호칭 분리·정합성 자동 테스트
-2. P1 설계 확정: 이 문서 검토 → domain 엔티티·state 추가
-3. P1 백엔드: chat 테이블(migration) + API(방 생성·메시지·읽음) + 권한 guard
+2. P1 설계 확정 — ✅ 완료: domain `chat.ts`(유형·상태머신·민감 카테고리 규칙·dmKey)
+3. P1 백엔드 — ✅ **1차 완료 (배치 14, 2026-07-18)**: migration 0010(방·멤버·메시지·ACK,
+   복합 FK + HEALTH/BILLING DB CHECK) + API 7종(DM 개설 find-or-create ·
+   메시지 · 읽음/확인/처리 분리 · 방/메시지 조회) + 감사·Outbox 합류 +
+   통합 테스트 14종(ACK 수명주기·비멤버 403·교차 테넌트·BILLING card 강제·
+   HEALTH 원생 필수). **잔여**: 단체방(COACH_ALL·CLASS_*·공지형 학원방 발송),
+   긴급 반복 알림·EXPIRED worker(notification 트랙), OpenAPI 등재
 4. P1 화면: **owner 앱에 소통 탭 신설** — ✅ 구동 목업 완료 (2026-07-17, `apps/web/app/owner/chat/`):
    하단탭 진입(안읽음 뱃지) · 대화 목록(코치 전체/반 담당/1:1 + 학부모 1:1 원생 컨텍스트 +
    코치↔학부모 관리 열람) · 대화방(업무 전달 카드 완료 전이 · 열람→참여/이관 confirm ·

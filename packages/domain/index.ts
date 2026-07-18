@@ -13,3 +13,4 @@ export * from "./guardian-linking";
 export * from "./notifications";
 export * from "./events";
 export * from "./consent";
+export * from "./chat";
