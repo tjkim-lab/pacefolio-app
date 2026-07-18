@@ -111,3 +111,26 @@ export async function acceptInvite(db: Db, input: {
     return { kind: "OK" as const, membershipId: ms.id, status: "ACTIVE" };
   });
 }
+
+/** 멤버 목록(#31) — staff 전용. 원장 코치 DM·전달사항의 대상 선택 정본.
+   ACTIVE 멤버십만, role 필터 옵션. 반환은 이름·역할까지(연락처 등 PII 미포함). */
+export async function listMembers(db: Db, input: {
+  actorRoles: readonly string[]; academyId: string; role?: string;
+}) {
+  const staff = ["OWNER", "MANAGER", "DESK"].some((r) => input.actorRoles.includes(r));
+  if (!staff) return null;
+  const rows = await db.select({
+    userId: s.academyMemberships.userId,
+    name: s.users.name,
+    roles: s.academyMemberships.roles,
+  }).from(s.academyMemberships)
+    .innerJoin(s.users, eq(s.users.id, s.academyMemberships.userId))
+    .where(and(
+      eq(s.academyMemberships.academyId, input.academyId),
+      eq(s.academyMemberships.status, "ACTIVE"),
+    ));
+  return rows
+    .filter((r) => !r.roles.includes("PLATFORM_ADMIN")) // 관리자 경계 — 테넌트 명단에 비노출
+    .filter((r) => !input.role || (r.roles as readonly string[]).includes(input.role))
+    .map((r) => ({ userId: r.userId, name: r.name, roles: r.roles }));
+}

@@ -25,6 +25,15 @@ const ATT_TO_SERVER: Record<Exclude<AttStatus, "">, string> = {
   p: "PRESENT", a: "ABSENT", l: "LATE", e: "EARLY_LEAVE",
 };
 
+/* #31: 원장 전달사항 — chat 서버 정본(READ ≠ ACKNOWLEDGED 는 코치의 실제 행동으로만) */
+export interface LiveBrief {
+  messageId: string;
+  body: string;
+  status: string;   // SENT/DELIVERED/READ → 확인 대기, ACKNOWLEDGED/RESOLVED → 확인됨
+  createdAt: string;
+  urgent: boolean;
+}
+
 interface CoachLiveCtx {
   state: CoachLiveState;
   errorMsg?: string;
@@ -34,6 +43,8 @@ interface CoachLiveCtx {
   roster: LiveRosterKid[];
   saveAttendance: (att: Record<string, AttStatus>) => Promise<{ ok: boolean; message: string }>;
   complete: () => Promise<{ ok: boolean; message: string }>;
+  brief: LiveBrief | null;
+  ackBrief: () => Promise<{ ok: boolean; message: string }>;
 }
 
 const Ctx = createContext<CoachLiveCtx | null>(null);
@@ -50,6 +61,24 @@ export function CoachLiveProvider({ children }: { children: ReactNode }) {
   const [sessionId, setSessionId] = useState<string>();
   const [sessionLabel, setSessionLabel] = useState<string>();
   const [roster, setRoster] = useState<LiveRosterKid[]>([]);
+  const [brief, setBrief] = useState<LiveBrief | null>(null);
+
+  /* 원장 DM 에서 최신 확인 필요/확인됨 전달사항을 찾는다 — 서버 상태가 정본 */
+  const loadBrief = useCallback(async (aid: string, myUserId: string) => {
+    const rooms = await api.listChatRooms(aid);
+    const dm = rooms.rooms.find((r) => r.type === "OWNER_COACH_DM");
+    if (!dm) { setBrief(null); return; }
+    const msgs = await api.listChatMessages(aid, dm.roomId);
+    const directives = msgs.messages.filter(
+      (m) => (m.kind === "ACK_REQUIRED" || m.kind === "URGENT_ACK_REQUIRED") &&
+             m.senderUserId !== myUserId && m.status !== "CANCELLED",
+    );
+    const last = directives[directives.length - 1];
+    setBrief(last ? {
+      messageId: last.messageId, body: last.body, status: last.status,
+      createdAt: last.createdAt, urgent: last.kind === "URGENT_ACK_REQUIRED",
+    } : null);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -88,6 +117,7 @@ export function CoachLiveProvider({ children }: { children: ReactNode }) {
           short: r.name.length >= 3 ? r.name.slice(1) : r.name,
           ageLabel: r.ageLabel,
         })));
+        await loadBrief(aid, me.user.id).catch(() => setBrief(null)); // 전달사항은 보조 — 실패해도 READY
         setState("READY");
       } catch (e) {
         if (!reachable) setState("FIXTURE");
@@ -124,8 +154,19 @@ export function CoachLiveProvider({ children }: { children: ReactNode }) {
     }
   }, [state, academyId, sessionId]);
 
+  const ackBrief = useCallback(async () => {
+    if (state !== "READY" || !academyId || !brief) return { ok: false, message: "실연결 아님" };
+    try {
+      const r = await api.ackChatMessage(academyId, brief.messageId);
+      setBrief({ ...brief, status: r.status }); // 서버가 돌려준 상태로만 갱신
+      return { ok: true, message: "확인 완료 — 원장님 화면에 서버 확인 시각이 표시돼요" };
+    } catch (e) {
+      return { ok: false, message: e instanceof ApiError ? `확인 실패(${e.status}: ${e.code})` : "확인 실패 — 네트워크 확인" };
+    }
+  }, [state, academyId, brief]);
+
   return (
-    <Ctx.Provider value={{ state, errorMsg, academyId, sessionId, sessionLabel, roster, saveAttendance, complete }}>
+    <Ctx.Provider value={{ state, errorMsg, academyId, sessionId, sessionLabel, roster, saveAttendance, complete, brief, ackBrief }}>
       {children}
     </Ctx.Provider>
   );

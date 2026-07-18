@@ -11,6 +11,7 @@ import { HomeBanner } from "@/components/mobile/HomeBanner";
 import { Card, Button, Tag, cn } from "@/components/ui";
 import { IconSpark } from "@/components/ui/icons";
 import { useCoach } from "./_state";
+import { useCoachLive } from "./_live";
 import {
   coach, brief, TODAY_CLASSES, CLASS_STATUS_BTN, PARENT_NOTES,
   tomorrowInfo, LIB, POLICIES, POLICY_ORDER,
@@ -19,6 +20,22 @@ import {
 
 export default function CoachToday() {
   const c = useCoach();
+  const live = useCoachLive();
+  /* #31: READY 면 원장 전달사항은 chat 서버 정본 — fixture brief·setTimeout 진행 금지 */
+  const liveBrief = live.state === "READY" ? live.brief : null;
+  const useLiveBrief = live.state === "READY";
+  const briefAcked = useLiveBrief
+    ? !!liveBrief && (liveBrief.status === "ACKNOWLEDGED" || liveBrief.status === "RESOLVED")
+    : c.briefAcked;
+  const briefBody = useLiveBrief ? liveBrief?.body ?? "" : brief.body;
+  const briefFrom = useLiveBrief ? "원장님 · 서버 전달사항 (READ ≠ 확인)" : brief.from;
+  const onAckBrief = () => {
+    if (useLiveBrief) {
+      void live.ackBrief().then((r) => c.showToast(r.message));
+      return;
+    }
+    c.ackBrief();
+  };
   const total = c.tomorrow.reduce((s, id) => s + (LIB.find((a) => a.id === id)?.d ?? 0), 0);
   const pol = POLICIES[c.policy];
   const [tomorrowOpen, setTomorrowOpen] = useState(false);
@@ -98,32 +115,35 @@ export default function CoachToday() {
           />
         </div>
 
-        {/* ② 필수 확인 공지 — 확인 버튼 전까지 유지 (READ ≠ ACKNOWLEDGED) */}
+        {/* ② 필수 확인 공지 — 확인 버튼 전까지 유지 (READ ≠ ACKNOWLEDGED)
+            #31: 실연결 시 서버 전달사항만 표시(없으면 카드 자체를 숨김 — 데모 위장 금지) */}
+        {(!useLiveBrief || liveBrief) && (
         <Card
           className={cn(
             "border-l-4",
-            c.briefAcked ? "border-l-accent" : "border-l-warn bg-warn-weak",
+            briefAcked ? "border-l-accent" : "border-l-warn bg-warn-weak",
           )}
         >
-          <div className={cn("flex items-center gap-1.5 text-[11px] font-extrabold", c.briefAcked ? "text-accent-ink" : "text-warn-ink")}>
-            <span className={cn("h-1.5 w-1.5 rounded-full", c.briefAcked ? "bg-accent" : "bg-warn")} />
-            {c.briefAcked ? "원장 전달사항 · 확인함" : "원장 전달사항 · 확인 필요 — 화면을 봐도 확인 전엔 안 사라져요"}
+          <div className={cn("flex items-center gap-1.5 text-[11px] font-extrabold", briefAcked ? "text-accent-ink" : "text-warn-ink")}>
+            <span className={cn("h-1.5 w-1.5 rounded-full", briefAcked ? "bg-accent" : "bg-warn")} />
+            {briefAcked ? "원장 전달사항 · 확인함" : "원장 전달사항 · 확인 필요 — 화면을 봐도 확인 전엔 안 사라져요"}
           </div>
           <div className="mt-1.5 text-[13.5px] font-semibold leading-relaxed text-ink">
-            &ldquo;{brief.body}&rdquo;
+            &ldquo;{briefBody}&rdquo;
           </div>
-          <div className="mt-1.5 text-[11.5px] font-medium text-ink3">{brief.from}</div>
+          <div className="mt-1.5 text-[11.5px] font-medium text-ink3">{briefFrom}</div>
           <button
-            onClick={c.ackBrief}
-            disabled={c.briefAcked}
+            onClick={onAckBrief}
+            disabled={briefAcked}
             className={cn(
               "mt-3 w-full rounded-xl py-2.5 text-[13px] font-bold transition",
-              c.briefAcked ? "bg-accent-weak text-accent-ink" : "bg-accent-strong text-white",
+              briefAcked ? "bg-accent-weak text-accent-ink" : "bg-accent-strong text-white",
             )}
           >
-            {c.briefAcked ? "확인함 ✓ · 원장님께 확인 시각 표시됨" : "확인했어요"}
+            {briefAcked ? "확인함 ✓ · 원장님께 확인 시각 표시됨" : "확인했어요"}
           </button>
         </Card>
+        )}
 
         {/* ③ 학부모 전달사항 — 원생·수업 컨텍스트 함께 */}
         <Card>

@@ -138,15 +138,36 @@ function PCNoticeBody() {
 
   /* 코치 전달사항 */
   const [coachIdx, setCoachIdx] = useState(0);
-  const coachName = COACH_CHIPS[coachIdx].replace(" 코치", "");
+  /* #31: READY 시 코치 목록 = 서버 멤버(ACTIVE COACH) — fixture 칩은 데모 전용 */
+  const liveCoaches = live.state === "READY" ? live.coaches : [];
+  const coachChips = liveCoaches.length > 0
+    ? liveCoaches.map((c) => `${c.name} 코치`)
+    : COACH_CHIPS;
+  const coachName = coachChips[coachIdx]?.replace(" 코치", "") ?? "";
   const [coachMsg, setCoachMsg] = useState("도담이 오늘 컨디션 확인해주세요 — 어제 병원 다녀왔대요");
   const [coachSent, setCoachSent] = useState(false);
   const [coachBusy, setCoachBusy] = useState(false);
+  const [directive, setDirective] = useState<import("../_live").CoachDirective | null>(null);
 
   function sendCoach() {
     if (coachSent) return;
     if (!coachMsg.trim()) {
       toast("전달할 내용을 적어주세요");
+      return;
+    }
+    /* #31: READY = 실 전송(DM 개설 → ACK_REQUIRED) — setTimeout 가짜 전송은 데모 전용 */
+    if (live.state === "READY") {
+      const target = liveCoaches[coachIdx];
+      if (!target) { toast("재직 코치가 없어요 — 초대·수락 후 전달할 수 있어요"); return; }
+      setCoachBusy(true);
+      void (async () => {
+        const r = await live.sendCoachDirective(target.userId, coachMsg.trim(), false);
+        setCoachBusy(false);
+        if (!r.ok) { toast(r.message); return; }
+        setCoachSent(true);
+        setDirective(r.directive ?? null);
+        toast(r.message);
+      })();
       return;
     }
     setCoachBusy(true);
@@ -155,6 +176,14 @@ function PCNoticeBody() {
       setCoachSent(true);
       toast(`${coachName} 코치에게 전달됐어요`);
     }, 700);
+  }
+
+  /* 서버 상태 재조회 — READ/ACKNOWLEDGED 는 코치의 실제 행동으로만 바뀐다 */
+  async function refreshDirectiveStatus() {
+    if (!directive) return;
+    const next = await live.refreshDirective(directive).catch(() => directive);
+    setDirective(next);
+    toast(next.status === "ACKNOWLEDGED" ? "코치가 확인했어요 ✓" : `현재 상태: ${next.status}`);
   }
 
   /* 배너 */
@@ -341,7 +370,7 @@ function PCNoticeBody() {
               <span className="text-[11px] text-ink3 font-medium">수업 전 코치 앱에 떠요</span>
             </div>
             <div className="flex gap-2 flex-wrap">
-              {COACH_CHIPS.map((c, i) => (
+              {coachChips.map((c, i) => (
                 <FilterChip key={c} active={coachIdx === i} onClick={() => setCoachIdx(i)}>
                   {c}
                 </FilterChip>
@@ -366,9 +395,19 @@ function PCNoticeBody() {
                 `${coachName} 코치에게 전송`
               )}
             </Button>
-            {coachSent && (
+            {coachSent && directive && (
               <div className="mt-2.5 bg-accent-weak text-brand rounded-xl px-3.5 py-2.5 text-[12px] font-semibold leading-relaxed">
-                ✓ {coachName} 코치 앱에 표시됨 · 확인 대기 — 읽으면 &quot;확인함&quot;으로 바뀌어요
+                {directive.status === "ACKNOWLEDGED" || directive.status === "RESOLVED"
+                  ? <>✓ {coachName} 코치가 확인했어요 (서버 기준)</>
+                  : <>✓ 서버 전송됨 · 상태 {directive.status} — 코치가 &quot;확인&quot;을 눌러야 확인함이 돼요</>}
+                <button onClick={() => void refreshDirectiveStatus()} className="ml-2 underline font-bold">
+                  상태 새로고침
+                </button>
+              </div>
+            )}
+            {coachSent && !directive && (
+              <div className="mt-2.5 bg-accent-weak text-brand rounded-xl px-3.5 py-2.5 text-[12px] font-semibold leading-relaxed">
+                ✓ {coachName} 코치 앱에 표시됨 · 확인 대기 (데모) — 읽으면 &quot;확인함&quot;으로 바뀌어요
               </div>
             )}
           </div>

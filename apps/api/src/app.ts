@@ -28,7 +28,7 @@ import {
   createBillingPeriod, createInvoice, issueInvoice, voidInvoice, recordOfflinePayment,
 } from "./billing/issue";
 import { publishNotice, markNoticeRead, listNotices } from "./notices/service";
-import { createAcademy, inviteMember, acceptInvite } from "./academies/service";
+import { createAcademy, inviteMember, acceptInvite, listMembers } from "./academies/service";
 import { preparePayment, processPgWebhook } from "./billing/service";
 import { requestRefund, approveRefund, processRefundWebhook } from "./billing/refunds";
 import { listGuardianInvoices, getPaymentStatus, getBillingSummary } from "./billing/queries";
@@ -614,6 +614,17 @@ export function createApp(cfg: ApiConfig) {
         return c.json({ error: "ACTIVE_PAYMENT_ATTEMPT_EXISTS", paymentId: r.paymentId }, 409);
       case "DENIED": return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
     }
+  });
+
+  /* 멤버 목록(#31) — staff 전용. 코치 전달사항 대상 선택의 정본(PII 미포함) */
+  app.get("/academies/:academyId/members", guard, academyCtx, async (c) => {
+    const m = c.get("membership");
+    const rows = await listMembers(cfg.db, {
+      actorRoles: m.roles, academyId: c.req.param("academyId")!,
+      role: c.req.query("role"),
+    });
+    if (!rows) return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json({ members: rows });
   });
 
   /* 원장 수납 관제 집계(#25) — staff 전용, 발행·수납·미납 실 데이터 */

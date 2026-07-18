@@ -94,6 +94,28 @@ const BillingSummary = z.object({
   billedKrw: z.number().int(), capturedKrw: z.number().int(),
 });
 
+/* 소통 실연결(#31) — 원장 전달사항·코치 ACK (Batch 14 chat 계약) */
+const MemberList = z.object({
+  members: z.array(z.object({ userId: z.string(), name: z.string(), roles: z.array(z.string()) })),
+});
+const DmOpen = z.object({ roomId: z.string(), created: z.boolean() });
+const ChatSend = z.object({ messageId: z.string(), status: z.string() });
+const ChatRoomList = z.object({
+  rooms: z.array(z.object({
+    roomId: z.string(), type: z.string(), title: z.string(),
+    lastReadAt: z.string().nullable(), unacked: z.number().int(),
+  })),
+});
+const ChatMessageList = z.object({
+  messages: z.array(z.object({
+    messageId: z.string(), senderUserId: z.string(), kind: z.string(), category: z.string(),
+    status: z.string(), body: z.string(),
+    contextCard: z.string().nullable(), relatedParticipantId: z.string().nullable(),
+    resolvedNote: z.string().nullable(), createdAt: z.string(),
+  })),
+});
+const ChatAck = z.object({ status: z.string() });
+
 /* Admin 관제(#27) — PLATFORM_ADMIN 전용(비관리자 404) */
 const AdminOverview = z.object({
   academies: z.object({ total: z.number().int(), suspended: z.number().int() }),
@@ -256,6 +278,29 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
     adminUnsuspendAcademy: (academyId: string) =>
       call(z.void(), `/admin/academies/${academyId}/suspension`, {
         method: "DELETE", csrf: true,
+      }),
+    /* 소통 실연결(#31) */
+    listMembers: (academyId: string, role?: string) =>
+      call(MemberList, `/academies/${academyId}/members${role ? `?role=${role}` : ""}`),
+    openCoachDm: (academyId: string, coachUserId: string) =>
+      call(DmOpen, `/academies/${academyId}/chat/dms`, {
+        method: "POST", csrf: true,
+        body: JSON.stringify({ type: "OWNER_COACH_DM", targetUserId: coachUserId }),
+      }),
+    sendChatMessage: (
+      academyId: string, roomId: string,
+      body: { kind: string; body: string; clientMessageId?: string },
+    ) =>
+      call(ChatSend, `/academies/${academyId}/chat/rooms/${roomId}/messages`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    listChatRooms: (academyId: string) =>
+      call(ChatRoomList, `/academies/${academyId}/chat/rooms`),
+    listChatMessages: (academyId: string, roomId: string) =>
+      call(ChatMessageList, `/academies/${academyId}/chat/rooms/${roomId}/messages`),
+    ackChatMessage: (academyId: string, messageId: string) =>
+      call(ChatAck, `/academies/${academyId}/chat/messages/${messageId}/ack`, {
+        method: "POST", csrf: true,
       }),
     /* 세션 리뷰: 서버·openapi 에 있던 op 의 클라이언트 누락 보완 */
     adminRevokeUserSessions: (userId: string, reason: string) =>

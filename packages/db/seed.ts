@@ -100,4 +100,25 @@ export async function seedWondergym(db: Db, nowISO: string): Promise<void> {
     date: nowISO.slice(0, 10), startTime: "14:30", endTime: "15:30",
     createdAt: nowISO, updatedAt: nowISO,
   });
+
+  // #31: 원장→코치 전달사항 데모 — 코치 앱 홈의 필수 확인 카드가 서버 정본으로 뜨도록.
+  // dmKey 규약 = domain chat.ts (type:userIds정렬:participantId)
+  await db.insert(s.chatRooms).values({
+    id: "cr_owner_ksj", academyId: "a_wondergym", type: "OWNER_COACH_DM", title: "김선재 1:1",
+    dmKey: `OWNER_COACH_DM:${["u_owner", "u_coach_ksj"].sort().join(":")}`,
+    createdByUserId: "u_owner", createdAt: nowISO,
+  });
+  await db.insert(s.chatRoomMembers).values([
+    { id: "crm_owner", roomId: "cr_owner_ksj", academyId: "a_wondergym", userId: "u_owner", role: "OWNER", joinedAt: nowISO },
+    { id: "crm_ksj", roomId: "cr_owner_ksj", academyId: "a_wondergym", userId: "u_coach_ksj", role: "COACH", joinedAt: nowISO },
+  ]);
+  await db.insert(s.chatMessages).values({
+    id: "cm_brief_1", roomId: "cr_owner_ksj", academyId: "a_wondergym",
+    senderUserId: "u_owner", kind: "ACK_REQUIRED", category: "GENERAL", status: "SENT",
+    body: "도담이 오늘 컨디션 확인해주세요 — 어제 병원 다녀왔대요. 무리한 활동은 빼주세요.",
+    createdAt: nowISO,
+  });
+  await db.insert(s.chatMessageAcks).values({
+    id: "cma_ksj_1", messageId: "cm_brief_1", academyId: "a_wondergym", userId: "u_coach_ksj",
+  });
 }

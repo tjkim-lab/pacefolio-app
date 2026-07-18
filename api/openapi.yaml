@@ -576,6 +576,19 @@ paths:
       responses:
         '204': { description: 취소됨 }
 
+  /academies/{academyId}/members:
+    get:
+      tags: [academies]
+      summary: 멤버 목록(#31) — staff 전용. 코치 전달사항 대상 선택 정본(PII 미포함·PLATFORM_ADMIN 비노출)
+      parameters:
+        - { name: academyId, in: path, required: true, schema: { type: string } }
+        - { name: role, in: query, required: false, schema: { type: string, example: COACH } }
+      responses:
+        '200':
+          description: 멤버 목록
+          content: { application/json: { schema: { type: object, properties: { members: { type: array, items: { type: object, properties: { userId: { type: string }, name: { type: string }, roles: { type: array, items: { type: string } } } } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /academies/{academyId}/billing/summary:
     get:
       tags: [billing]

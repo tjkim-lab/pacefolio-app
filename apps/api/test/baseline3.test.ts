@@ -218,6 +218,14 @@ test("공지: 발행(보호자 receipt 생성) → 읽음(최초 시각 보존) 
   assert.equal(momList.notices[0].unread, undefined);
 });
 
+test("멤버 목록(#31): staff 는 코치 필터 조회 — 보호자 403·PLATFORM_ADMIN 비노출", async () => {
+  const r = await get(founder, `/academies/${academy}/members?role=COACH`);
+  assert.equal(r.status, 200);
+  const { members } = (await r.json()) as { members: { userId: string; name: string }[] };
+  assert.ok(members.some((m) => m.userId === newCoach.userId)); // 수락된 코치 노출
+  assert.equal((await get(mom, `/academies/${academy}/members`)).status, 403);
+});
+
 test("수납 관제 집계(#25): staff 발행·수납·미납 합 — 보호자 403", async () => {
   const r = await get(founder, `/academies/${academy}/billing/summary`);
   assert.equal(r.status, 200);
