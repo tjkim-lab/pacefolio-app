@@ -20,16 +20,13 @@ export default function PayPage() {
   const go = async () => {
     if (processing || amt === 0) return;
     if (live.live) {
-      // Gate 2: 실 API — 결제 준비(서버 금액·멱등키) → PG 시뮬 웹훅 CAPTURED → 정산 반영
+      /* 13차 B P0-1: 완료 판정 = webhook APPLY + Payment CAPTURED +
+         청구서 PAID 서버 확인 후에만. 실패·확인중은 사유와 함께 표시. */
       setProcessing(true);
-      try {
-        const ok = await live.pay();
-        if (ok) toast("결제 완료 — 서버 웹훅(CAPTURED)이 청구서를 PAID 로 확정했어요");
-      } catch {
-        toast("결제 실패 — API 로그를 확인하세요");
-      } finally {
-        setProcessing(false);
-      }
+      const r = await live.pay();
+      setProcessing(false);
+      if (r.ok) toast("결제 확정 — 서버가 CAPTURED·PAID 를 확인했어요");
+      else toast(r.message ?? "결제 실패 — 재시도하면 같은 멱등키로 안전하게 이어져요");
       return;
     }
     setProcessing(true);

@@ -10,6 +10,7 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
+    "@pacefolio/api-client": "*",
     "@pacefolio/domain": "*",
     "next": "16.2.10",
     "react": "19.2.4",

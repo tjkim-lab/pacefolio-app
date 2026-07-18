@@ -36,6 +36,12 @@ export type PrepareResult = z.infer<typeof PrepareResult>;
 
 const DevLoginResult = z.object({ userId: z.string() });
 
+const PaymentStatus = z.object({
+  paymentId: z.string(), status: z.string(), amount: z.number().int().positive(),
+  invoices: z.array(z.object({ invoiceId: z.string(), status: z.string() })),
+});
+export type PaymentStatus = z.infer<typeof PaymentStatus>;
+
 const RefundCreate = z.object({
   refundId: z.string(), requestedAmount: z.number().int().positive(), status: z.string(),
 });
@@ -111,6 +117,9 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
         method: "POST", csrf: true, idempotencyKey,
         body: JSON.stringify({ invoiceIds }),
       }),
+    /** 결제 상태 재조회(13차 B P0-1) — 완료 화면은 이 서버 진실 확인 후에만 */
+    getPayment: (academyId: string, paymentId: string) =>
+      call(PaymentStatus, `/academies/${academyId}/payments/${paymentId}`),
     /* 환불 — 요청자 = 실제 결제자 · 양측 승인(side 는 서버가 역할로 도출) */
     requestRefund: (
       academyId: string,

@@ -11,7 +11,7 @@ import { requireSession, requireCsrf, requireAcademyContext, SESSION_COOKIE, CSR
 import { requestGuardianLink } from "./linking/service";
 import { preparePayment, processPgWebhook } from "./billing/service";
 import { requestRefund, approveRefund, processRefundWebhook } from "./billing/refunds";
-import { listGuardianInvoices } from "./billing/queries";
+import { listGuardianInvoices, getPaymentStatus } from "./billing/queries";
 import {
   openDm, postMessage, markRead, acknowledge, resolveMessage, listRooms, listMessages,
 } from "./chat/service";
@@ -203,6 +203,18 @@ export function createApp(cfg: ApiConfig) {
     const auth = c.get("auth");
     const rows = await listGuardianInvoices(cfg.db, auth.userId, c.req.param("academyId")!);
     return c.json({ invoices: rows });
+  });
+
+  /* 13차 B P0-1: 결제 상태 재조회 — 완료 화면은 이 서버 진실 확인 후에만 */
+  app.get("/academies/:academyId/payments/:paymentId", guard, academyCtx, async (c) => {
+    const auth = c.get("auth");
+    const m = c.get("membership");
+    const r = await getPaymentStatus(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, paymentId: c.req.param("paymentId")!,
+    });
+    if (!r) return c.json({ error: "NOT_FOUND" }, 404);
+    return c.json(r);
   });
 
   /* ── 환불 (R7 배치 5) — 요청·양측 승인. 실행(PG 환불 API)은 provider 연동 시 ── */

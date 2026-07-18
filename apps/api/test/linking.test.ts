@@ -1,5 +1,5 @@
 /* Phase 4 통합 테스트 — 보호자 연결 vertical slice (R5 §7 Phase 4)
-   실 HTTP × 진짜 Postgres: 도메인 판정 + DB 원자성(1회 소비·UNIQUE·rollback).
+   실 HTTP × PGlite(WASM Postgres — 같은 migration·실 PostgreSQL 검증은 concurrency.pg.test.ts/CI): 도메인 판정 + DB 원자성(1회 소비·UNIQUE·rollback).
    ⚠️ 동시 20요청 경쟁은 PGlite(단일 커넥션) 불가 — CI postgres service 에서.
       여기서는 "재사용이 반드시 실패한다"의 순차 재현 + rollback 무결성 검증. */
 import { test, before, beforeEach } from "node:test";

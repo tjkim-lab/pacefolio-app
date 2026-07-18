@@ -71,16 +71,18 @@ export default function Gate2Live() {
         return `userId=${r.userId} · 세션·CSRF 쿠키 발급`;
       });
 
-      await step("③ 세션 확인 (me) — GUARDIAN membership", async () => {
+      let academy = ACADEMY;
+      await step("③ 세션 확인 (me) — GUARDIAN membership (academyId 는 세션에서 도출)", async () => {
         const me = await api.me();
-        const m = me.memberships.find((x) => x.academyId === ACADEMY);
-        if (!m?.roles.includes("GUARDIAN")) throw new Error("GUARDIAN membership 없음");
-        return `${me.user.name} · ${ACADEMY} ${m.roles.join(",")} ${m.status}`;
+        const m = me.memberships.find((x) => x.roles.includes("GUARDIAN") && x.status === "ACTIVE");
+        if (!m) throw new Error("GUARDIAN membership 없음");
+        academy = m.academyId; // P1-4: 하드코딩 대신 membership 도출
+        return `${me.user.name} · ${academy} ${m.roles.join(",")} ${m.status}`;
       });
 
       let invoiceId = "", participantId = "", total = 0;
       await step("④ 내 아이 청구서 목록 (실 DB)", async () => {
-        const list = await api.listInvoices(ACADEMY);
+        const list = await api.listInvoices(academy);
         const iv = list.invoices.find((x) => x.status === "ISSUED");
         if (!iv) throw new Error("ISSUED 청구서 없음 — API 재시작(seed 초기화) 필요");
         invoiceId = iv.invoiceId; participantId = iv.participantId; total = iv.total;
@@ -89,9 +91,10 @@ export default function Gate2Live() {
 
       let paymentId = "";
       await step("⑤ 결제 준비 (서버 금액 계산 · 멱등키)", async () => {
-        const r = await api.preparePayment(ACADEMY, [invoiceId], `pay-${uniq}`);
+        const r = await api.preparePayment(academy, [invoiceId], `pay-${uniq}`);
         paymentId = r.paymentId;
         if (r.amount !== total) throw new Error(`금액 불일치 ${r.amount} ≠ ${total}`);
+        if (r.status !== "PENDING") throw new Error(`상태 이상: ${r.status} (PENDING 이어야)`); // P0-3
         return `${r.paymentId} · ${r.amount.toLocaleString()}원 · ${r.status}`;
       });
 
@@ -100,7 +103,8 @@ export default function Gate2Live() {
           kind: "payment", providerEventId: `evt-${uniq}-cap`, paymentId,
           targetStatus: "CAPTURED", occurredAt: new Date().toISOString(),
         });
-        const list = await api.listInvoices(ACADEMY);
+        const list = await api.listInvoices(academy);
+        if (w.decision !== "APPLY") throw new Error(`decision=${w.decision} (APPLY 이어야)`); // P0-3
         const iv = list.invoices.find((x) => x.invoiceId === invoiceId);
         if (iv?.status !== "PAID") throw new Error(`webhook=${w.decision} 인데 invoice=${iv?.status}`);
         return `inbox=${w.decision ?? "?"} · invoice → PAID ✓ (정산 재계산)`;
@@ -109,7 +113,7 @@ export default function Gate2Live() {
       let refundId = "";
       await step("⑦ 환불 요청 (요청자 = 실제 결제자)", async () => {
         const r = await api.requestRefund(
-          ACADEMY,
+          academy,
           { paymentId, participantId, reasonCode: "PERSONAL", reasonText: "Gate2 수명주기 검증" },
           `ref-${uniq}`,
         );
@@ -119,8 +123,9 @@ export default function Gate2Live() {
       });
 
       await step("⑧ 보호자 측 승인 (링크 재검증 포함)", async () => {
-        const r = await api.approveRefund(ACADEMY, refundId);
-        return `status=${r.status} (보호자 승인 기록)`;
+        const r = await api.approveRefund(academy, refundId);
+        if (r.status !== "REQUESTED") throw new Error(`한쪽 승인 후 상태 이상: ${r.status}`); // P0-3
+        return `status=${r.status} (보호자 승인 기록 — 아직 상호 승인 아님)`;
       });
 
       await step("⑨ 원장 로그인 전환 — 김도윤", async () => {
@@ -130,40 +135,52 @@ export default function Gate2Live() {
       });
 
       await step("⑩ 원장 측 승인 → MUTUALLY_APPROVED (동일인 승인 금지 통과)", async () => {
-        const r = await api.approveRefund(ACADEMY, refundId);
+        const r = await api.approveRefund(academy, refundId);
         if (r.status !== "MUTUALLY_APPROVED") throw new Error(`status=${r.status}`);
         return `양측 승인 완료 · ${r.status}`;
       });
 
-      await step("⑪ 환불 웹훅 PROCESSING → COMPLETED", async () => {
-        await pgWebhook({
+      let completedAt = "";
+      await step("⑪ 환불 웹훅 PROCESSING → COMPLETED (시각 분리 · 각 APPLY 검증)", async () => {
+        // P0-3: 두 이벤트의 occurredAt 을 명확히 분리 — 같은 밀리초 경계 제거
+        const t0 = Date.now();
+        const w1 = await pgWebhook({
           kind: "refund", providerEventId: `evt-${uniq}-prc`, refundId,
-          targetStatus: "PROCESSING", occurredAt: new Date().toISOString(),
+          targetStatus: "PROCESSING", occurredAt: new Date(t0).toISOString(),
         });
-        const w = await pgWebhook({
+        if (w1.decision !== "APPLY") throw new Error(`PROCESSING decision=${w1.decision}`);
+        completedAt = new Date(t0 + 1000).toISOString();
+        const w2 = await pgWebhook({
           kind: "refund", providerEventId: `evt-${uniq}-cpl`, refundId,
-          targetStatus: "COMPLETED", occurredAt: new Date().toISOString(),
+          targetStatus: "COMPLETED", occurredAt: completedAt,
         });
-        return `inbox=${w.decision ?? "?"} · 환불 확정`;
+        if (w2.decision !== "APPLY") throw new Error(`COMPLETED decision=${w2.decision}`);
+        return `PROCESSING=APPLY · COMPLETED=APPLY ✓ (occurredAt +1s 분리)`;
       });
 
-      await step("⑫ 정산 재계산 확인 — 보호자 재로그인 후 조회", async () => {
+      await step("⑫ 정산 재계산 — 정확히 REFUNDED + Payment 서버 재조회", async () => {
         await api.logout();
         await api.devLogin("박서연");
-        const list = await api.listInvoices(ACADEMY);
+        const list = await api.listInvoices(academy);
         const iv = list.invoices.find((x) => x.invoiceId === invoiceId);
         if (!iv) throw new Error("청구서 조회 실패");
-        if (iv.status === "PAID") throw new Error("환불 후에도 PAID — 재계산 실패");
-        return `invoice → ${iv.status} ✓ (유효 납부 − 완료 환불 = 0)`;
+        // P0-3: "PAID 아님"이 아니라 전액 환불의 기대 상태를 정확히 검사
+        if (iv.status !== "REFUNDED") throw new Error(`invoice=${iv.status} (REFUNDED 이어야)`);
+        const ps = await api.getPayment(academy, paymentId);
+        if (ps.status !== "REFUNDED") throw new Error(`payment=${ps.status} (REFUNDED 이어야)`);
+        return `invoice → REFUNDED · payment → REFUNDED ✓ (서버 진실 이중 확인)`;
       });
 
-      await step("⑬ 웹훅 멱등 — 같은 eventId 재전송 = 중복 미적용", async () => {
+      await step("⑬ 웹훅 멱등 — 같은 eventId 재전송 = 정확히 IGNORE_ALREADY_SEEN", async () => {
         const w = await pgWebhook({
           kind: "refund", providerEventId: `evt-${uniq}-cpl`, refundId,
-          targetStatus: "COMPLETED", occurredAt: new Date().toISOString(),
+          targetStatus: "COMPLETED", occurredAt: completedAt,
         });
-        if (w.decision === "APPLY") throw new Error("중복 이벤트가 APPLIED — 멱등 실패");
-        return `decision=${w.decision} ✓ (inbox UNIQUE)`;
+        // P0-3: "APPLY 아님"은 느슨 — RECONCILE·REJECT 도 실패다
+        if (w.decision !== "IGNORE_ALREADY_SEEN") {
+          throw new Error(`decision=${w.decision} (IGNORE_ALREADY_SEEN 이어야)`);
+        }
+        return `decision=IGNORE_ALREADY_SEEN ✓ (inbox UNIQUE)`;
       });
     } catch {
       /* 실패 스텝에 이미 기록됨 — 이후 스텝 중단 */

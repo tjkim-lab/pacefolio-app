@@ -237,17 +237,17 @@ paths:
   /academies/{academyId}/payments/{paymentId}:
     get:
       tags: [billing]
-      summary: 결제 상태 재조회 — 완료 URL 직접 접근 시에도 서버가 진실(P0-4) (계약 초안 — 미구현)
+      summary: 결제 상태 재조회 — 완료 화면은 이 서버 진실 확인 후에만(13차 B P0-1 구현됨)
       parameters:
         - $ref: '#/components/parameters/AcademyId'
         - { name: paymentId, in: path, required: true, schema: { type: string } }
       responses:
-        '200': { description: 'allocations + provider 상태 포함', content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '200': { description: '{ paymentId, status, amount, invoices[{invoiceId,status}] } — 결제자 본인·OWNER/DESK 만(그 외 404 존재 은닉)', content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
   /academies/{academyId}/refunds:
     post:
       tags: [billing]
-      summary: 환불 요청 — 귀속은 PaymentAllocation 기준(P0-2). 상호승인 전 실행 안 됨. (계약 초안 — 미구현, 도메인 규칙은 billing.ts 완료)
+      summary: 환불 요청 — 귀속은 PaymentAllocation 기준(P0-2). 상호승인 전 실행 안 됨. 요청액은 서버 계산(클라이언트 미입력). (구현됨)
       parameters:
         - $ref: '#/components/parameters/AcademyId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -262,19 +262,17 @@ paths:
     post:
       tags: [billing]
       summary: >
-        환불 승인 — side 는 서버가 세션 역할로 도출(요청 body 의 side 는 참고용 아님, 검증 대상).
-        동일 사용자가 양측 승인 불가(state-machines.ts canApplyRefundApproval). (계약 초안 — 미구현)
+        환불 승인 — side 는 서버가 세션 역할(OWNER=ACADEMY / GUARDIAN=보호자 측)로만 도출.
+        body 없음(클라이언트 side 주장 금지 — 13차 B P1-3 로 계약을 구현에 동기화).
+        보호자 측 = 실제 결제자만 + 승인 시점 링크 재검증(FOR UPDATE 직렬화).
+        동일 사용자가 양측 승인 불가(state-machines.ts canApplyRefundApproval). (구현됨)
       parameters:
         - $ref: '#/components/parameters/AcademyId'
         - { name: refundId, in: path, required: true, schema: { type: string } }
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content: { application/json: { schema: { type: object, required: [side], properties: { side: { type: string, enum: [GUARDIAN, ACADEMY] } } } } }
       responses:
-        '200': { description: 승인 반영(양측 완료 시 MUTUALLY_APPROVED), content: { application/json: { schema: { $ref: '#/components/schemas/Refund' } } } }
+        '200': { description: '{ refundId, status } — 양측 완료 시 MUTUALLY_APPROVED', content: { application/json: { schema: { $ref: '#/components/schemas/Refund' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: 동일인 양측 승인 시도 등, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'APPROVAL_REJECTED — 동일인 양측 승인·결제자 아님·링크 철회(운영 심사) 등', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ── PG 웹훅 (P0-3) ───────────────────────────────────────────
   /webhooks/pg/{provider}:

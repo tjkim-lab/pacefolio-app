@@ -1,4 +1,4 @@
-/* R7 배치 5 통합 테스트 — 환불 전체 라이프사이클 (실 HTTP × 진짜 Postgres)
+/* R7 배치 5 통합 테스트 — 환불 전체 라이프사이클 (실 HTTP × PGlite(WASM Postgres — 같은 migration·실 PostgreSQL 검증은 concurrency.pg.test.ts/CI))
    요청(결제자만) → 양측 승인(동일인 금지) → PROCESSING → COMPLETED 웹훅
    → Payment REFUNDED + Invoice 재계산 + outbox — 전부 원자 트랜잭션. */
 import { test, before } from "node:test";

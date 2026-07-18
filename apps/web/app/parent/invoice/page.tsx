@@ -5,14 +5,38 @@ import { useRouter } from "next/navigation";
 import { AppScroll } from "@/components/mobile/MobileShell";
 import { cn } from "@/components/ui";
 import { useParent } from "../_state";
-import { useLive, LiveBadge } from "../_live";
+import { useLive, LiveBadge, isInvoicePayable, invoiceStatusLabel } from "../_live";
 import { NoteRow, PushHeader } from "../_components";
 import { won, type ChildName } from "../_data";
 
 export default function InvoicePage() {
   const live = useLive();
   if (live.live) return <LiveInvoicePage />;
+  // P0-2: 실연결 성립 후 오류 = fixture 로 위장하지 않고 오류 화면
+  if (live.state === "LIVE_ERROR") return <LiveErrorPage />;
   return <FixtureInvoicePage />;
+}
+
+function LiveErrorPage() {
+  const live = useLive();
+  return (
+    <>
+      <PushHeader title="청구서" sub="실연결 오류" />
+      <LiveBadge />
+      <AppScroll>
+        <div className="rounded-2xl border border-line bg-surface p-5 text-center">
+          <div className="text-[36px]">⚠️</div>
+          <div className="mt-2 text-[15px] font-extrabold text-ink">청구서를 불러오지 못했어요</div>
+          <div className="mt-1.5 text-[12.5px] font-medium text-ink3">
+            {live.errorMsg} — 실제 정보 조회에 실패해 가짜 데이터를 보여주지 않아요.
+          </div>
+          <button onClick={live.retry} className="mt-4 h-11 w-full rounded-xl bg-accent-strong text-[14px] font-bold text-white">
+            다시 시도
+          </button>
+        </div>
+      </AppScroll>
+    </>
+  );
 }
 
 /* ── Gate 2: 실 API 청구서 — 금액·상태·구성 전부 서버 정본 ── */
@@ -35,18 +59,19 @@ function LiveInvoicePage() {
           <div className="px-4 pb-3">
             {live.invoices.map((iv) => (
               <div key={iv.invoiceId}>
-                <Sub>{iv.participantName} 청구 {iv.status === "PAID" ? "· 완납 ✓" : iv.status === "REFUNDED" ? "· 환불됨" : ""}</Sub>
+                {/* P1-5: 상태별 라벨 분리 — "ISSUED 아니면 완납" 단순 판정 금지 */}
+                <Sub>{iv.participantName} 청구 · {invoiceStatusLabel(iv.status)}</Sub>
                 {iv.lines.map((l) => (
                   <Line key={l.label} label={l.label} small={l.type === "DISCOUNT" ? "할인" : "수업기간 9/1~11/30"}
                     amt={`${l.amount < 0 ? "−" : l.type === "VEHICLE" ? "+" : ""}${Math.abs(l.amount).toLocaleString()}`}
                     disc={l.amount < 0} />
                 ))}
                 <InvSel
-                  name={iv.participantName.slice(1)}
+                  name={`${iv.participantName.slice(1)} (${invoiceStatusLabel(iv.status)})`}
                   amt={iv.total.toLocaleString()}
-                  paid={iv.status !== "ISSUED"}
+                  paid={!isInvoicePayable(iv.status)}
                   sel={!!live.sel[iv.invoiceId]}
-                  onToggle={() => iv.status === "ISSUED" && live.toggle(iv.invoiceId)}
+                  onToggle={() => isInvoicePayable(iv.status) && live.toggle(iv.invoiceId)}
                 />
               </div>
             ))}

@@ -1,5 +1,5 @@
 /* 배치 14 통합 테스트 — 소통(채팅) vertical slice (docs/12 개정 계약)
-   실 HTTP × 진짜 Postgres(PGlite):
+   실 HTTP × PGlite(WASM Postgres — 같은 migration·실 PostgreSQL 검증은 concurrency.pg.test.ts/CI):
    - ACK 수명주기: SENT → READ(안 사라짐) → ACKNOWLEDGED → RESOLVED
    - 민감 카테고리: BILLING = DM+context card 만 / HEALTH = 원생 지정 필수
    - 경계: 비멤버 403 · 공지형 학원방 보호자 발송 403 · DM 중복 방지 · 감사 기록 */
