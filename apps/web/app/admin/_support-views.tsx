@@ -23,14 +23,19 @@ export function SupportViewPanel() {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string>();
+  const [loadedAt, setLoadedAt] = useState(0); // 상태 판정 기준 시각 — 렌더 중 Date.now() 금지(react-compiler)
 
   const load = useCallback(async () => {
     const r = await adminApi.adminListSupportViews();
     setViews(r.supportViews);
+    setLoadedAt(Date.now());
   }, []);
 
   useEffect(() => {
-    if (live.state === "READY") load().catch(() => setMsg("이력을 불러오지 못했어요"));
+    if (live.state !== "READY") return;
+    (async () => {
+      try { await load(); } catch { setMsg("이력을 불러오지 못했어요"); }
+    })();
   }, [live.state, load]);
 
   if (live.state !== "READY") {
@@ -64,7 +69,7 @@ export function SupportViewPanel() {
     setBusy(false);
   };
 
-  const now = Date.now();
+  const now = loadedAt; // 목록 로드 시점 기준 — 액션마다 재조회되므로 충분
   return (
     <Panel title="SupportView — 학원 내부 열람 세션" note="사유 필수 · 30분 만료 · 전 이력 감사">
       <div className="flex gap-2 items-center flex-wrap">
