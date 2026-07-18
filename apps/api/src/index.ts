@@ -51,8 +51,10 @@ const app = createApp({
   // dev 는 기본 시크릿으로 mockpg 개방(Gate 2 시뮬) — 프로덕션은 env 없으면 404(fail-closed 유지)
   mockPgSecret: process.env.PACEFOLIO_MOCKPG_SECRET ?? (isProd ? undefined : "dev-mockpg-secret"),
   webhookVerifiers: {}, // 실 PG adapter 연동 시 provider 별 raw-body 서명 verifier 등록
-  // #19: 스토리지 어댑터 — 사업자 결정 전엔 dev 인메모리만(프로덕션 미주입 = 사진 라우트 501)
-  storage: isProd ? undefined : (await import("./storage/adapter")).createDevMemoryStorage(),
+  // #19 완성: NCP Object Storage(env 4개 설정 시) → 없으면 dev 인메모리(비프로덕션)
+  // 프로덕션에서 env 미설정 = 사진 라우트 501 fail-closed(침묵 저장 금지)
+  storage: (await import("./storage/ncp")).ncpStorageFromEnv()
+    ?? (isProd ? undefined : (await import("./storage/adapter")).createDevMemoryStorage()),
 });
 
 /* 파일럿 P0: outbox 디스패처 루프 — 인앱 알림 소비(at-least-once·SKIP LOCKED).
