@@ -199,13 +199,23 @@ export function dayOf(cls: string) {
 /* 반 선택지 = fixture 반 정본 (6개 반 이름·순서 일치) */
 export const CLS_OPTS = fx.classes.map((c) => c.name);
 
+/* 시간대 — fixture 반 시작시간 파생 (13B AudienceFilter 축) */
+export function timeOf(cls: string): string {
+  const c = fx.classes.find((x) => cls.indexOf(x.name.split(" ")[1] ?? x.name) >= 0 || cls.indexOf(x.name) >= 0);
+  const h = parseInt(c?.time ?? "0", 10);
+  if (h < 12) return "오전";
+  return `${h - 12}시`;
+}
+/* 13B: AudienceFilter 정본 축 — 원생 조회·공지 대상·청구 대상·출결·대회·CSV 가
+   같은 그룹 정의를 재사용한다 (화면별 재정의 금지, docs/13 §C) */
 export const AF_GROUPS: { key: string; label: string; opts: string[] }[] = [
-  { key: "age", label: "연령대", opts: ["5~6세", "7~9세", "10~12세"] },
-  { key: "gender", label: "성별 (선택 입력 · 운영 목적만 · 마케팅 타기팅 금지)", opts: ["남", "여", "미입력"] },
+  { key: "day", label: "수업 요일 (복수 = 또는)", opts: ["월·수", "화·목", "화·금", "토"] },
+  { key: "time", label: "시간대", opts: ["오전", "2시", "3시", "4시"] },
   { key: "prog", label: "프로그램", opts: ["플레이2", "플레이3", "유소년 축구", "농구 특강", "인라인 기초"] },
   { key: "cls2", label: "반", opts: CLS_OPTS },
-  { key: "day", label: "수업 요일", opts: ["월·수", "화·목", "화·금", "토"] },
   { key: "coach", label: "담당 코치", opts: ["김선재", "이창진", "이도현", "박정우"] },
+  { key: "age", label: "연령대", opts: ["5~6세", "7~9세", "10~12세"] },
+  { key: "gender", label: "성별 (선택 입력 · 운영 목적만 · 마케팅 타기팅 금지)", opts: ["남", "여", "미입력"] },
   { key: "pay", label: "수납", opts: ["완납", "미납", "일할 청구"] },
   { key: "veh", label: "차량", opts: ["이용", "미이용"] },
   { key: "safe", label: "안전정보", opts: ["있음", "없음"] },
@@ -351,6 +361,77 @@ export const MJ_OPTS = [
   { r: 8, date: "11/4 (화)", sub: "남은 실제 수업 8회" },
   { r: 5, date: "11/14 (금)", sub: "남은 실제 수업 5회" },
 ];
+/* 13B: 입회 계산기 반 선택 — 반을 고르면 요일·시간 자동(중복 입력 방지) */
+export const MJ_CLASSES = [
+  { nm: "축구 화금반", days: "화·금 16:00", total: 24, fee: 540000 },
+  { nm: "플레이2 월수반", days: "월·수 14:30", total: 24, fee: 360000 },
+  { nm: "인라인 토요반", days: "토 11:00", total: 12, fee: 300000 },
+];
+export const MJ_DISCOUNTS = [
+  { nm: "할인 없음", pct: 0 },
+  { nm: "형제 20%", pct: 20 },
+  { nm: "다종목 10%", pct: 10 },
+];
+
+/* 13B: 휴무 등록 — event 로 등록하면 계산기가 회차를 재계산 (숫자 직접 수정 금지) */
+export const OFF_TYPES = ["공휴일", "학원 방학", "학원 공사", "행사", "강사 개인 사유", "대회", "임시 휴무", "기타"];
+export const OFF_SCOPES = ["전체 학원", "플레이2 월수반", "축구 화금반", "인라인 토요반"];
+
+/* 13B: 부분 발송 그룹 — AudienceFilter(요일 축) 기반 · 대상 인원은 반 정본 파생 */
+export const BILL_GROUPS = fx.classes
+  .filter((c) => ["c_play2_mw", "c_soccer_tf", "c_play3_th", "c_inline_sat"].includes(c.id as string))
+  .map((c) => ({
+    id: c.id as string,
+    nm: c.name,
+    days: c.daysLabel,
+    time: c.time,
+    n: c.enrolled,
+  }));
+
+/* 13B: 환불 요청 목록 — 단일 카드 → 목록(접기/펼치기). 순서:
+   계산 → 원장 제안 → 학부모 승인 → 원장 최종 승인 → PG → COMPLETED → 재계산 */
+export const REFUND_LIST = [
+  {
+    id: "minjun", nm: "박민준", cls: "플레이2 월수반", stage: "원장 최종 승인 대기",
+    tone: "warn" as const,
+    detail: { tuition: "165,000", vehicle: "+26,250", total: "191,250원", done: 10, whole: 24, rule: "½ 경과 전 → ½ 반환 기준 (법정 바닥 · 학원은 더 후하게만)" },
+    guardian: "민준 어머님 승인 완료 · 오전 10:20 “금액 확인했습니다”",
+  },
+  {
+    id: "ian", nm: "최이안", cls: "축구 화금반", stage: "금액 확인 중 (원장 제안 단계)",
+    tone: "muted" as const,
+    detail: { tuition: "112,500", vehicle: "—", total: "112,500원 (예상)", done: 19, whole: 24, rule: "잔여 회차 비례 · 위약금 정책 확인 중" },
+    guardian: "학부모 요청 접수 · 어제 — 원장 제안 대기",
+  },
+  {
+    id: "sua", nm: "이수아", cls: "인라인 토요반", stage: "PG 처리 중",
+    tone: "accent" as const,
+    detail: { tuition: "75,000", vehicle: "—", total: "75,000원", done: 9, whole: 12, rule: "양측 승인 완료 · 웹훅 COMPLETED 대기" },
+    guardian: "양측 승인 완료 · PG 환불 요청됨 (3영업일 내)",
+  },
+];
+
+/* 13B: 강사 상세 4군 (기본 / 자격·안전 / 운영 / 권한) — 민감 인사는 PC·원장만 */
+export const COACH_DETAIL: Record<string, { base: [string, string][]; cert: [string, string][]; ops: [string, string][]; perm: [string, string][] }> = {
+  김선재: {
+    base: [["연락처", "010-****-7712"], ["입사일", "2024-08-01"], ["재직 상태", "퇴사 예정 (마지막 근무 11/30)"], ["고용 형태", "정규"]],
+    cert: [["자격증", "생활스포츠지도사 2급 · ~2027-05"], ["응급처치", "CPR 이수 · 2026-03"], ["안전교육", "이수 · 2026-01"], ["필수 서류", "완비"]],
+    ops: [["담당 원생", "18명"], ["주간 수업", "3회"], ["대체 가능", "플레이2·농구"], ["인수인계", "작별 피드백 2/4 · 안전 정보 자동 인계"], ["미확인 필수 메시지", "0건"]],
+    perm: [["원생·건강정보", "담당 반만"], ["사진", "담당 반 업로드"], ["학부모 채팅", "담당 보호자만"], ["출결 수정", "가능(이력)"], ["수납정보", "접근 불가"]],
+  },
+  이창진: {
+    base: [["연락처", "010-****-3391"], ["입사일", "2026-07-16 (어제 가입)"], ["재직 상태", "재직"], ["고용 형태", "정규"]],
+    cert: [["자격증", "축구지도자 C급 · ~2028-02"], ["응급처치", "CPR 이수 · 2026-06"], ["안전교육", "예정 (입사 30일 내)"], ["필수 서류", "1건 대기"]],
+    ops: [["담당 원생", "16명"], ["주간 수업", "2회"], ["대체 가능", "축구"], ["인수인계", "—"], ["미확인 필수 메시지", "1건"]],
+    perm: [["원생·건강정보", "담당 반만"], ["사진", "담당 반 업로드"], ["학부모 채팅", "담당 보호자만"], ["출결 수정", "가능(이력)"], ["수납정보", "접근 불가"]],
+  },
+  박정우: {
+    base: [["연락처", "010-****-8845"], ["입사일", "2025-03-02"], ["재직 상태", "재직"], ["고용 형태", "정규"]],
+    cert: [["자격증", "생활스포츠지도사 2급 · ~2026-11 ⚠ 만료 임박"], ["응급처치", "CPR 이수 · 2025-11"], ["안전교육", "이수"], ["필수 서류", "완비"]],
+    ops: [["담당 원생", "16명"], ["주간 수업", "3회"], ["대체 가능", "플레이3·인라인"], ["인수인계", "—"], ["미확인 필수 메시지", "0건"]],
+    perm: [["원생·건강정보", "담당 반만"], ["사진", "담당 반 업로드"], ["학부모 채팅", "담당 보호자만"], ["출결 수정", "가능(이력)"], ["수납정보", "접근 불가"]],
+  },
+};
 
 /* 강사 — 이름은 fixture 코치 정본(멤버십 순서), 담당·상태 카피는 로컬 */
 export interface Coach { init: string; nm: string; charge: string; status: string; tone: "ok" | "wait"; perm: string; swap?: boolean; }

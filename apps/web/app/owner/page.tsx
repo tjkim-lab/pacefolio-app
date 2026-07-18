@@ -19,7 +19,7 @@ import {
   OwnerSheet,
 } from "./_kit";
 import {
-  CAP_METERS, CAP_DAYS, TODOS, TODO_CONFIRM, PAY_SHEETS,
+  CAP_METERS, CAP_DAYS, TODOS, TODO_CONFIRM, PAY_SHEETS, NOTICE_UNREAD,
   type TodoKey,
 } from "./_data";
 
@@ -79,6 +79,8 @@ export default function OwnerHome() {
 
   // 수납 명단 시트 (13A: 숫자 = 버튼)
   const [paySheet, setPaySheet] = useState<null | "done" | "wait" | "over">(null);
+  // 공지 미열람 명단 시트 (13B §7.1)
+  const [noticeSheet, setNoticeSheet] = useState(false);
 
   // 반별 정원: 요일 OR 필터 + accordion (기본 접힘)
   const [dayFilter, setDayFilter] = useState<string[]>([]);
@@ -203,9 +205,14 @@ export default function OwnerHome() {
                   <span>읽음 81/87</span>
                 </div>
               </div>
-              <Button variant="primary" className="h-9 w-full text-[12.5px]" onClick={() => handleTodo("notice")}>
-                안 읽은 6명에게 다시 알림
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="soft" className="h-9 flex-1 text-[12.5px]" onClick={() => setNoticeSheet(true)}>
+                  안 읽은 6명 명단
+                </Button>
+                <Button variant="primary" className="h-9 flex-1 text-[12.5px]" onClick={() => handleTodo("notice")}>
+                  다시 알림
+                </Button>
+              </div>
             </Card>,
             <Card key="todo" className="flex h-full flex-col justify-between !p-4">
               <div className="flex items-center gap-1.5 text-[12px] font-bold text-ink3">
@@ -507,6 +514,34 @@ export default function OwnerHome() {
               {sheet.bulk}
             </Button>
           )}
+        </OwnerSheet>
+      )}
+      {/* 공지 미열람 보호자 명단 (13B §7.1) */}
+      {noticeSheet && (
+        <OwnerSheet
+          title={`안 읽은 보호자 ${NOTICE_UNREAD.count}명`}
+          sub={`"${NOTICE_UNREAD.title}" · 읽음 81/87`}
+          onClose={() => setNoticeSheet(false)}
+        >
+          {NOTICE_UNREAD.rows.map((r) => (
+            <div key={r.id} className="border-b border-line2 py-3 last:border-b-0">
+              <div className="text-[14px] font-bold text-ink">{r.nm}</div>
+              <div className="mt-0.5 text-[12px] font-medium text-ink3">{r.sub}</div>
+              <div className="mt-2 flex gap-1.5">
+                {["재알림", "대화"].map((a) => (
+                  <button key={a} onClick={() => toast(`${r.nm} · ${a} (목업 — 실 API 연결 후)`)}
+                    className={cn(ACT_BTN, "w-auto border-[1.5px] border-line bg-surface px-2.5 text-accent-ink")}>
+                    {a}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="pt-3 text-center text-[12px] font-medium text-ink3">{NOTICE_UNREAD.more}</div>
+          <Button variant="primary" className="mt-3 h-11 w-full text-[13px]"
+            onClick={() => { setNoticeSheet(false); handleTodo("notice"); }}>
+            선택 재발송 — 안 읽은 {NOTICE_UNREAD.count}명 전체
+          </Button>
         </OwnerSheet>
       )}
       {toastNode}

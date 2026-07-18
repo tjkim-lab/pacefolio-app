@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import { PCShell } from "../_shell";
 import { Panel, Pill, Note, FilterChip, ActBtn, useOverlays } from "../_ui";
 import { IconChevron, IconSearch, IconUsers } from "@/components/ui/icons";
-import { KIDS, AF_GROUPS, CLS_OPTS, programOf, ageBand, dayOf, type Kid } from "../_data";
+import { KIDS, type Kid } from "../_data";
+import { useAudienceFilter, AudienceChips, emptyAudience, type AudienceState } from "../_audience";
 
 const STATUS_FILTERS = ["all", "재원", "체험", "휴원", "퇴원 예정"];
-type AF = Record<string, Set<string>>;
-const emptyAf = (): AF => Object.fromEntries(AF_GROUPS.map((g) => [g.key, new Set<string>()]));
+type AF = AudienceState;
 
 const PRESETS: { t: string; apply: (af: AF) => void }[] = [
   { t: "미납 원생", apply: (af) => af.pay.add("미납") },
@@ -30,41 +30,24 @@ export default function PCStudents() {
   const { confirm, toast, overlays } = useOverlays();
   const [status, setStatus] = useState("all");
   const [q, setQ] = useState("");
-  const [af, setAf] = useState<AF>(emptyAf);
+  const filter = useAudienceFilter(); // 13B: AudienceFilter 정본 — 공지·청구·출결·대회와 공유
   const [drawer, setDrawer] = useState(false);
-  const [tick, setTick] = useState(0); // Set 변경 반영용
 
   const list = useMemo(() => {
     return KIDS.filter((k) => {
       if (status !== "all" && k.status !== status) return false;
-      if (af.age.size && !af.age.has(ageBand(k.age))) return false;
-      if (af.gender.size && !af.gender.has(k.gender || "미입력")) return false;
-      if (af.prog.size && !af.prog.has(programOf(k.cls))) return false;
-      if (af.cls2.size && !CLS_OPTS.some((c) => af.cls2.has(c) && k.cls.indexOf(c) >= 0)) return false;
-      if (af.day.size && !af.day.has(dayOf(k.cls))) return false;
-      if (af.coach.size && !af.coach.has(k.coach)) return false;
-      if (af.pay.size && !af.pay.has(k.pay)) return false;
-      if (af.veh.size && !af.veh.has(k.veh ? "이용" : "미이용")) return false;
-      if (af.safe.size && !af.safe.has(k.alert ? "있음" : "없음")) return false;
+      if (!filter.matches(k)) return false;
       return !q || (k.nm + k.cls + k.parent).indexOf(q) >= 0;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, q, tick]);
+  }, [status, q, filter.tick]);
 
-  function toggleAf(key: string, opt: string) {
-    setAf((prev) => {
-      const s = prev[key];
-      if (s.has(opt)) s.delete(opt); else s.add(opt);
-      return { ...prev };
-    });
-    setTick((t) => t + 1);
-  }
   function resetAll() {
-    setAf(emptyAf()); setStatus("all"); setQ(""); setTick((t) => t + 1);
+    filter.reset(); setStatus("all"); setQ("");
     toast("필터 초기화");
   }
   function applyPreset(p: (typeof PRESETS)[number]) {
-    const next = emptyAf(); p.apply(next); setAf(next); setTick((t) => t + 1);
+    const next = emptyAudience(); p.apply(next); filter.setAf(next); filter.setTick((t) => t + 1);
     toast(`저장된 필터 '${p.t}' 적용`);
   }
   function bulk(name: string, danger: boolean) {
@@ -106,19 +89,10 @@ export default function PCStudents() {
         </div>
       </div>
 
-      {/* 고급 필터 드로어 */}
+      {/* 고급 필터 드로어 — AudienceFilter 정본 칩 (요일·시간대 상단 노출) */}
       {drawer && (
         <div className="border-t border-line2 pt-2">
-          {AF_GROUPS.map((g) => (
-            <div key={g.key}>
-              <div className="text-[11px] font-bold text-ink3 mt-2 mb-1">{g.label}</div>
-              <div className="flex gap-2 flex-wrap mb-0.5">
-                {g.opts.map((o) => (
-                  <FilterChip key={o} active={af[g.key].has(o)} onClick={() => toggleAf(g.key, o)}>{o}</FilterChip>
-                ))}
-              </div>
-            </div>
-          ))}
+          <AudienceChips filter={filter} />
         </div>
       )}
 
