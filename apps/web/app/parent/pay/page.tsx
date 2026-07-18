@@ -36,6 +36,42 @@ export default function PayPage() {
     router.push("/parent/pay/done");
   };
 
+  /* 14차 B P0: 결제 페이지는 상태별로 명시 분기 — LIVE_ERROR·LOADING 에서
+     fixture 금액·모의 결제 진입 금지(fail-closed). fixture 결제는 FIXTURE_PREVIEW 만. */
+  if (live.state === "LIVE_LOADING") {
+    return (
+      <>
+        <PushHeader title="결제하기" sub="연결 확인 중" />
+        <AppScroll>
+          <div className="rounded-2xl border border-line bg-surface p-6 text-center text-[13px] font-semibold text-ink3">
+            서버 연결을 확인하고 있어요 — 결제는 확인 후에만 진행돼요
+          </div>
+        </AppScroll>
+      </>
+    );
+  }
+  if (live.state === "LIVE_ERROR") {
+    return (
+      <>
+        <PushHeader title="결제하기" sub="연결 오류" />
+        <AppScroll>
+          <div className="rounded-2xl border border-danger-weak bg-danger-weak p-5 text-center">
+            <div className="text-[15px] font-extrabold text-danger-ink">결제를 진행할 수 없어요</div>
+            <div className="mt-1.5 text-[12.5px] font-medium text-ink2 leading-normal">
+              서버 오류({live.errorMsg}) — 데모 화면으로 대체하지 않아요. 잠시 후 다시 시도해주세요.
+            </div>
+            <button
+              onClick={live.retry}
+              className="mt-4 h-11 w-full rounded-xl bg-accent-strong text-[14px] font-bold text-white"
+            >
+              다시 연결
+            </button>
+          </div>
+        </AppScroll>
+      </>
+    );
+  }
+
   if (live.live && live.payResult) {
     return (
       <>

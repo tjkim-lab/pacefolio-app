@@ -2,7 +2,7 @@
    범위: DM 개설(find-or-create) · 메시지(민감 카테고리 규칙·ACK 수명주기) ·
    읽음/확인/처리 분리 · AuditLog·Outbox 합류.
    전부 같은 트랜잭션 — 방 멤버십이 게이트, 테넌트는 복합 FK 가 최종 방어. */
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import {
   requiresAck, canTransitionChatStatus, validateChatCategory, canPostToRoom, dmKey,
@@ -249,13 +249,25 @@ export async function postMessage(db: Db, input: {
 
     const messageId = newId("cm");
     const status: ChatMessageStatus = "SENT";
-    await tx.insert(s.chatMessages).values({
+    /* 14차 C P1-3: check-then-insert 는 동시 중복 전송 경쟁에 진다 —
+       UNIQUE(uq_chatmsg_client_id) 에 ON CONFLICT DO NOTHING 으로 수렴,
+       패자는 기존 메시지를 재조회해 멱등 성공(ack·감사·outbox 중복 생성 금지) */
+    const inserted = await tx.insert(s.chatMessages).values({
       id: messageId, roomId: room.id, academyId: input.academyId,
       senderUserId: input.actorUserId, kind: input.msgKind, category: input.category,
       status, body: input.body, contextCard: serverCard,
       relatedParticipantId: related, clientMessageId: input.clientMessageId ?? null,
       createdAt: nowISO,
-    });
+    }).onConflictDoNothing().returning({ id: s.chatMessages.id });
+    if (inserted.length === 0) {
+      const dup = input.clientMessageId ? (await tx.select().from(s.chatMessages).where(and(
+        eq(s.chatMessages.academyId, input.academyId),
+        eq(s.chatMessages.senderUserId, input.actorUserId),
+        eq(s.chatMessages.clientMessageId, input.clientMessageId),
+      )))[0] : undefined;
+      if (dup) return { kind: "OK" as const, messageId: dup.id, status: dup.status as ChatMessageStatus };
+      return { kind: "INVALID" as const, reason: "메시지 저장 충돌 — 재시도해주세요" };
+    }
     // 수신자 ack 행 — READ ≠ ACKNOWLEDGED 를 행 단위로 기록
     const others = await tx.select().from(s.chatRoomMembers).where(and(
       eq(s.chatRoomMembers.roomId, room.id), isNull(s.chatRoomMembers.leftAt),
@@ -380,10 +392,16 @@ export async function resolveMessage(db: Db, input: {
   actorUserId: string; academyId: string; messageId: string; note: string;
 }, nowISO: string): Promise<AckResult> {
   return db.transaction(async (tx) => {
-    const msg = await loadMessage(tx, input.academyId, input.messageId);
+    /* 14차 C P2: row FOR UPDATE — 동시 처리 완료 경쟁 직렬화(노트 덮어쓰기·감사 중복 방지) */
+    const msg = (await tx.select().from(s.chatMessages).where(and(
+      eq(s.chatMessages.id, input.messageId), eq(s.chatMessages.academyId, input.academyId),
+    )).for("update"))[0];
     if (!msg) return { kind: "FORBIDDEN" as const, reason: "메시지 없음" };
     const member = await activeMember(tx, msg.roomId, input.actorUserId);
     if (!member) return { kind: "FORBIDDEN" as const, reason: "방 멤버가 아니에요" };
+    if (msg.status === "RESOLVED") {
+      return { kind: "OK" as const, status: "RESOLVED" }; // 멱등 — 최초 처리자의 노트·감사 보존
+    }
     if (!canTransitionChatStatus(msg.status as ChatMessageStatus, "RESOLVED")) {
       return { kind: "CONFLICT" as const, reason: "확인(ACKNOWLEDGED) 후에만 처리 완료할 수 있어요" };
     }
@@ -438,18 +456,53 @@ export async function listMessages(db: Db, input: {
       eq(s.chatMessages.academyId, input.academyId),
     )).orderBy(asc(s.chatMessages.createdAt), asc(s.chatMessages.id)); // 동률 안정 정렬
 
-    /* 13차 C P0-3(조회 재인가): 보호자는 조회 시점에도 canViewHealthInfo 를
-       재확인 — 권한이 철회됐으면 HEALTH 본문·카드를 가림(멤버십은 유지) */
-    let healthAllowed = true;
-    if (member.role === "GUARDIAN" && msgs.some((m) => m.category === "HEALTH")) {
-      const gd = (await tx.select().from(s.guardians).where(eq(s.guardians.userId, input.actorUserId)))[0];
-      const pid = msgs.find((m) => m.category === "HEALTH")?.relatedParticipantId;
-      const link = gd && pid ? (await tx.select().from(s.guardianParticipantLinks).where(and(
-        eq(s.guardianParticipantLinks.guardianId, gd.id),
-        eq(s.guardianParticipantLinks.participantId, pid),
-        eq(s.guardianParticipantLinks.academyId, input.academyId),
-      )))[0] : undefined;
-      healthAllowed = !!link && link.verificationStatus === "VERIFIED" && link.canViewHealthInfo;
+    /* 13차 C P0-3 + 14차 C P1-1·2(조회 재인가 확장): 발송 시점 권한만으론 부족 —
+       권한 철회를 읽기 시점에 반영한다(멤버십은 유지, 본문·카드만 가림).
+       - HEALTH: 보호자 = VERIFIED+canViewHealthInfo / 코치 = 현재 담당 관계 재확인
+       - BILLING: 보호자 = VERIFIED+canPay 재확인(정책: 금액은 개인정보(헌법) —
+         권한 회수 시 과거 청구 메시지도 즉시 가림. 원장 화면·감사에는 보존) */
+    const pidsOf = (cat: string) => [...new Set(
+      msgs.filter((m) => m.category === cat && m.relatedParticipantId)
+        .map((m) => m.relatedParticipantId as string),
+    )];
+    const healthPids = pidsOf("HEALTH");
+    const billingPids = pidsOf("BILLING");
+    const healthAllowedPids = new Set<string>();
+    const billingAllowedPids = new Set<string>();
+    const allPids = [...new Set([...healthPids, ...billingPids])];
+    if (allPids.length > 0) {
+      if (member.role === "GUARDIAN") {
+        const gd = (await tx.select().from(s.guardians).where(eq(s.guardians.userId, input.actorUserId)))[0];
+        const links = gd ? await tx.select().from(s.guardianParticipantLinks).where(and(
+          eq(s.guardianParticipantLinks.guardianId, gd.id),
+          eq(s.guardianParticipantLinks.academyId, input.academyId),
+          inArray(s.guardianParticipantLinks.participantId, allPids),
+        )) : [];
+        for (const l of links) {
+          if (l.verificationStatus !== "VERIFIED") continue;
+          if (l.canViewHealthInfo) healthAllowedPids.add(l.participantId);
+          if (l.canPay) billingAllowedPids.add(l.participantId);
+        }
+      } else if (member.role === "COACH") {
+        /* 14차 C P1-1: 코치 HEALTH 읽기 = 현재 담당(ACTIVE 배정×등록) 재인가 —
+           배정 해제 후 방에 남아 있어도 아동 건강정보는 가린다 */
+        const inCharge = await tx.select({ pid: s.dbEnrollments.participantId })
+          .from(s.classAssignments)
+          .innerJoin(s.dbEnrollments, eq(s.dbEnrollments.classId, s.classAssignments.classId))
+          .where(and(
+            eq(s.classAssignments.academyId, input.academyId),
+            eq(s.classAssignments.coachUserId, input.actorUserId),
+            eq(s.classAssignments.status, "ACTIVE"),
+            eq(s.dbEnrollments.status, "ACTIVE"),
+            inArray(s.dbEnrollments.participantId, allPids),
+          ));
+        for (const r of inCharge) healthAllowedPids.add(r.pid);
+        // 코치에게 BILLING 은 원래 비표시 표면(금액 = 개인정보) — 가림 유지
+      } else {
+        // OWNER·MANAGER·DESK — 학원 운영 주체, 전체 열람(감사는 아래에서 기록)
+        for (const p of healthPids) healthAllowedPids.add(p);
+        for (const p of billingPids) billingAllowedPids.add(p);
+      }
     }
 
     /* 13차 C P0-4: 민감(BILLING·HEALTH) 메시지 열람 = 서버 감사 행
@@ -468,13 +521,18 @@ export async function listMessages(db: Db, input: {
     }
 
     return msgs.map((m) => {
-      const redactHealth = m.category === "HEALTH" && !healthAllowed;
+      const redactHealth = m.category === "HEALTH" &&
+        !!m.relatedParticipantId && !healthAllowedPids.has(m.relatedParticipantId);
+      const redactBilling = m.category === "BILLING" &&
+        !!m.relatedParticipantId && !billingAllowedPids.has(m.relatedParticipantId);
+      const redacted = redactHealth || redactBilling;
       return {
         messageId: m.id, senderUserId: m.senderUserId, kind: m.kind, category: m.category,
         status: m.status,
         body: m.deletedAt ? "(삭제된 메시지 — 원문 보존)"
-          : redactHealth ? "(건강정보 — 열람 권한이 없어요)" : m.body,
-        contextCard: redactHealth ? null : m.contextCard,
+          : redactHealth ? "(건강정보 — 열람 권한이 없어요)"
+          : redactBilling ? "(청구 정보 — 열람 권한이 없어요)" : m.body,
+        contextCard: redacted ? null : m.contextCard,
         relatedParticipantId: m.relatedParticipantId,
         resolvedNote: m.resolvedNote, createdAt: m.createdAt,
       };

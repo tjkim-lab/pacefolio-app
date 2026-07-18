@@ -323,7 +323,7 @@ test("hardening: 링크 철회 tx 커밋 전 도착한 승인 → 잠금 대기 
    수신자 2명이 동시에 확인하면 각 tx 가 "미확인 1명 남음"을 읽고 둘 다
    READ 에 머무는 집계 경쟁이 가능 — 잠금으로 마지막 확인이 반드시
    ACKNOWLEDGED 를 만든다. */
-import { acknowledge } from "../src/chat/service";
+import { acknowledge, postMessage } from "../src/chat/service";
 
 test("13차 C: 수신자 2명 동시 ACK → 정확히 ACKNOWLEDGED + 양쪽 시각 기록", { skip }, async () => {
   const w = await setup();
@@ -363,6 +363,39 @@ test("13차 C: 수신자 2명 동시 ACK → 정확히 ACKNOWLEDGED + 양쪽 시
   assert.equal(msg.status, "ACKNOWLEDGED");
   const acks = await w.db.select().from(s2.chatMessageAcks).where(eq2(s2.chatMessageAcks.messageId, msgId));
   assert.equal(acks.filter((a) => a.acknowledgedAt).length, 2);
+});
+
+test("14차 C P1-3: 같은 clientMessageId ×2 동시 전송 → 메시지 정확히 1 · 둘 다 OK(멱등)", { skip }, async () => {
+  const w = await setup();
+  const mk = async (n: string) => {
+    const uid = rid("u");
+    await w.db.insert(s2.users).values({ id: uid, name: n, phone: "010-0" });
+    return uid;
+  };
+  const sender = await mk("동시발신"); const recv = await mk("동시수신");
+  const roomId = rid("cr");
+  await w.db.insert(s2.chatRooms).values({
+    id: roomId, academyId: w.academyId, type: "OWNER_COACH_DM", title: "동시전송",
+    createdByUserId: sender, createdAt: NOW(),
+  });
+  await w.db.insert(s2.chatRoomMembers).values([
+    { id: rid("crm"), roomId, academyId: w.academyId, userId: sender, role: "OWNER", joinedAt: NOW() },
+    { id: rid("crm"), roomId, academyId: w.academyId, userId: recv, role: "COACH", joinedAt: NOW() },
+  ]);
+  const cmid = rid("dup");
+  const send = () => postMessage(w.db, {
+    actorUserId: sender, actorRoles: ["OWNER"], academyId: w.academyId, roomId,
+    msgKind: "ACK_REQUIRED", category: "GENERAL", body: "동시 중복 전송",
+    clientMessageId: cmid,
+  }, NOW());
+  const results = await Promise.all([send(), send()]);
+  assert.ok(results.every((r) => r.kind === "OK"), JSON.stringify(results));
+  const ids = new Set(results.map((r) => (r as { messageId: string }).messageId));
+  assert.equal(ids.size, 1); // 둘 다 같은 메시지 — ON CONFLICT 수렴
+  const rows = await w.db.select().from(s2.chatMessages).where(eq2(s2.chatMessages.roomId, roomId));
+  assert.equal(rows.length, 1); // 중복 행 없음
+  const acks = await w.db.select().from(s2.chatMessageAcks).where(eq2(s2.chatMessageAcks.messageId, rows[0].id));
+  assert.equal(acks.length, 1); // 수신자 ack 행도 1(중복 생성 금지)
 });
 
 /* ═══ 13차 D: 실제 철회 서비스 + 승인 경쟁 확장 ═══ */

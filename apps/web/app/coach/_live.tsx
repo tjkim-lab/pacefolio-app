@@ -87,13 +87,21 @@ export function CoachLiveProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     (async () => {
+      if (process.env.NEXT_PUBLIC_PACEFOLIO_DEMO_FIXTURE === "1") {
+        setState("FIXTURE"); return; // 명시적 데모 설정 — 유일한 의도된 fixture 진입로
+      }
       let reachable = false;
       try {
         const ctl = new AbortController();
         const t = setTimeout(() => ctl.abort(), 1500);
         const probe = await fetch("/api/sessions/me", { signal: ctl.signal, credentials: "include" });
         clearTimeout(t);
-        if (probe.status !== 401 && !probe.ok) { setState("FIXTURE"); return; }
+        /* 14차 B P0: 서버가 응답한 비-401(403/404/5xx)은 전부 장애 = ERROR.
+           FIXTURE 는 명시 플래그 또는 비프로덕션의 네트워크 실패만. */
+        if (!probe.ok && probe.status !== 401) {
+          reachable = true;
+          throw new ApiError(probe.status, "PROBE_FAILED");
+        }
         reachable = true;
         if (probe.status === 401) await api.devLogin("김선재");
         let me = await api.me();
@@ -125,7 +133,8 @@ export function CoachLiveProvider({ children }: { children: ReactNode }) {
         await loadBrief(aid, me.user.id).catch(() => setBrief(null)); // 전달사항은 보조 — 실패해도 READY
         setState("READY");
       } catch (e) {
-        if (!reachable) setState("FIXTURE");
+        if (!reachable && process.env.NODE_ENV !== "production") setState("FIXTURE");
+        else if (!reachable) { setErrorMsg("API 연결 불가"); setState("ERROR"); }
         else {
           setErrorMsg(e instanceof ApiError ? `${e.status} ${e.code}` : String(e));
           setState("ERROR"); // 실연결 후 오류 — fixture 로 위장 금지(13차 B P0-2 원칙)

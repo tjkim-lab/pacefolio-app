@@ -91,10 +91,15 @@ export function LiveBillingProvider({ children }: { children: ReactNode }) {
     setInvoices(list.invoices);
   }, [academyId]);
 
-  /* 연결 감지: API 부재 → FIXTURE_PREVIEW / 성립 후 오류 → LIVE_ERROR (P0-2) */
+  /* 연결 감지(14차 B P0 개정): fixture 진입은 ① 명시 플래그 ② 비프로덕션의 네트워크
+     실패(연결 자체 불가)만. 서버가 응답한 403/404/5xx 는 장애 — 데모로 오판 금지. */
   useEffect(() => {
     (async () => {
       setState("LIVE_LOADING");
+      if (process.env.NEXT_PUBLIC_PACEFOLIO_DEMO_FIXTURE === "1") {
+        setState("FIXTURE_PREVIEW"); // 명시적 데모 설정 — 유일한 의도된 fixture 진입로
+        return;
+      }
       let reachable = false;
       try {
         const ctl = new AbortController();
@@ -102,7 +107,9 @@ export function LiveBillingProvider({ children }: { children: ReactNode }) {
         const probe = await fetch("/api/sessions/me", { signal: ctl.signal, credentials: "include" });
         clearTimeout(t);
         if (probe.status !== 401 && !probe.ok) {
-          setState("FIXTURE_PREVIEW"); // API 라우트 부재(404/502) = 데모 모드
+          // 서버 응답 수신 = API 는 살아있다(구버전 라우트 404·프록시 502 포함) — fail-closed
+          setErrorMsg(`서버 응답 이상(${probe.status})`);
+          setState("LIVE_ERROR");
           return;
         }
         reachable = true;
@@ -124,7 +131,9 @@ export function LiveBillingProvider({ children }: { children: ReactNode }) {
         setState("LIVE_READY");
       } catch (e) {
         if (!reachable) {
-          setState("FIXTURE_PREVIEW"); // 연결 자체가 안 됨 = 데모
+          // 연결 자체 불가(fetch reject) — 비프로덕션 로컬 데모만 fixture, 프로덕션은 오류
+          if (process.env.NODE_ENV !== "production") setState("FIXTURE_PREVIEW");
+          else { setErrorMsg("API 연결 불가"); setState("LIVE_ERROR"); }
         } else {
           // P0-2: 실연결이 성립했는데 실패 — fixture 로 위장하지 않는다
           setErrorMsg(e instanceof ApiError ? `${e.status} ${e.code}` : String(e));

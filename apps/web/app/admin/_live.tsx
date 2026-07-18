@@ -48,17 +48,20 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     (async () => {
+      if (process.env.NEXT_PUBLIC_PACEFOLIO_DEMO_FIXTURE === "1") {
+        setState("FIXTURE"); return; // 명시적 데모 설정 — 유일한 의도된 fixture 진입로
+      }
       let reachable = false;
       try {
         const ctl = new AbortController();
         const t = setTimeout(() => ctl.abort(), 1500);
         const probe = await fetch("/api/sessions/me", { signal: ctl.signal, credentials: "include" });
         clearTimeout(t);
-        /* 세션 리뷰: FIXTURE 폴백은 API 부재(네트워크 실패·라우트 없음)만 —
-           5xx 는 서버가 살아있는 오류이므로 ERROR 로(데모 위장 금지) */
+        /* 14차 B P0: 서버가 응답한 비-401(403/404/5xx)은 전부 장애 = ERROR.
+           FIXTURE 는 명시 플래그 또는 비프로덕션의 네트워크 실패만. */
         if (!probe.ok && probe.status !== 401) {
-          if (probe.status >= 500) { reachable = true; throw new ApiError(probe.status, "PROBE_5XX"); }
-          setState("FIXTURE"); return;
+          reachable = true;
+          throw new ApiError(probe.status, "PROBE_FAILED");
         }
         reachable = true;
         // 주의(dev 데모 한계): 쿠키는 브라우저 전역 1개 — admin↔학부모·코치 데모 탭을
@@ -77,7 +80,10 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
         await load();
         setState("READY");
       } catch (e) {
-        if (!reachable) { setState("FIXTURE"); return; } // API 부재만 fixture 폴백
+        if (!reachable) {
+          if (process.env.NODE_ENV !== "production") { setState("FIXTURE"); return; }
+          setErrorMsg("API 연결 불가"); setState("ERROR"); return;
+        }
         setErrorMsg(e instanceof ApiError ? `서버 오류(${e.status}: ${e.code})` : "관제 데이터를 불러오지 못했어요");
         setState("ERROR"); // 실연결 후 오류는 오류로 — 데모 위장 금지
       }

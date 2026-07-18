@@ -51,3 +51,25 @@ test("라인 부호 정책 — DISCOUNT 는 음수만, 그 외는 양수만, 0�
   assert.equal(isValidLineAmountForType("VEHICLE", 45_000), true);
   assert.equal(isValidLineAmountForType("OTHER", 0, ), false);
 });
+
+test("14차 A 잔여: 타입별 경계값 고정 — 상한 ±1억·0·부호 전 조합", () => {
+  // DISCOUNT: 음수만, |n| ≤ 1억
+  assert.equal(isValidLineAmountForType("DISCOUNT", -100_000_000), true);
+  assert.equal(isValidLineAmountForType("DISCOUNT", -100_000_001), false);
+  assert.equal(isValidLineAmountForType("DISCOUNT", 0), false);
+  assert.equal(isValidLineAmountForType("DISCOUNT", 1), false);       // 양수 할인 금지
+  assert.equal(isValidLineAmountForType("DISCOUNT", 72_000), false);
+  // 일반 라인: 양수만, ≤ 1억
+  assert.equal(isValidLineAmountForType("TUITION", 1), true);
+  assert.equal(isValidLineAmountForType("TUITION", 100_000_000), true);
+  assert.equal(isValidLineAmountForType("TUITION", 100_000_001), false);
+  assert.equal(isValidLineAmountForType("VEHICLE", 0), false);
+  assert.equal(isValidLineAmountForType("VEHICLE", -1), false);
+  assert.equal(isValidLineAmountForType("OTHER", -100_000_000), false);
+  // 총액: 0·음수·상한 초과 전부 거부
+  assert.equal(isValidInvoiceTotal(1), true);
+  assert.equal(isValidInvoiceTotal(100_000_000), true);
+  assert.equal(isValidInvoiceTotal(100_000_001), false);
+  assert.equal(isValidInvoiceTotal(0), false);
+  assert.equal(isValidInvoiceTotal(-1), false);
+});

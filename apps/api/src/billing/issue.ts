@@ -61,6 +61,16 @@ export async function createInvoice(db: Db, input: {
     return { kind: "INVALID", reason: `청구 총액 검증 실패(${total}) — 할인 후 음수·0·1억 초과 금지` };
   }
   return db.transaction(async (tx) => {
+    /* 14차 A 잔여 권고: participant·billingPeriod 의 학원 귀속을 서비스가 명시 검증 —
+       DB 복합 FK 위반이 일반 500 으로 새는 대신 422 로 응답 */
+    const p = (await tx.select({ id: s.participants.id }).from(s.participants).where(and(
+      eq(s.participants.id, input.participantId), eq(s.participants.academyId, input.academyId),
+    )))[0];
+    if (!p) return { kind: "INVALID" as const, reason: "원생 없음(학원 불일치 포함)" };
+    const bp = (await tx.select({ id: s.billingPeriods.id }).from(s.billingPeriods).where(and(
+      eq(s.billingPeriods.id, input.billingPeriodId), eq(s.billingPeriods.academyId, input.academyId),
+    )))[0];
+    if (!bp) return { kind: "INVALID" as const, reason: "수납 기간 없음(학원 불일치 포함)" };
     // 중복 발행 방지: 같은 (원생, 기간)의 VOID 아닌 청구서 존재 = 409 (재발행은 VOID 후)
     const dup = (await tx.select().from(s.invoices).where(and(
       eq(s.invoices.participantId, input.participantId),

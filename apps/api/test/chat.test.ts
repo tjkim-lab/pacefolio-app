@@ -356,3 +356,32 @@ test("확인 수명주기 없는 메시지에 ack → 409", async () => {
   const ack = await post(coach, `/academies/a_wg/chat/messages/${messageId}/ack`);
   assert.equal(ack.status, 409);
 });
+
+test("14차 C P1-1: 코치 배정 해제 → HEALTH 읽기 가림(방 멤버여도) · 재배정 시 복구", async () => {
+  // dmRoom 의 첫 메시지는 HEALTH(도담) — 담당 해제 후 조회
+  await db.update(s.classAssignments).set({ status: "ENDED" })
+    .where(eq(s.classAssignments.id, "ca_1"));
+  let msgs = (await (await get(coach, `/academies/a_wg/chat/rooms/${dmRoom}/messages`)).json()) as
+    { messages: { category: string; body: string; contextCard: string | null }[] };
+  const health = msgs.messages.find((m) => m.category === "HEALTH")!;
+  assert.equal(health.body, "(건강정보 — 열람 권한이 없어요)"); // 발송 시점 권한 ≠ 영구 열람
+  // 재배정 → 복구
+  await db.update(s.classAssignments).set({ status: "ACTIVE" })
+    .where(eq(s.classAssignments.id, "ca_1"));
+  msgs = (await (await get(coach, `/academies/a_wg/chat/rooms/${dmRoom}/messages`)).json()) as
+    { messages: { category: string; body: string; contextCard: string | null }[] };
+  assert.notEqual(msgs.messages.find((m) => m.category === "HEALTH")!.body, "(건강정보 — 열람 권한이 없어요)");
+});
+
+test("14차 C P1-2: 보호자 canPay 회수 → BILLING 본문·카드 가림(금액 = 개인정보)", async () => {
+  await db.update(s.guardianParticipantLinks).set({ canPay: false })
+    .where(eq(s.guardianParticipantLinks.id, "gl_mom"));
+  const msgs = (await (await get(mom, `/academies/a_wg/chat/rooms/${momRoom}/messages`)).json()) as
+    { messages: { category: string; body: string; contextCard: string | null }[] };
+  const billing = msgs.messages.find((m) => m.category === "BILLING")!;
+  assert.equal(billing.body, "(청구 정보 — 열람 권한이 없어요)");
+  assert.equal(billing.contextCard, null); // 서버 카드(금액)도 가림
+  // 원복(다른 테스트 영향 방지)
+  await db.update(s.guardianParticipantLinks).set({ canPay: true })
+    .where(eq(s.guardianParticipantLinks.id, "gl_mom"));
+});
