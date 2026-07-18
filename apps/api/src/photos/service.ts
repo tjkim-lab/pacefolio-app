@@ -214,7 +214,17 @@ export async function finalizePhoto(db: Db, storage: StorageAdapter, input: {
       return { kind: "FORBIDDEN" as const, reason: "업로더·staff 만 확정할 수 있어요" };
     }
     if (photo.status === "DELETED") return { kind: "INVALID" as const, reason: "삭제된 사진" };
+    /* 파일럿 P0-③: 업로드 실존 확인 — 객체 없이 UPLOADED 확정 금지 */
+    if (!(await storage.exists(photo.storageKey))) {
+      return { kind: "INVALID" as const, reason: "업로드 미완료 — 파일 전송 후 확정할 수 있어요" };
+    }
     const pids = [...new Set(input.participantIds)];
+    /* 파일럿 P0-①: 빈 태그 우회 차단 — 등장 원생 태그 없는 사진은 학원 내부 기록만.
+       (도메인 규칙 "등장 원생 없음 = 게이트 대상 없음"의 악용 경로 봉합 —
+        아이가 나오는데 태그를 비워 반 공유·외부 공개로 우회하는 것을 정책으로 차단) */
+    if (pids.length === 0 && input.audience !== "ACADEMY_INTERNAL") {
+      return { kind: "INVALID" as const, reason: "등장 원생 태그 필수 — 태그 없는 사진은 학원 내부 기록만 가능" };
+    }
     if (pids.length > 0) {
       const found = await tx.select({ id: s.participants.id }).from(s.participants).where(and(
         eq(s.participants.academyId, input.academyId), inArray(s.participants.id, pids),
@@ -294,6 +304,33 @@ export async function getPhotoDownload(db: Db, storage: StorageAdapter, input: {
       : [];
     const allowed = links.some((l) => l.verificationStatus === "VERIFIED" && l.canReceivePhotos);
     if (!allowed) return null;
+    /* 파일럿 P0-②: 다운로드 시점 동의 재검증 — 철회는 새 finalize 만이 아니라
+       기존 확정 사진의 배포도 즉시 멈춘다(발송·열람 시점 재검증 원칙 R2 P0-9).
+       staff·업로더는 관리 목적 접근 유지(감사 동반). */
+    if (photo.purpose && photo.audience && tags.length > 0) {
+      const consentRows = await db.select().from(s.photoConsents).where(and(
+        eq(s.photoConsents.academyId, input.academyId),
+        inArray(s.photoConsents.participantId, tags.map((t) => t.participantId)),
+      ));
+      const consents = consentRows.map((r) => ({
+        id: r.id, policyId: "policy", policyVersion: r.policyVersion,
+        academyId: r.academyId, guardianId: r.guardianId, participantId: r.participantId,
+        grants: JSON.parse(r.grants), consentedAt: r.consentedAt, channel: r.channel,
+        revokedAt: r.revokedAt, expiresAt: r.expiresAt,
+      })) as unknown as Parameters<typeof canSendPhotoAsset>[1];
+      const decision = canSendPhotoAsset(
+        { id: photo.id, academyId: input.academyId, depictedParticipantIds: tags.map((t) => t.participantId) } as unknown as Parameters<typeof canSendPhotoAsset>[0],
+        consents, photo.purpose as never, photo.audience as never, nowISO,
+      );
+      if (!decision.allowed) {
+        await recordAudit(db, {
+          academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "GUARDIAN",
+          action: "photo.view_blocked_consent", targetType: "PhotoAsset", targetId: photo.id,
+          detail: { blocked: decision.blockedParticipantIds.length }, success: false,
+        }, nowISO);
+        return null; // 철회·만료된 동의 — 404 은닉(배포 즉시 중단)
+      }
+    }
     await recordAudit(db, {
       academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "GUARDIAN",
       action: "photo.viewed", targetType: "PhotoAsset", targetId: photo.id,

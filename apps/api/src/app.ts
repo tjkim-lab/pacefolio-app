@@ -29,6 +29,7 @@ import {
 } from "./billing/issue";
 import { publishNotice, markNoticeRead, listNotices } from "./notices/service";
 import { reportIncident, listIncidents } from "./safety/service";
+import { listMyNotifications, markNotificationRead } from "./notifications/service";
 import {
   upsertPhotoConsent, revokePhotoConsent, getPhotoConsent,
   createPhotoUpload, finalizePhoto, getPhotoDownload,
@@ -623,6 +624,24 @@ export function createApp(cfg: ApiConfig) {
         return c.json({ error: "ACTIVE_PAYMENT_ATTEMPT_EXISTS", paymentId: r.paymentId }, 409);
       case "DENIED": return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
     }
+  });
+
+  /* 인앱 알림(파일럿 P0) — outbox 소비 결과, 내 것만 */
+  app.get("/academies/:academyId/notifications", guard, academyCtx, async (c) => {
+    const auth = c.get("auth");
+    return c.json({
+      notifications: await listMyNotifications(cfg.db, {
+        actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+      }),
+    });
+  });
+  app.post("/academies/:academyId/notifications/:notificationId/read", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth");
+    await markNotificationRead(cfg.db, {
+      actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+      notificationId: c.req.param("notificationId")!,
+    }, now());
+    return c.json({ ok: true });
   });
 
   /* ── 사진 파이프라인 사전 코어(#19) — 동의는 초안 계약(GET/PUT+If-Match·revocations) 구현 ── */

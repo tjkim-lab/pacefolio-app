@@ -144,7 +144,9 @@ test("동의 후 finalize 통과 — 정확한 조합만(교차조합 차단) ·
   assert.equal(fin.status, 200);
   // 동의 안 한 조합(SNS_POST×PUBLIC)은 차단 — 목적×대상 독립 매칭 금지
   const up2 = await req(coach, "POST", "/academies/a_wg/photos", { contentType: "image/png", byteSize: 10 });
-  const p2 = ((await up2.json()) as { photoId: string }).photoId;
+  const up2body = (await up2.json()) as { photoId: string; upload: { url: string } };
+  const p2 = up2body.photoId;
+  await app.request(up2body.upload.url, { method: "PUT", headers: { "content-type": "image/png" }, body: "img" });
   assert.equal((await req(coach, "POST", `/academies/a_wg/photos/${p2}/finalize`, {
     participantIds: ["p_dodam"], purpose: "SNS_POST", audience: "PUBLIC",
   })).status, 422);
@@ -157,7 +159,9 @@ test("동의 후 finalize 통과 — 정확한 조합만(교차조합 차단) ·
   // 철회 → 새 finalize 는 다시 차단(발송 시점 재검증 원칙)
   assert.equal((await req(mom, "POST", "/academies/a_wg/participants/p_dodam/photo-consent/revocations", {})).status, 201);
   const up3 = await req(coach, "POST", "/academies/a_wg/photos", { contentType: "image/png", byteSize: 10 });
-  const p3 = ((await up3.json()) as { photoId: string }).photoId;
+  const up3body = (await up3.json()) as { photoId: string; upload: { url: string } };
+  const p3 = up3body.photoId;
+  await app.request(up3body.upload.url, { method: "PUT", headers: { "content-type": "image/png" }, body: "img" });
   assert.equal((await req(coach, "POST", `/academies/a_wg/photos/${p3}/finalize`, {
     participantIds: ["p_dodam"], purpose: "CLASS_SHARE", audience: "CLASS_MEMBERS",
   })).status, 422);
@@ -174,4 +178,37 @@ test("어댑터 미주입 = 501 fail-closed (사업자 결정 대기 — 침묵 
     body: JSON.stringify({ contentType: "image/jpeg", byteSize: 10 }),
   });
   assert.equal(r.status, 501);
+});
+
+test("파일럿 P0: 빈 태그 우회 차단 · 업로드 미완료 finalize 422", async () => {
+  // 업로드 미완료(PUT 안 함) → finalize 422
+  const upA = await req(coach, "POST", "/academies/a_wg/photos", { contentType: "image/png", byteSize: 10 });
+  const pA = ((await upA.json()) as { photoId: string }).photoId;
+  const noUpload = await req(coach, "POST", `/academies/a_wg/photos/${pA}/finalize`, {
+    participantIds: [], purpose: "INTERNAL_RECORD", audience: "ACADEMY_INTERNAL",
+  });
+  assert.equal(noUpload.status, 422); // 객체 실존 확인(HEAD) 선행
+  // 빈 태그 + 외부 공개 시도 → 정책 차단(내부 기록만 허용)
+  const upB = await req(coach, "POST", "/academies/a_wg/photos", { contentType: "image/png", byteSize: 10 });
+  const bodyB = (await upB.json()) as { photoId: string; upload: { url: string } };
+  await app.request(bodyB.upload.url, { method: "PUT", headers: { "content-type": "image/png" }, body: "x" });
+  const bypass = await req(coach, "POST", `/academies/a_wg/photos/${bodyB.photoId}/finalize`, {
+    participantIds: [], purpose: "SNS_POST", audience: "PUBLIC",
+  });
+  assert.equal(bypass.status, 422); // "등장 원생 없음 = 허용" 악용 경로 봉합
+  // 빈 태그 + 내부 기록은 허용(풍경·시설 사진)
+  assert.equal((await req(coach, "POST", `/academies/a_wg/photos/${bodyB.photoId}/finalize`, {
+    participantIds: [], purpose: "INTERNAL_RECORD", audience: "ACADEMY_INTERNAL",
+  })).status, 200);
+});
+
+test("파일럿 P0: 동의 철회 후 기존 확정 사진 다운로드 재인가 — 즉시 차단 + 감사", async () => {
+  // 직전 테스트에서 mom 동의는 철회된 상태 — photoId(확정된 CLASS_SHARE 사진) 다운로드 시도
+  const r = await get(mom, `/academies/a_wg/photos/${photoId}/url`);
+  assert.equal(r.status, 404); // 발송 시점이 아니라 열람 시점 재검증(R2 P0-9) — 배포 즉시 중단
+  const audit = await db.select().from(s.auditLogs)
+    .where(eq(s.auditLogs.action, "photo.view_blocked_consent"));
+  assert.equal(audit.length, 1);
+  // staff 는 관리 목적 접근 유지
+  assert.equal((await get(owner, `/academies/a_wg/photos/${photoId}/url`)).status, 200);
 });

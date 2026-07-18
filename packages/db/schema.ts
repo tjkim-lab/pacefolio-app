@@ -582,6 +582,24 @@ export const outboxEvents = pgTable("outbox_events", {
   index("ix_outbox_unpublished").on(t.publishedAt, t.createdAt), // publisher 폴링
 ]);
 
+/* ── 인앱 알림(파일럿 P0) — Outbox 소비의 첫 채널.
+   알림톡·푸시(외부 채널)는 사업자 연동 시 dispatcher 에 채널만 추가. ── */
+export const inAppNotifications = pgTable("in_app_notifications", {
+  id: text("id").primaryKey(),                     // ntf_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  userId: text("user_id").notNull().references(() => users.id), // 수신자
+  category: text("category").notNull(),            // domain NOTIFICATION_CATEGORY
+  title: text("title").notNull(),
+  body: text("body").notNull(),                    // PII 최소 — ID 참조 위주
+  refType: text("ref_type"),
+  refId: text("ref_id"),
+  readAt: timestamp("read_at", { withTimezone: true, mode: "string" }),
+  createdAt: createdAt(),
+}, (t) => [
+  index("ix_ntf_user_created").on(t.userId, t.createdAt),
+  index("ix_ntf_academy").on(t.academyId),
+]);
+
 /* ── 사진 파이프라인 사전 코어(#19 — 스토리지 사업자 결정과 무관) ──
    동의 정본 = domain consent.ts(PhotoConsentRecord·canSendPhotoAsset).
    grants 는 목적×대상 쌍 JSON — 발송·공개 시점마다 서버 재검증(R2 P0-9). */

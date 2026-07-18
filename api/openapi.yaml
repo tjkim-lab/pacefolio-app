@@ -643,6 +643,23 @@ paths:
         '200': { description: 'url(단기)·contentType' }
         '404': { description: 없음 또는 권한 없음 }
 
+  /academies/{academyId}/notifications:
+    get:
+      tags: [notices]
+      summary: 인앱 알림(파일럿 P0) — outbox 소비 결과, 본인 수신분만(최근 50)
+      parameters: [{ $ref: '#/components/parameters/AcademyId' }]
+      responses:
+        '200': { description: notifications 배열(category·title·body·ref·readAt) }
+  /academies/{academyId}/notifications/{notificationId}/read:
+    post:
+      tags: [notices]
+      summary: 알림 읽음 — 소유자만·최초 시각 보존(멱등)
+      parameters:
+        - { $ref: '#/components/parameters/AcademyId' }
+        - { name: notificationId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 기록됨 }
+
   /academies/{academyId}/incidents:
     post:
       tags: [safety]

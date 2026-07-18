@@ -55,6 +55,14 @@ const app = createApp({
   storage: isProd ? undefined : (await import("./storage/adapter")).createDevMemoryStorage(),
 });
 
+/* 파일럿 P0: outbox 디스패처 루프 — 인앱 알림 소비(at-least-once·SKIP LOCKED).
+   프로덕션은 전용 워커/스케줄러로 분리 예정 — 단일 인스턴스 dev/파일럿은 이 루프로 충분. */
+const { dispatchPendingOutbox } = await import("./notifications/service");
+setInterval(() => {
+  dispatchPendingOutbox(db, new Date().toISOString()).catch((e) =>
+    console.warn(`[outbox] dispatch 실패(다음 주기 재시도): ${e instanceof Error ? e.message : e}`));
+}, 15_000);
+
 const port = Number(process.env.PORT ?? 3001);
 serve({ fetch: app.fetch, port }, () => {
   console.log(`PACEFOLIO API listening on :${port}`);

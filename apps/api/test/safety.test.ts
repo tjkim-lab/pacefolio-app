@@ -128,3 +128,22 @@ test("조회: staff 전체 · 코치 본인 보고분 · 비담당 코치 빈목
   const viewAudit = await db.select().from(s.auditLogs).where(eq(s.auditLogs.action, "safety_incident.viewed"));
   assert.ok(viewAudit.length >= 2); // staff·코치 열람 각각 감사
 });
+
+test("파일럿 P0: outbox 디스패치 — 사고 보고 → 원장 인앱 알림 · 재실행 멱등 · 본인만 조회", async () => {
+  const { dispatchPendingOutbox } = await import("../src/notifications/service");
+  const n1 = await dispatchPendingOutbox(db, NOW);
+  assert.ok(n1 >= 1); // 앞 테스트들의 SAFETY_INCIDENT 이벤트 소비
+  const n2 = await dispatchPendingOutbox(db, NOW);
+  assert.equal(n2, 0); // publishedAt 마킹 — 재실행 시 재발송 없음(멱등)
+  // 원장 인앱 알림 수신(사고 2건 = 알림 2건) — 상황 원문 미포함
+  const list = (await (await get(owner, "/academies/a_wg/notifications")).json()) as {
+    notifications: { category: string; body: string; refType: string | null }[];
+  };
+  const safety = list.notifications.filter((n) => n.category === "SAFETY_INCIDENT");
+  assert.equal(safety.length, 2);
+  assert.ok(!safety[0].body.includes("발목")); // PII 최소 — 심각도·참조만
+  assert.equal(safety[0].refType, "SafetyIncident");
+  // 코치(비수신자)에겐 안 보임 — 내 것만
+  const coachList = (await (await get(coach, "/academies/a_wg/notifications")).json()) as { notifications: unknown[] };
+  assert.equal(coachList.notifications.length, 0);
+});

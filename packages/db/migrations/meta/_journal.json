@@ -148,6 +148,13 @@
       "when": 1784379119478,
       "tag": "0020_photo-pipeline-core",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784387696291,
+      "tag": "0021_in-app-notifications",
+      "breakpoints": true
     }
   ]
 }

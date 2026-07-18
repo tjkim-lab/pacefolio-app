@@ -15,6 +15,8 @@ export interface StorageAdapter {
   createUploadTarget(key: string, contentType: string, nowISO: string): Promise<UploadTarget>;
   /** 열람용 단기 URL — 권한 판정은 호출부(서비스) 책임, 어댑터는 서명만 */
   getDownloadUrl(key: string, ttlSeconds: number, nowISO: string): Promise<string>;
+  /** 파일럿 P0: finalize 전 객체 실존 확인(HEAD) — 업로드 미완료 확정 금지 */
+  exists(key: string): Promise<boolean>;
   delete(key: string): Promise<void>;
 }
 
@@ -39,6 +41,7 @@ export function createDevMemoryStorage(): StorageAdapter & { objects: Map<string
       if (!objects.has(key)) throw new Error(`object not found: ${key}`);
       return `/dev-storage/${encodeURIComponent(key)}`;
     },
+    async exists(key) { return objects.has(key); },
     async delete(key) { objects.delete(key); },
   };
 }
