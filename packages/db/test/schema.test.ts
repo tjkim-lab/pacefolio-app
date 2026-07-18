@@ -296,6 +296,73 @@ test("C10-01: 금액 상한 1억 초과 insert 를 CHECK 제약명으로 거부"
   });
 });
 
+test("13차 A: 하한(0·음수) — 기존 양수 CHECK 가 최종 스키마에 살아있음 + 정확한 ±1억 라인 허용", async () => {
+  await seedTwoAcademies();
+  await db.insert(s.users).values({ id: "u_low", name: "하한", phone: "010-low" }).onConflictDoNothing();
+  await db.insert(s.guardians).values({ id: "gd_low", userId: "u_low" }).onConflictDoNothing();
+  await db.insert(s.participants).values({
+    id: "p_low", academyId: "a_wg", name: "하한원생", birth: "2018-01-01", ageLabel: "7세",
+  }).onConflictDoNothing();
+  // Payment 0 · -1 — 0009(상한)가 아니라 기존 양수 CHECK 가 막는다(다중 방어의 하한층)
+  await rejectsWith(
+    db.insert(s.payments).values({ id: "pay_zero", academyId: "a_wg", guardianId: "gd_low", amount: 0, status: "PENDING", idempotencyKey: "z-k" }),
+    /ck_payment_amount_positive/,
+  );
+  await rejectsWith(
+    db.insert(s.payments).values({ id: "pay_neg", academyId: "a_wg", guardianId: "gd_low", amount: -1, status: "PENDING", idempotencyKey: "n-k" }),
+    /ck_payment_amount_positive/,
+  );
+  // Invoice total 0
+  await rejectsWith(
+    db.insert(s.invoices).values({
+      id: "inv_zero", academyId: "a_wg", participantId: "p_low",
+      enrollmentId: "e_z", billingPeriodId: "bp_a", status: "ISSUED", total: 0, dueDate: "2025-09-10",
+    }),
+    /ck_invoice_total_positive/,
+  );
+  // Allocation 0
+  await db.insert(s.payments).values({
+    id: "pay_okl", academyId: "a_wg", guardianId: "gd_low", amount: 50000,
+    status: "CAPTURED", idempotencyKey: "ok-l",
+  });
+  await db.insert(s.invoices).values({
+    id: "inv_low", academyId: "a_wg", participantId: "p_low",
+    enrollmentId: "e_low", billingPeriodId: "bp_a", status: "ISSUED", total: 10000, dueDate: "2025-09-10",
+  });
+  await rejectsWith(
+    db.insert(s.paymentAllocations).values({ id: "pa_zero", paymentId: "pay_okl", invoiceId: "inv_low", academyId: "a_wg", amount: 0 }),
+    /ck_alloc_amount_positive/,
+  );
+  // Refund 0
+  await rejectsWith(
+    db.insert(s.refunds).values({
+      id: "rf_zero", academyId: "a_wg", paymentId: "pay_okl", participantId: "p_low",
+      status: "REQUESTED", requestedAmount: 0, requestedByUserId: "u_low",
+      requestedAt: "2026-07-18T00:00:00Z", reasonCode: "OTHER", idempotencyKey: "rf-z",
+    }),
+    /ck_refund_requested_positive/,
+  );
+  // RefundAllocation 음수 — 유효 연쇄(FK 전부 충족) 위에서 CHECK 만 실패
+  await db.insert(s.paymentAllocations).values({ id: "pa_okl", paymentId: "pay_okl", invoiceId: "inv_low", academyId: "a_wg", amount: 10000 });
+  await db.insert(s.refunds).values({
+    id: "rf_okl", academyId: "a_wg", paymentId: "pay_okl", participantId: "p_low",
+    status: "REQUESTED", requestedAmount: 10000, requestedByUserId: "u_low",
+    requestedAt: "2026-07-18T00:00:00Z", reasonCode: "OTHER", idempotencyKey: "rf-okl",
+  });
+  await rejectsWith(
+    db.insert(s.refundAllocations).values({
+      id: "ra_neg", refundId: "rf_okl", paymentAllocationId: "pa_okl", paymentId: "pay_okl",
+      invoiceId: "inv_low", participantId: "p_low", academyId: "a_wg", amount: -100,
+    }),
+    /ck_ra_amount_positive/,
+  );
+  // 정확한 경계: 라인 +1억 / −1억(할인) = 허용 (범위 CHECK 의 양끝)
+  await db.insert(s.invoiceLines).values([
+    { id: "il_edge_pos", invoiceId: "inv_low", type: "TUITION", label: "경계", amount: 100_000_000 },
+    { id: "il_edge_neg", invoiceId: "inv_low", type: "DISCOUNT", label: "경계 할인", amount: -100_000_000 },
+  ]);
+});
+
 test("트랜잭션: 실패 시 전체 rollback (Phase 0 완료 기준)", async () => {
   await seedUserAcademy();
   await assert.rejects(

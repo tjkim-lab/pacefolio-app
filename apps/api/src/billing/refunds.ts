@@ -121,8 +121,10 @@ export async function requestRefund(
     for (const a of targetAllocs) {
       const prior = priorRas.filter((ra) => ra.paymentAllocationId === a.id)
         .reduce((sum, ra) => sum + ra.amount, 0);
-      if (prior + a.amount > a.amount) {
-        return { kind: "DENIED", reason: "이미 환불 완료된 배분" };
+      /* 전액 환불 모델: 완료 환불이 조금이라도 있으면 같은 배분 재환불 금지.
+         부분 환불 도입 시 `prior + 이번 요청분 > a.amount` 로 확장(13차 A P0-②). */
+      if (prior > 0) {
+        return { kind: "DENIED", reason: "이미 환불 완료된 배분 — 누적 환불이 원결제를 초과할 수 없음" };
       }
     }
 

@@ -348,3 +348,21 @@ test("webhook: 존재하지 않는 Payment → REJECT_INVALID (inbox 보존)", a
   const inbox = await db.select().from(s.webhookInbox).where(eq(s.webhookInbox.providerEventId, "evt-ghost"));
   assert.equal(inbox.length, 1); // raw 보존 — 수동/재처리 대상
 });
+
+/* ── 13차 A P0-①: 개별 청구는 상한 이하지만 합계만 1억 초과 ── */
+test("13차 A P0: 6천만원 ×2 합산 결제(1.2억) → 서버 합계 guard 가 422 거부", async () => {
+  const { cookie, csrf, userId } = await login("bigsum");
+  await grantGuardian(userId, "bigsum");
+  await db.insert(s.invoices).values([
+    { id: "inv_big_a", academyId: "a_wg", participantId: "p_dodam", enrollmentId: "e_ba", billingPeriodId: "bp_q4", status: "ISSUED", total: 60_000_000, dueDate: "2025-09-10" },
+    { id: "inv_big_b", academyId: "a_wg", participantId: "p_dodam", enrollmentId: "e_bb", billingPeriodId: "bp_q4", status: "ISSUED", total: 60_000_000, dueDate: "2025-09-10" },
+  ]);
+  // 개별 6천만원은 DB CHECK(≤1억) 통과 — 합계 1.2억은 서비스 guard 만이 막는다
+  const res = await prepare(cookie, csrf, "k-bigsum", ["inv_big_a", "inv_big_b"]);
+  assert.equal(res.status, 422);
+  const body = await res.json() as { reason?: string };
+  assert.match(body.reason ?? "", /허용 범위|상한/);
+  // Payment 가 생성되지 않았어야 함(부분 성공 금지)
+  const pays = await db.select().from(s.payments);
+  assert.ok(!pays.some((p) => p.idempotencyKey === "k-bigsum"));
+});

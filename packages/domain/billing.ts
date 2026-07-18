@@ -21,6 +21,22 @@ export function isValidMoneyAmount(n: number): boolean {
   return Number.isSafeInteger(n) && n > 0 && n <= MAX_MONEY_AMOUNT;
 }
 
+/* 13차 A P1: 의미별 금액 검증 분리 — 청구 라인은 할인 때문에 음수를
+   허용하므로 isValidMoneyAmount 를 재사용하면 안 된다. 부호 정책을
+   type 별로 강제해 발행 API 에서 잘못된 검사 재사용을 차단. */
+export type InvoiceLineKind = "TUITION" | "VEHICLE" | "DISCOUNT" | "OTHER";
+/** 라인 공통: 정수 · 0 금지(정책 명시 — 0원 라인은 만들지 않는다) · |n| ≤ 1억 */
+export function isValidSignedLineAmount(n: number): boolean {
+  return Number.isSafeInteger(n) && n !== 0 && Math.abs(n) <= MAX_MONEY_AMOUNT;
+}
+/** 부호 정책: DISCOUNT = -1억..-1(음수만) / 그 외 = 1..1억(양수만) */
+export function isValidLineAmountForType(type: InvoiceLineKind, n: number): boolean {
+  if (!isValidSignedLineAmount(n)) return false;
+  return type === "DISCOUNT" ? n < 0 : n > 0;
+}
+/** Invoice 총액 = 반드시 양수·상한 (의미 별칭 — 발행 API 용) */
+export const isValidInvoiceTotal = isValidMoneyAmount;
+
 /** 납부액으로 인정되는 Payment 상태(리뷰 R2 P0-1).
    PENDING·AUTHORIZED·FAILED·CANCELLED 는 미포함. */
 export function isEffectivePayment(status: PaymentStatus): boolean {
