@@ -20,6 +20,8 @@ interface AdminLiveCtx {
   overview?: AdminOverviewData;
   academies: AdminAcademyRow[];
   setPlan: (academyId: string, plan: "BASIC" | "PRO") => Promise<{ ok: boolean; message: string }>;
+  suspend: (academyId: string, reason: string) => Promise<{ ok: boolean; message: string }>;
+  unsuspend: (academyId: string) => Promise<{ ok: boolean; message: string }>;
   refresh: () => Promise<void>;
 }
 
@@ -86,8 +88,29 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
     }
   }, [load]);
 
+  const fail = (e: unknown, fallback: string) => ({
+    ok: false,
+    message: e instanceof ApiError ? `실패(${e.status}: ${e.code})` : fallback,
+  });
+
+  const suspend = useCallback(async (academyId: string, reason: string) => {
+    try {
+      const r = await api.adminSuspendAcademy(academyId, reason);
+      await load();
+      return { ok: true, message: `정지 완료 — 멤버 세션 ${r.revokedUserSessions}명분 즉시 폐기` };
+    } catch (e) { return fail(e, "정지 실패 — 네트워크 확인"); }
+  }, [load]);
+
+  const unsuspend = useCallback(async (academyId: string) => {
+    try {
+      await api.adminUnsuspendAcademy(academyId);
+      await load();
+      return { ok: true, message: "정지 해제 — 다음 로그인부터 정상 이용" };
+    } catch (e) { return fail(e, "해제 실패 — 네트워크 확인"); }
+  }, [load]);
+
   return (
-    <Ctx.Provider value={{ state, errorMsg, overview, academies, setPlan, refresh: load }}>
+    <Ctx.Provider value={{ state, errorMsg, overview, academies, setPlan, suspend, unsuspend, refresh: load }}>
       {children}
     </Ctx.Provider>
   );

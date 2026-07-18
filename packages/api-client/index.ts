@@ -101,6 +101,8 @@ const AdminAcademyList = z.object({
   })),
 });
 const AdminSubscriptionSet = z.object({ subscriptionId: z.string(), priceKrwMonthly: z.number().int() });
+const AdminSuspendResult = z.object({ revokedUserSessions: z.number().int() });
+const AdminCancelResult = z.object({ subscriptionId: z.string() });
 
 /* ── 에러 — status 와 서버 error 코드 보존 ── */
 export class ApiError extends Error {
@@ -207,6 +209,19 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
     adminSetSubscription: (academyId: string, plan: "BASIC" | "PRO") =>
       call(AdminSubscriptionSet, `/admin/academies/${academyId}/subscription`, {
         method: "PUT", csrf: true, body: JSON.stringify({ plan }),
+      }),
+    adminCancelSubscription: (academyId: string, reason?: string) =>
+      call(AdminCancelResult, `/admin/academies/${academyId}/subscription/cancellation`, {
+        method: "POST", csrf: true, body: JSON.stringify(reason ? { reason } : {}),
+      }),
+    /* 통제 액션 — 정지는 전 멤버 세션 즉시 폐기 + guard 차단(사유 필수·감사) */
+    adminSuspendAcademy: (academyId: string, reason: string) =>
+      call(AdminSuspendResult, `/admin/academies/${academyId}/suspension`, {
+        method: "POST", csrf: true, body: JSON.stringify({ reason }),
+      }),
+    adminUnsuspendAcademy: (academyId: string) =>
+      call(z.void(), `/admin/academies/${academyId}/suspension`, {
+        method: "DELETE", csrf: true,
       }),
   };
 }
