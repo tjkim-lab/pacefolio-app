@@ -9,6 +9,8 @@ import {
 import { createApiClient, ApiError } from "@pacefolio/api-client";
 
 const api = createApiClient({ baseUrl: "/api" });
+/** READY 상태의 화면이 추가 admin 호출(SupportView 등)에 재사용 */
+export const adminApi = api;
 
 export type AdminLiveState = "FIXTURE" | "LOADING" | "READY" | "ERROR";
 export type AdminOverviewData = Awaited<ReturnType<typeof api.adminOverview>>;

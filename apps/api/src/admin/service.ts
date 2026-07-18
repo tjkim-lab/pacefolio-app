@@ -4,7 +4,7 @@
    ③ SupportView: 사유 필수·시간 제한·철회 — 테넌트 내부 열람의 유일한 문
    ④ 통제 액션: 학원 정지(전 멤버 세션 폐기 + guard 차단)·사용자 세션 강제 폐기
    전 액션 감사(audit) — "관리자도 감사받는다"가 이 모듈의 헌법. */
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import {
   SUBSCRIPTION_PRICE_KRW, SUBSCRIPTION_PLAN, type SubscriptionPlan,
@@ -188,6 +188,24 @@ export async function issueSupportView(db: Db, input: {
     }, nowISO);
     return { kind: "OK" as const, supportViewId, expiresAt };
   });
+}
+
+/** 최근 SupportView 이력 — 발급·만료·철회를 콘솔에서 한눈에(감사의 UI 표면) */
+export async function listSupportViews(db: Db, limit = 50) {
+  const rows = await db.select({
+    id: s.supportViews.id,
+    academyId: s.supportViews.academyId,
+    academyName: s.academies.name,
+    adminUserId: s.supportViews.adminUserId,
+    reason: s.supportViews.reason,
+    issuedAt: s.supportViews.issuedAt,
+    expiresAt: s.supportViews.expiresAt,
+    revokedAt: s.supportViews.revokedAt,
+  }).from(s.supportViews)
+    .leftJoin(s.academies, eq(s.academies.id, s.supportViews.academyId))
+    .orderBy(desc(s.supportViews.issuedAt))
+    .limit(limit);
+  return rows;
 }
 
 export async function revokeSupportView(db: Db, input: {

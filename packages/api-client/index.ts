@@ -103,6 +103,15 @@ const AdminAcademyList = z.object({
 const AdminSubscriptionSet = z.object({ subscriptionId: z.string(), priceKrwMonthly: z.number().int() });
 const AdminSuspendResult = z.object({ revokedUserSessions: z.number().int() });
 const AdminCancelResult = z.object({ subscriptionId: z.string() });
+const AdminSupportViewIssue = z.object({ supportViewId: z.string(), expiresAt: z.string() });
+const AdminSupportViewRevoke = z.object({ supportViewId: z.string() });
+const AdminSupportViewList = z.object({
+  supportViews: z.array(z.object({
+    id: z.string(), academyId: z.string(), academyName: z.string().nullable(),
+    adminUserId: z.string(), reason: z.string(),
+    issuedAt: z.string(), expiresAt: z.string(), revokedAt: z.string().nullable(),
+  })),
+});
 
 /* ── 에러 — status 와 서버 error 코드 보존 ── */
 export class ApiError extends Error {
@@ -222,6 +231,17 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
     adminUnsuspendAcademy: (academyId: string) =>
       call(z.void(), `/admin/academies/${academyId}/suspension`, {
         method: "DELETE", csrf: true,
+      }),
+    /* SupportView — 테넌트 내부 열람의 유일한 문(사유 필수·만료·철회·감사) */
+    adminListSupportViews: () => call(AdminSupportViewList, "/admin/support-views"),
+    adminIssueSupportView: (academyId: string, reason: string, minutes?: number) =>
+      call(AdminSupportViewIssue, "/admin/support-views", {
+        method: "POST", csrf: true,
+        body: JSON.stringify({ academyId, reason, ...(minutes ? { minutes } : {}) }),
+      }),
+    adminRevokeSupportView: (supportViewId: string, reason?: string) =>
+      call(AdminSupportViewRevoke, `/admin/support-views/${supportViewId}/revocation`, {
+        method: "POST", csrf: true, body: JSON.stringify(reason ? { reason } : {}),
       }),
   };
 }

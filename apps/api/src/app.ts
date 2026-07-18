@@ -10,7 +10,8 @@ import type { ProviderRegistry, OAuthProviderName } from "./auth/provider";
 import { requireSession, requireCsrf, requireAcademyContext, requirePlatformAdmin, SESSION_COOKIE, CSRF_COOKIE, type GuardEnv } from "./guard";
 import {
   getPlatformOverview, listAcademiesOverview, setSubscription, cancelSubscription,
-  issueSupportView, revokeSupportView, suspendAcademy, unsuspendAcademy, adminRevokeUserSessions,
+  issueSupportView, revokeSupportView, listSupportViews,
+  suspendAcademy, unsuspendAcademy, adminRevokeUserSessions,
 } from "./admin/service";
 import { requestGuardianLink } from "./linking/service";
 import { revokeGuardianLink } from "./linking/revoke";
@@ -887,6 +888,9 @@ export function createApp(cfg: ApiConfig) {
     reason: z.string().min(1).max(500),
     minutes: z.number().int().min(5).max(60).optional(),
   }).strict();
+  app.get("/admin/support-views", guard, adminOnly, async (c) =>
+    c.json({ supportViews: await listSupportViews(cfg.db) }));
+
   app.post("/admin/support-views", guard, csrf, adminOnly, async (c) => {
     const parsed = SupportViewBody.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);

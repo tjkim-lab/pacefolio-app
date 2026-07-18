@@ -3,6 +3,7 @@ import { AdminShell } from "./_shell";
 import { Tag } from "@/components/ui";
 import { Panel, MetricRow, Note, ServiceDot } from "./_ui";
 import { TaskList } from "./_tasks";
+import { DashboardKpis } from "./_kpi";
 import {
   DASH_SERVICES,
   KEY_METRICS,
@@ -24,17 +25,8 @@ export default function AdminDashboard() {
           </p>
         </div>
 
-        {/* KPI */}
-        <div className="grid grid-cols-4 gap-3">
-          <div className="rounded-2xl bg-accent-strong text-white p-4">
-            <div className="text-[11.5px] text-white/80 font-semibold">디지털 자가처리 완료율 (북극성)</div>
-            <div className="text-[22px] font-extrabold tracking-tight mt-1">76%</div>
-            <div className="text-[11px] text-white/80 font-medium mt-1">전화 개입 없이 종료 · 결석·Q&amp;A·결제·공지·리포트</div>
-          </div>
-          <Kpi label="자동결제 등록률" tag="별도 핵심" value="64%" sub="▲ 3.2%p · 589 / 920명 · 결제·리텐션" subTone="up" />
-          <Kpi label="활성 학원" tag="원생 1,284명" value="12곳" sub="온보딩 3 · 휴면 1 · 이탈위험 2" />
-          <Kpi label="오늘 처리 필요" value="8건" sub="긴급 2 · 주의 3 · 일반 3" subTone="dn" />
-        </div>
+        {/* KPI — 실연결(#30): API 연결 시 MRR·활성 학원·재원·미납으로 교체 */}
+        <DashboardKpis />
 
         {/* 작업함 + 상태/지표 */}
         <div className="grid grid-cols-[1.6fr_1fr] gap-3">
@@ -166,33 +158,6 @@ export default function AdminDashboard() {
         </Panel>
       </div>
     </AdminShell>
-  );
-}
-
-function Kpi({
-  label,
-  tag,
-  value,
-  sub,
-  subTone,
-}: {
-  label: string;
-  tag?: string;
-  value: string;
-  sub: string;
-  subTone?: "up" | "dn";
-}) {
-  return (
-    <div className="rounded-2xl bg-surface border border-line p-4">
-      <div className="text-[11.5px] text-ink3 font-semibold">
-        {label}
-        {tag && <span className="ml-1 text-[9.5px] font-bold text-ink3">{tag}</span>}
-      </div>
-      <div className="text-[22px] font-extrabold tracking-tight mt-1 text-ink">{value}</div>
-      <div className={`text-[11px] font-semibold mt-1 ${subTone === "up" ? "text-accent-ink" : subTone === "dn" ? "text-danger-ink" : "text-ink3"}`}>
-        {sub}
-      </div>
-    </div>
   );
 }
 

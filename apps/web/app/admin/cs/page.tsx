@@ -6,6 +6,8 @@ import { Tag } from "@/components/ui";
 import { IconChevron } from "@/components/ui/icons";
 import { FilterChips, Note, Empty, useConfirm, useToast } from "../_ui";
 import { CS, CS_STATUS_META, type CsStatus } from "../_data";
+import { AdminLiveProvider } from "../_live";
+import { SupportViewPanel } from "../_support-views";
 
 type F = "all" | "원장" | "보호자";
 
@@ -108,6 +110,11 @@ export default function AdminCs() {
           <ChatMini />
           <span>행 클릭 → 문의 상세. <b className="text-ink font-bold">고객에게 보이는 답변</b>과 <b className="text-ink font-bold">내부 메모</b>는 반드시 분리해 기록합니다.</span>
         </Note>
+
+        {/* 실연결(#30): 문의 처리 중 학원 내부 확인이 필요할 때 — 열람은 이 문으로만 */}
+        <AdminLiveProvider>
+          <SupportViewPanel />
+        </AdminLiveProvider>
       </div>
       {confirmView}
       {toastView}

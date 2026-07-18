@@ -628,6 +628,11 @@ paths:
       responses:
         '204': { description: 해제됨 }
   /admin/support-views:
+    get:
+      tags: [admin]
+      summary: SupportView 이력 조회 — 최근 50건(학원명·사유·만료·철회)
+      responses:
+        '200': { description: supportViews 배열 }
     post:
       tags: [admin]
       summary: SupportView 발급 — 사유 필수, 기본 30분·최대 60분 만료, 발급·철회 전부 감사
