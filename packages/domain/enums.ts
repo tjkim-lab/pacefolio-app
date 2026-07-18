@@ -91,6 +91,8 @@ export const SUBSCRIPTION_PRICE_KRW: Record<SubscriptionPlan, number> = {
 export const SUBSCRIPTION_STATUS = ["TRIAL", "ACTIVE", "PAST_DUE", "CANCELED"] as const;
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUS)[number];
 
+/* SupportView 열람 범위의 정본 = authorization.ts SUPPORT_VIEW_RESOURCES (중복 정의 금지 — 세션 리뷰) */
+
 /* 결제 서비스 온보딩 상태 — 원장 설정의 PG 가입·심사 수명주기 */
 export const PG_ONBOARDING_STATUS = ["NOT_ENROLLED", "IN_REVIEW", "AVAILABLE", "ACTIVE", "RESTRICTED"] as const;
 export type PgOnboardingStatus = (typeof PG_ONBOARDING_STATUS)[number];

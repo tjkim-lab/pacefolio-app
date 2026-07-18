@@ -23,6 +23,7 @@ interface OwnerLiveCtx {
   publish: (input: { title: string; body: string; audience: string }) =>
     Promise<{ ok: boolean; recipients: number; message: string }>;
   refreshNotices: () => Promise<void>;
+  refreshSummary: () => Promise<void>;
 }
 
 const Ctx = createContext<OwnerLiveCtx | null>(null);
@@ -47,7 +48,11 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
         const t = setTimeout(() => ctl.abort(), 1500);
         const probe = await fetch("/api/sessions/me", { signal: ctl.signal, credentials: "include" });
         clearTimeout(t);
-        if (probe.status !== 401 && !probe.ok) { setState("FIXTURE"); return; }
+        /* 세션 리뷰: 5xx = 살아있는 서버의 오류 → ERROR(데모 위장 금지). FIXTURE 는 API 부재만 */
+        if (!probe.ok && probe.status !== 401) {
+          if (probe.status >= 500) { reachable = true; throw new ApiError(probe.status, "PROBE_5XX"); }
+          setState("FIXTURE"); return;
+        }
         reachable = true;
         if (probe.status === 401) await api.devLogin("김도윤");
         const isOwner = (m: { roles: string[]; status: string }) =>
@@ -80,22 +85,30 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
     setNotices(nt.notices);
   }, [academyId]);
 
+  const refreshSummary = useCallback(async () => {
+    if (!academyId) return;
+    setSummary(await api.billingSummary(academyId));
+  }, [academyId]);
+
   const publish = useCallback(async (input: { title: string; body: string; audience: string }) => {
     if (!academyId) return { ok: false, recipients: 0, message: "학원 컨텍스트 없음" };
-    try {
-      const r = await api.publishNotice(academyId, input);
-      await refreshNotices();
-      return { ok: true, recipients: r.recipients, message: `보호자 ${r.recipients}명에게 발송했어요` };
-    } catch (e) {
+    /* 세션 리뷰 P1 패턴: 발행 성공과 목록 갱신 실패를 분리 — 성공을 실패로 위장 금지 */
+    let r;
+    try { r = await api.publishNotice(academyId, input); }
+    catch (e) {
       return {
         ok: false, recipients: 0,
         message: e instanceof ApiError ? `발송 실패(${e.status}: ${e.code})` : "발송 실패 — 네트워크 확인",
       };
     }
+    try { await refreshNotices(); } catch {
+      return { ok: true, recipients: r.recipients, message: `보호자 ${r.recipients}명에게 발송 — 목록 갱신은 새로고침으로` };
+    }
+    return { ok: true, recipients: r.recipients, message: `보호자 ${r.recipients}명에게 발송했어요` };
   }, [academyId, refreshNotices]);
 
   return (
-    <Ctx.Provider value={{ state, errorMsg, academyId, notices, summary, publish, refreshNotices }}>
+    <Ctx.Provider value={{ state, errorMsg, academyId, notices, summary, publish, refreshNotices, refreshSummary }}>
       {children}
     </Ctx.Provider>
   );

@@ -257,6 +257,11 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       call(z.void(), `/admin/academies/${academyId}/suspension`, {
         method: "DELETE", csrf: true,
       }),
+    /* 세션 리뷰: 서버·openapi 에 있던 op 의 클라이언트 누락 보완 */
+    adminRevokeUserSessions: (userId: string, reason: string) =>
+      call(z.void(), `/admin/users/${userId}/session-revocation`, {
+        method: "POST", csrf: true, body: JSON.stringify({ reason }),
+      }),
     /* SupportView — 테넌트 내부 열람의 유일한 문(사유 필수·만료·철회·감사) */
     adminListSupportViews: () => call(AdminSupportViewList, "/admin/support-views"),
     adminIssueSupportView: (academyId: string, reason: string, minutes?: number) =>

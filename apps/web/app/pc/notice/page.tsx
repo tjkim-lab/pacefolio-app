@@ -91,23 +91,30 @@ function PCNoticeBody() {
     }
     confirm({
       title: "공지를 발송할까요?",
-      rows: [
-        ["제목", ntTitle.trim()],
-        ["대상 원생", `${aud.n}명`],
-        ["알림 수신 보호자", `${aud.p}명`],
-        ["채널", "알림톡 + 앱 푸시"],
-      ],
+      /* 세션 리뷰: READY 에선 fixture 인원수를 실제 대상처럼 보이지 않게 — 산정은 서버 */
+      rows: live.state === "READY"
+        ? [
+            ["제목", ntTitle.trim()],
+            ["대상", `${aud.label} 보호자 — 수신자 수는 서버가 산정해요`],
+            ["채널", "알림톡 + 앱 푸시"],
+          ]
+        : [
+            ["제목", ntTitle.trim()],
+            ["대상 원생", `${aud.n}명`],
+            ["알림 수신 보호자", `${aud.p}명`],
+            ["채널", "알림톡 + 앱 푸시"],
+          ],
       label: "발송",
       onConfirm: () => {
         /* #25: 실연결 시 서버 발행 — 수신자 수·미열람은 서버 진실 */
         if (live.state === "READY") {
           void (async () => {
-            const r = await live.publish({
-              title: ntTitle.trim(), body: ntBody.trim(), audience: aud.label,
-            });
+            const title = ntTitle.trim();
+            const r = await live.publish({ title, body: ntBody.trim(), audience: aud.label });
             if (!r.ok) { toast(r.message); return; }
-            setSent(true);
-            setSentInfo({ title: ntTitle.trim(), p: r.recipients });
+            /* 세션 리뷰: sent 영구 차단 금지 — 발송 후 폼 리셋으로 연속 발송 허용 */
+            setSentInfo({ title, p: r.recipients });
+            setNtTitle("");
             toast(r.message);
           })();
           return;
@@ -251,7 +258,9 @@ function PCNoticeBody() {
             대상 원생 {aud.n}명 · 알림 수신 보호자 {aud.p}명
           </div>
           <Button variant="primary" full className="mt-3" onClick={sendNotice}>
-            {sent ? "발송 완료 ✓ · 도달 추적 중" : `원생 ${aud.n}명의 보호자에게 보내기`}
+            {live.state === "READY"
+              ? `${aud.label} 보호자에게 보내기`
+              : sent ? "발송 완료 ✓ · 도달 추적 중" : `원생 ${aud.n}명의 보호자에게 보내기`}
           </Button>
           {sentInfo && (
             <div className="mt-2.5 bg-accent-weak text-brand rounded-xl px-3.5 py-2.5 text-[12px] font-semibold leading-relaxed">

@@ -54,8 +54,15 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
         const t = setTimeout(() => ctl.abort(), 1500);
         const probe = await fetch("/api/sessions/me", { signal: ctl.signal, credentials: "include" });
         clearTimeout(t);
-        if (probe.status !== 401 && !probe.ok) { setState("FIXTURE"); return; }
+        /* 세션 리뷰: FIXTURE 폴백은 API 부재(네트워크 실패·라우트 없음)만 —
+           5xx 는 서버가 살아있는 오류이므로 ERROR 로(데모 위장 금지) */
+        if (!probe.ok && probe.status !== 401) {
+          if (probe.status >= 500) { reachable = true; throw new ApiError(probe.status, "PROBE_5XX"); }
+          setState("FIXTURE"); return;
+        }
         reachable = true;
+        // 주의(dev 데모 한계): 쿠키는 브라우저 전역 1개 — admin↔학부모·코치 데모 탭을
+        // 오가면 마지막 devLogin 계정으로 세션이 바뀐다. 데모는 한 번에 한 역할로.
         if (probe.status === 401) await api.devLogin("TJ");
         let me = await api.me();
         const isAdmin = (m: { roles: string[]; status: string }) =>
@@ -77,18 +84,25 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
     })();
   }, [load]);
 
+  /* 세션 리뷰 P1: mutation 성공과 refresh 실패를 분리 — 성공을 실패로 위장 금지 */
+  const refreshAfter = useCallback(async (okMsg: string) => {
+    try { await load(); } catch {
+      return { ok: true, message: `${okMsg} — 목록 갱신 실패, 새로고침 해주세요` };
+    }
+    return { ok: true, message: okMsg };
+  }, [load]);
+
   const setPlan = useCallback(async (academyId: string, plan: "BASIC" | "PRO") => {
-    try {
-      const r = await api.adminSetSubscription(academyId, plan);
-      await load();
-      return { ok: true, message: `${plan} · 월 ${r.priceKrwMonthly.toLocaleString()}원으로 변경했어요` };
-    } catch (e) {
+    let r;
+    try { r = await api.adminSetSubscription(academyId, plan); }
+    catch (e) {
       return {
         ok: false,
         message: e instanceof ApiError ? `변경 실패(${e.status}: ${e.code})` : "변경 실패 — 네트워크 확인",
       };
     }
-  }, [load]);
+    return refreshAfter(`${plan} · 월 ${r.priceKrwMonthly.toLocaleString()}원으로 변경했어요`);
+  }, [refreshAfter]);
 
   const fail = (e: unknown, fallback: string) => ({
     ok: false,
@@ -96,20 +110,17 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
   });
 
   const suspend = useCallback(async (academyId: string, reason: string) => {
-    try {
-      const r = await api.adminSuspendAcademy(academyId, reason);
-      await load();
-      return { ok: true, message: `정지 완료 — 멤버 세션 ${r.revokedUserSessions}명분 즉시 폐기` };
-    } catch (e) { return fail(e, "정지 실패 — 네트워크 확인"); }
-  }, [load]);
+    let r;
+    try { r = await api.adminSuspendAcademy(academyId, reason); }
+    catch (e) { return fail(e, "정지 실패 — 네트워크 확인"); }
+    return refreshAfter(`정지 완료 — 멤버 세션 ${r.revokedUserSessions}명분 즉시 폐기`);
+  }, [refreshAfter]);
 
   const unsuspend = useCallback(async (academyId: string) => {
-    try {
-      await api.adminUnsuspendAcademy(academyId);
-      await load();
-      return { ok: true, message: "정지 해제 — 다음 로그인부터 정상 이용" };
-    } catch (e) { return fail(e, "해제 실패 — 네트워크 확인"); }
-  }, [load]);
+    try { await api.adminUnsuspendAcademy(academyId); }
+    catch (e) { return fail(e, "해제 실패 — 네트워크 확인"); }
+    return refreshAfter("정지 해제 — 다음 로그인부터 정상 이용");
+  }, [refreshAfter]);
 
   return (
     <Ctx.Provider value={{ state, errorMsg, overview, academies, setPlan, suspend, unsuspend, refresh: load }}>

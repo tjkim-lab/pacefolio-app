@@ -295,7 +295,14 @@ function PCPaymentsBody() {
                       </div>
                     ))}
                   </div>
-                  <div className="flex items-center gap-2.5 mt-2.5"><Meter pct={liveRate} /><span className="text-[12px] text-ink3 font-semibold whitespace-nowrap">수납률 {liveRate}% · 수납 {fmt(s.paidKrw)} / 발행 {fmt(s.billedKrw)}</span></div>
+                  <div className="flex items-center gap-2.5 mt-2.5"><Meter pct={liveRate} /><span className="text-[12px] text-ink3 font-semibold whitespace-nowrap">수납률 {liveRate}% · 수납 {fmt(s.paidKrw)} / 발행 {fmt(s.billedKrw)}</span>
+                    <button
+                      onClick={() => { void ownerLive.refreshSummary().then(() => toast("수납 현황 갱신")).catch(() => toast("갱신 실패 — 새로고침 해주세요")); }}
+                      className="ml-auto shrink-0 rounded-lg border border-line bg-surface text-ink2 text-[11px] font-bold px-2.5 py-1.5 hover:text-ink"
+                    >
+                      새로고침
+                    </button>
+                  </div>
                 </Panel>
               );
             })()

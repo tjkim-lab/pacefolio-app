@@ -61,6 +61,19 @@ export function requireAcademyContext(db: Db, now: () => string, requiredRole?: 
   };
 }
 
+/** 세션 리뷰 반영: academyCtx 를 타지 않는 academyId 라우트(guardian-links·members/accept)용
+   정지 검사 — 멤버십 상태와 무관하게 학원 정지면 403. 통제 계약 "정지 = 전 역할 차단"의 구멍 봉합. */
+export function requireAcademyAlive(db: Db) {
+  return async (c: Context<GuardEnv>, next: Next) => {
+    const academyId = c.req.param("academyId");
+    if (!academyId) return c.json({ error: "INVALID_BODY" }, 422);
+    const academy = (await db.select({ suspendedAt: s.academies.suspendedAt })
+      .from(s.academies).where(eq(s.academies.id, academyId)))[0];
+    if (academy?.suspendedAt) return c.json({ error: "ACADEMY_SUSPENDED" }, 403);
+    await next();
+  };
+}
+
 /** Admin 경계(#27) — requireAcademyContext 의 PLATFORM_ADMIN 차단과 대칭.
    ACTIVE PLATFORM_ADMIN 멤버십만 통과. 그 외엔 404(admin 표면 존재 은닉). */
 export function requirePlatformAdmin() {

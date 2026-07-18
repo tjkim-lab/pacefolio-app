@@ -7,7 +7,8 @@
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import {
-  SUBSCRIPTION_PRICE_KRW, SUBSCRIPTION_PLAN, type SubscriptionPlan,
+  SUBSCRIPTION_PRICE_KRW, SUBSCRIPTION_PLAN, SUPPORT_VIEW_RESOURCES,
+  type SubscriptionPlan, type SupportViewResource,
 } from "@pacefolio/domain";
 import { newId } from "../crypto";
 import { recordAudit } from "../audit";
@@ -37,16 +38,27 @@ export async function getPlatformOverview(db: Db) {
   const active = subs.filter((r) => r.status === "ACTIVE");
   const planCount = (p: SubscriptionPlan) => active.find((r) => r.plan === p)?.n ?? 0;
 
-  /* 수납 집계(테넌트 학원비 — 우리 매출 아님, 관제용): 발행·수납·미납 */
+  /* 수납 집계(테넌트 학원비 — 우리 매출 아님, 관제용): 발행·수납·미납.
+     세션 리뷰 P1: 미납 = open total − 기수납 배분 / 수납 = 유효결제 − 완료환불 */
   const [inv] = await db.select({
     billed: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} not in ('DRAFT','VOID')), 0)::int`,
-    unpaid: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} in ('ISSUED','PARTIALLY_PAID','OVERDUE')), 0)::int`,
+    openTotal: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} in ('ISSUED','PARTIALLY_PAID','OVERDUE')), 0)::int`,
   }).from(s.invoices);
+  const [openAlloc] = await db.select({
+    n: sql<number>`coalesce(sum(${s.paymentAllocations.amount}), 0)::int`,
+  }).from(s.paymentAllocations)
+    .innerJoin(s.invoices, eq(s.paymentAllocations.invoiceId, s.invoices.id))
+    .innerJoin(s.payments, eq(s.paymentAllocations.paymentId, s.payments.id))
+    .where(and(
+      inArray(s.invoices.status, ["ISSUED", "PARTIALLY_PAID", "OVERDUE"]),
+      inArray(s.payments.status, ["CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED"]),
+    ));
   const [pay] = await db.select({
-    captured: sql<number>`coalesce(sum(${s.payments.amount}) filter (where ${s.payments.status} = 'CAPTURED'), 0)::int`,
+    valid: sql<number>`coalesce(sum(${s.payments.amount}) filter (where ${s.payments.status} in ('CAPTURED','PARTIALLY_REFUNDED','REFUNDED')), 0)::int`,
   }).from(s.payments);
   const [ref] = await db.select({
     pending: sql<number>`count(*) filter (where ${s.refunds.status} in ('REQUESTED','MUTUALLY_APPROVED','PROCESSING'))::int`,
+    refunded: sql<number>`coalesce(sum(${s.refunds.completedAmount}) filter (where ${s.refunds.status} = 'COMPLETED'), 0)::int`,
   }).from(s.refunds);
 
   return {
@@ -58,7 +70,11 @@ export async function getPlatformOverview(db: Db) {
       activeByPlan: { BASIC: planCount("BASIC"), PRO: planCount("PRO") },
       priceTable: SUBSCRIPTION_PRICE_KRW,
     },
-    tuition: { billedKrw: inv.billed, unpaidKrw: inv.unpaid, capturedKrw: pay.captured },
+    tuition: {
+      billedKrw: inv.billed,
+      unpaidKrw: Math.max(0, inv.openTotal - openAlloc.n),
+      capturedKrw: Math.max(0, pay.valid - ref.refunded),
+    },
     refundsPending: ref.pending,
   };
 }
@@ -79,8 +95,20 @@ export async function listAcademiesOverview(db: Db) {
   }).from(s.participants).groupBy(s.participants.academyId);
   const invs = await db.select({
     academyId: s.invoices.academyId,
-    unpaid: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} in ('ISSUED','PARTIALLY_PAID','OVERDUE')), 0)::int`,
+    openTotal: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} in ('ISSUED','PARTIALLY_PAID','OVERDUE')), 0)::int`,
   }).from(s.invoices).groupBy(s.invoices.academyId);
+  // 세션 리뷰 P1: 학원별 미납도 기수납 배분 차감
+  const allocs = await db.select({
+    academyId: s.invoices.academyId,
+    n: sql<number>`coalesce(sum(${s.paymentAllocations.amount}), 0)::int`,
+  }).from(s.paymentAllocations)
+    .innerJoin(s.invoices, eq(s.paymentAllocations.invoiceId, s.invoices.id))
+    .innerJoin(s.payments, eq(s.paymentAllocations.paymentId, s.payments.id))
+    .where(and(
+      inArray(s.invoices.status, ["ISSUED", "PARTIALLY_PAID", "OVERDUE"]),
+      inArray(s.payments.status, ["CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED"]),
+    ))
+    .groupBy(s.invoices.academyId);
 
   return rows.map((a) => {
     const sub = subs.find((x) => x.academyId === a.academyId);
@@ -91,7 +119,9 @@ export async function listAcademiesOverview(db: Db) {
         ? { plan: sub.plan, status: sub.status, priceKrwMonthly: sub.priceKrwMonthly }
         : null,
       activeParticipants: parts.find((x) => x.academyId === a.academyId)?.n ?? 0,
-      unpaidKrw: invs.find((x) => x.academyId === a.academyId)?.unpaid ?? 0,
+      unpaidKrw: Math.max(0,
+        (invs.find((x) => x.academyId === a.academyId)?.openTotal ?? 0) -
+        (allocs.find((x) => x.academyId === a.academyId)?.n ?? 0)),
     };
   });
 }
@@ -102,13 +132,17 @@ export async function setSubscription(db: Db, input: {
   actorUserId: string; academyId: string; plan: SubscriptionPlan;
 }, nowISO: string): Promise<AdminResult<{ subscriptionId: string; priceKrwMonthly: number }>> {
   if (!SUBSCRIPTION_PLAN.includes(input.plan)) return { kind: "INVALID", reason: "알 수 없는 플랜" };
-  const price = SUBSCRIPTION_PRICE_KRW[input.plan];
   return db.transaction(async (tx) => {
     const academy = (await tx.select().from(s.academies)
       .where(eq(s.academies.id, input.academyId)).for("update"))[0];
     if (!academy) return { kind: "NOT_FOUND" as const };
     const prev = (await tx.select().from(s.academySubscriptions)
       .where(eq(s.academySubscriptions.academyId, input.academyId)).for("update"))[0];
+    /* 세션 리뷰 반영: 같은 플랜 재지정·복원은 기존 스냅샷 가격 유지(grandfather 보호).
+       가격표 반영은 플랜이 실제로 바뀔 때만 — 일괄 개정은 명시적 reprice 트랙(후속). */
+    const price = prev && prev.plan === input.plan
+      ? prev.priceKrwMonthly
+      : SUBSCRIPTION_PRICE_KRW[input.plan];
     let subscriptionId: string;
     if (prev) {
       subscriptionId = prev.id;
@@ -128,7 +162,11 @@ export async function setSubscription(db: Db, input: {
     await recordAudit(tx, {
       academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
       action: "subscription.set", targetType: "AcademySubscription", targetId: subscriptionId,
-      detail: { plan: input.plan, priceKrwMonthly: price, prevPlan: prev?.plan ?? null },
+      detail: {
+        plan: input.plan, priceKrwMonthly: price,
+        prevPlan: prev?.plan ?? null, prevPriceKrwMonthly: prev?.priceKrwMonthly ?? null,
+        prevStatus: prev?.status ?? null,
+      },
       success: true,
     }, nowISO);
     return { kind: "OK" as const, subscriptionId, priceKrwMonthly: price };
@@ -164,9 +202,13 @@ const SUPPORT_VIEW_DEFAULT_MINUTES = 30;
 
 export async function issueSupportView(db: Db, input: {
   actorUserId: string; academyId: string; reason: string;
-  minutes?: number; allowedResources?: readonly string[];
+  minutes?: number; allowedResources?: readonly SupportViewResource[];
 }, nowISO: string): Promise<AdminResult<{ supportViewId: string; expiresAt: string }>> {
   if (!input.reason.trim()) return { kind: "INVALID", reason: "사유 필수" };
+  // 도메인 enum(authorization.ts 정본) 밖 리소스는 fail-closed(세션 리뷰 — 무검증 문자열 저장 금지)
+  if (input.allowedResources?.some((r) => !SUPPORT_VIEW_RESOURCES.includes(r))) {
+    return { kind: "INVALID", reason: "알 수 없는 열람 리소스" };
+  }
   const minutes = Math.min(input.minutes ?? SUPPORT_VIEW_DEFAULT_MINUTES, SUPPORT_VIEW_MAX_MINUTES);
   if (minutes < 5) return { kind: "INVALID", reason: "최소 5분" };
   return db.transaction(async (tx) => {
@@ -178,7 +220,10 @@ export async function issueSupportView(db: Db, input: {
     await tx.insert(s.supportViews).values({
       id: supportViewId, academyId: input.academyId, adminUserId: input.actorUserId,
       reason: input.reason.trim(),
-      allowedResources: JSON.stringify(input.allowedResources ?? ["OPERATIONS_READONLY"]),
+      // 기본 = 읽기 요약 3종(authorization.ts 정본 값) — 마스킹 프로필·결제 상태는 명시 요청 시에만
+      allowedResources: JSON.stringify(
+        input.allowedResources ?? ["BILLING_SUMMARY", "ATTENDANCE_SUMMARY", "AUDIT_TIMELINE"],
+      ),
       issuedAt: nowISO, expiresAt, createdAt: nowISO,
     });
     await recordAudit(tx, {
@@ -242,11 +287,22 @@ export async function suspendAcademy(db: Db, input: {
     await tx.update(s.academies).set({
       suspendedAt: nowISO, updatedAt: nowISO, version: sql`${s.academies.version} + 1`,
     }).where(eq(s.academies.id, academy.id));
-    /* 다음 요청을 기다리지 않는다 — 소속 전원 세션 즉시 폐기(guard 는 이후 재로그인도 차단) */
-    const members = await tx.select({ userId: s.academyMemberships.userId })
-      .from(s.academyMemberships)
-      .where(eq(s.academyMemberships.academyId, academy.id));
-    const userIds = [...new Set(members.map((m) => m.userId))];
+    /* 다음 요청을 기다리지 않는다 — 소속 전원 세션 즉시 폐기(guard 는 이후 재로그인도 차단).
+       세션 리뷰 반영: ACTIVE 멤버십만 대상, PLATFORM_ADMIN·시행자 본인 제외
+       (관리자는 테넌트 접근이 이미 403 — 폐기 실익 없이 콘솔 자기 잠금만 유발) */
+    const members = await tx.select({
+      userId: s.academyMemberships.userId,
+      roles: s.academyMemberships.roles,
+    }).from(s.academyMemberships)
+      .where(and(
+        eq(s.academyMemberships.academyId, academy.id),
+        eq(s.academyMemberships.status, "ACTIVE"),
+      ));
+    const userIds = [...new Set(
+      members
+        .filter((m) => !m.roles.includes("PLATFORM_ADMIN") && m.userId !== input.actorUserId)
+        .map((m) => m.userId),
+    )];
     if (userIds.length > 0) {
       await tx.update(s.sessions).set({ revokedAt: nowISO }).where(and(
         inArray(s.sessions.userId, userIds), isNull(s.sessions.revokedAt),

@@ -7,7 +7,7 @@ import type { Db } from "./sessions/service";
 import { revokeSession, revokeAllSessions, SESSION_TTL_DAYS, type IssuedSession } from "./sessions/service";
 import { startOAuth, handleOAuthCallback } from "./auth/service";
 import type { ProviderRegistry, OAuthProviderName } from "./auth/provider";
-import { requireSession, requireCsrf, requireAcademyContext, requirePlatformAdmin, SESSION_COOKIE, CSRF_COOKIE, type GuardEnv } from "./guard";
+import { requireSession, requireCsrf, requireAcademyContext, requireAcademyAlive, requirePlatformAdmin, SESSION_COOKIE, CSRF_COOKIE, type GuardEnv } from "./guard";
 import {
   getPlatformOverview, listAcademiesOverview, setSubscription, cancelSubscription,
   issueSupportView, revokeSupportView, listSupportViews,
@@ -67,6 +67,7 @@ export function createApp(cfg: ApiConfig) {
   const guard = requireSession(cfg.db, now);
   const csrf = requireCsrf(cfg.allowedOrigins);
   const academyCtx = requireAcademyContext(cfg.db, now);
+  const academyAlive = requireAcademyAlive(cfg.db); // academyCtx 미적용 라우트의 정지 차단(세션 리뷰)
   const guardianCtx = requireAcademyContext(cfg.db, now, "GUARDIAN");
 
   const setSessionCookies = (c: Parameters<typeof setCookie>[0], ses: IssuedSession) => {
@@ -160,7 +161,7 @@ export function createApp(cfg: ApiConfig) {
     academyInviteCode: z.string().min(4).max(64).optional(),
   }).strict(); // 예상하지 않은 필드 거부(R5 §6.2)
 
-  app.post("/academies/:academyId/guardian-links", guard, csrf, async (c) => {
+  app.post("/academies/:academyId/guardian-links", guard, csrf, academyAlive, async (c) => {
     const parsed = LinkBody.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
       return c.json({ error: "INVALID_BODY", issues: parsed.error.issues.map((i) => i.path.join(".")) }, 422);
@@ -324,7 +325,7 @@ export function createApp(cfg: ApiConfig) {
     return c.json({ membershipId: r.membershipId, status: r.status }, 201);
   });
   // 수락은 본인 — academyCtx(ACTIVE 요구) 밖에서 guard 만
-  app.post("/academies/:academyId/members/accept", guard, csrf, async (c) => {
+  app.post("/academies/:academyId/members/accept", guard, csrf, academyAlive, async (c) => {
     const auth = c.get("auth");
     const r = await acceptInvite(cfg.db, {
       actorUserId: auth.userId, academyId: c.req.param("academyId")!,
@@ -867,7 +868,7 @@ export function createApp(cfg: ApiConfig) {
     c.json({ academies: await listAcademiesOverview(cfg.db) }));
 
   const SubscriptionBody = z.object({ plan: z.enum(["BASIC", "PRO"]) }).strict();
-  app.put("/admin/academies/:academyId/subscription", guard, csrf, adminOnly, async (c) => {
+  app.put("/admin/academies/:academyId/subscription", guard, adminOnly, csrf, async (c) => {
     const parsed = SubscriptionBody.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
     const r = await setSubscription(cfg.db, {
@@ -882,7 +883,7 @@ export function createApp(cfg: ApiConfig) {
   const ReasonBody = z.object({ reason: z.string().min(1).max(500) }).strict();
   const OptionalReasonBody = z.object({ reason: z.string().max(500).optional() }).strict();
 
-  app.post("/admin/academies/:academyId/subscription/cancellation", guard, csrf, adminOnly, async (c) => {
+  app.post("/admin/academies/:academyId/subscription/cancellation", guard, adminOnly, csrf, async (c) => {
     const parsed = OptionalReasonBody.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
     const r = await cancelSubscription(cfg.db, {
@@ -901,7 +902,7 @@ export function createApp(cfg: ApiConfig) {
   app.get("/admin/support-views", guard, adminOnly, async (c) =>
     c.json({ supportViews: await listSupportViews(cfg.db) }));
 
-  app.post("/admin/support-views", guard, csrf, adminOnly, async (c) => {
+  app.post("/admin/support-views", guard, adminOnly, csrf, async (c) => {
     const parsed = SupportViewBody.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
     const r = await issueSupportView(cfg.db, {
@@ -912,7 +913,7 @@ export function createApp(cfg: ApiConfig) {
     return c.json({ supportViewId: r.supportViewId, expiresAt: r.expiresAt }, 201);
   });
 
-  app.post("/admin/support-views/:supportViewId/revocation", guard, csrf, adminOnly, async (c) => {
+  app.post("/admin/support-views/:supportViewId/revocation", guard, adminOnly, csrf, async (c) => {
     const parsed = OptionalReasonBody.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
     const r = await revokeSupportView(cfg.db, {
@@ -923,7 +924,7 @@ export function createApp(cfg: ApiConfig) {
     return c.json({ supportViewId: (r as { supportViewId: string }).supportViewId }, 200);
   });
 
-  app.post("/admin/academies/:academyId/suspension", guard, csrf, adminOnly, async (c) => {
+  app.post("/admin/academies/:academyId/suspension", guard, adminOnly, csrf, async (c) => {
     const parsed = ReasonBody.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
     const r = await suspendAcademy(cfg.db, {
@@ -935,7 +936,7 @@ export function createApp(cfg: ApiConfig) {
     return c.json({ revokedUserSessions: r.revokedUserSessions }, 200);
   });
 
-  app.delete("/admin/academies/:academyId/suspension", guard, csrf, adminOnly, async (c) => {
+  app.delete("/admin/academies/:academyId/suspension", guard, adminOnly, csrf, async (c) => {
     const r = await unsuspendAcademy(cfg.db, {
       actorUserId: c.get("auth").userId, academyId: c.req.param("academyId")!,
     }, now());
@@ -943,7 +944,7 @@ export function createApp(cfg: ApiConfig) {
     return c.body(null, 204);
   });
 
-  app.post("/admin/users/:userId/session-revocation", guard, csrf, adminOnly, async (c) => {
+  app.post("/admin/users/:userId/session-revocation", guard, adminOnly, csrf, async (c) => {
     const parsed = ReasonBody.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
     const r = await adminRevokeUserSessions(cfg.db, {

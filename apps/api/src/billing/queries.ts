@@ -3,22 +3,45 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import type { Db } from "../sessions/service";
 
-/** 원장 수납 관제 집계(#25) — staff(OWNER·DESK)만. 화면의 "LIVE 수납 현황" 실 데이터 판. */
+/** 원장 수납 관제 집계(#25) — staff(OWNER·DESK)만. 화면의 "LIVE 수납 현황" 실 데이터 판.
+   세션 리뷰 P1 반영: 미납 = open 청구 total − 기수납 배분(부분수납 이중계상 제거),
+   수납 = 유효결제(CAPTURED·PARTIALLY_REFUNDED·REFUNDED) − 완료환불(도메인 순수납 정의). */
 export async function getBillingSummary(db: Db, input: {
   academyId: string; actorRoles: readonly string[];
 }) {
   if (!input.actorRoles.includes("OWNER") && !input.actorRoles.includes("DESK")) return null;
   const [inv] = await db.select({
     unpaidCount: sql<number>`count(*) filter (where ${s.invoices.status} in ('ISSUED','PARTIALLY_PAID','OVERDUE'))::int`,
-    unpaidKrw: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} in ('ISSUED','PARTIALLY_PAID','OVERDUE')), 0)::int`,
+    openTotalKrw: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} in ('ISSUED','PARTIALLY_PAID','OVERDUE')), 0)::int`,
     paidCount: sql<number>`count(*) filter (where ${s.invoices.status} = 'PAID')::int`,
     paidKrw: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} = 'PAID'), 0)::int`,
     billedKrw: sql<number>`coalesce(sum(${s.invoices.total}) filter (where ${s.invoices.status} not in ('DRAFT','VOID')), 0)::int`,
   }).from(s.invoices).where(eq(s.invoices.academyId, input.academyId));
+  // open 청구서에 이미 배분된 유효 수납액 — 부분수납은 미납에서 차감
+  const [alloc] = await db.select({
+    n: sql<number>`coalesce(sum(${s.paymentAllocations.amount}), 0)::int`,
+  }).from(s.paymentAllocations)
+    .innerJoin(s.invoices, eq(s.paymentAllocations.invoiceId, s.invoices.id))
+    .innerJoin(s.payments, eq(s.paymentAllocations.paymentId, s.payments.id))
+    .where(and(
+      eq(s.invoices.academyId, input.academyId),
+      inArray(s.invoices.status, ["ISSUED", "PARTIALLY_PAID", "OVERDUE"]),
+      inArray(s.payments.status, ["CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED"]),
+    ));
   const [pay] = await db.select({
-    capturedKrw: sql<number>`coalesce(sum(${s.payments.amount}) filter (where ${s.payments.status} = 'CAPTURED'), 0)::int`,
+    validKrw: sql<number>`coalesce(sum(${s.payments.amount}) filter (where ${s.payments.status} in ('CAPTURED','PARTIALLY_REFUNDED','REFUNDED')), 0)::int`,
   }).from(s.payments).where(eq(s.payments.academyId, input.academyId));
-  return { ...inv, capturedKrw: pay.capturedKrw };
+  const [ref] = await db.select({
+    refundedKrw: sql<number>`coalesce(sum(${s.refunds.completedAmount}) filter (where ${s.refunds.status} = 'COMPLETED'), 0)::int`,
+  }).from(s.refunds).where(eq(s.refunds.academyId, input.academyId));
+  return {
+    unpaidCount: inv.unpaidCount,
+    unpaidKrw: Math.max(0, inv.openTotalKrw - alloc.n),
+    paidCount: inv.paidCount,
+    paidKrw: inv.paidKrw,
+    billedKrw: inv.billedKrw,
+    capturedKrw: Math.max(0, pay.validKrw - ref.refundedKrw),
+  };
 }
 
 export interface GuardianInvoiceRow {

@@ -579,11 +579,26 @@ paths:
   /academies/{academyId}/billing/summary:
     get:
       tags: [billing]
-      summary: 원장 수납 관제 집계(#25) — staff(OWNER·DESK)만. 발행·수납·미납 건수/합계
+      summary: >
+        원장 수납 관제 집계(#25) — staff(OWNER·DESK)만. 미납 = open 청구 total − 기수납 배분,
+        수납 = 유효결제(CAPTURED·PARTIALLY_REFUNDED·REFUNDED) − 완료환불 (세션 리뷰 반영)
       parameters:
         - { name: academyId, in: path, required: true, schema: { type: string } }
       responses:
-        '200': { description: 'unpaidCount·unpaidKrw·paidCount·paidKrw·billedKrw·capturedKrw' }
+        '200':
+          description: 수납 집계
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [unpaidCount, unpaidKrw, paidCount, paidKrw, billedKrw, capturedKrw]
+                properties:
+                  unpaidCount: { type: integer }
+                  unpaidKrw: { type: integer }
+                  paidCount: { type: integer }
+                  paidKrw: { type: integer }
+                  billedKrw: { type: integer }
+                  capturedKrw: { type: integer }
         '403': { $ref: '#/components/responses/Forbidden' }
 
   # ── Admin 백엔드 1차(#27) — PLATFORM_ADMIN 전용 경계 ───────────
@@ -612,15 +627,22 @@ paths:
         required: true
         content: { application/json: { schema: { type: object, required: [plan], properties: { plan: { type: string, enum: [BASIC, PRO] } } } } }
       responses:
-        '200': { description: '지정됨(subscriptionId·priceKrwMonthly)' }
-        '404': { description: 학원 없음 또는 비관리자 }
+        '200':
+          description: 지정됨 — 같은 플랜 재지정은 기존 스냅샷 가격 유지(grandfather 보호)
+          content: { application/json: { schema: { type: object, required: [subscriptionId, priceKrwMonthly], properties: { subscriptionId: { type: string }, priceKrwMonthly: { type: integer } } } } }
+        '404': { description: 학원 없음 또는 비관리자(은닉) }
+        '422': { description: INVALID_BODY }
   /admin/academies/{academyId}/subscription/cancellation:
     post:
       tags: [admin]
       summary: 구독 해지 — CANCELED 는 MRR 제외, 멱등
       parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { type: object, properties: { reason: { type: string, maxLength: 500 } } } } }
       responses:
-        '200': { description: 해지됨 }
+        '200': { description: '해지됨(subscriptionId)' }
+        '404': { description: 구독 없음 또는 비관리자(은닉) }
   /admin/academies/{academyId}/suspension:
     post:
       tags: [admin]
@@ -630,13 +652,16 @@ paths:
         required: true
         content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string } } } } }
       responses:
-        '200': { description: '정지됨(revokedUserSessions)' }
+        '200': { description: '정지됨(revokedUserSessions) — ACTIVE 일반 멤버만 폐기(PLATFORM_ADMIN·시행자 제외)' }
+        '404': { description: 학원 없음 또는 비관리자(은닉) }
+        '422': { description: 사유 누락 }
     delete:
       tags: [admin]
       summary: 정지 해제 — 멱등
       parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
       responses:
         '204': { description: 해제됨 }
+        '404': { description: 학원 없음 또는 비관리자(은닉) }
   /admin/support-views:
     get:
       tags: [admin]
@@ -651,13 +676,19 @@ paths:
         content: { application/json: { schema: { type: object, required: [academyId, reason], properties: { academyId: { type: string }, reason: { type: string }, minutes: { type: integer, minimum: 5, maximum: 60 } } } } }
       responses:
         '201': { description: '발급(supportViewId·expiresAt)' }
+        '404': { description: 학원 없음 또는 비관리자(은닉) }
+        '422': { description: 사유 누락·알 수 없는 열람 리소스(SUPPORT_VIEW_RESOURCE 밖) }
   /admin/support-views/{supportViewId}/revocation:
     post:
       tags: [admin]
       summary: SupportView 철회 — 멱등
       parameters: [{ name: supportViewId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { type: object, properties: { reason: { type: string, maxLength: 500 } } } } }
       responses:
         '200': { description: 철회됨 }
+        '404': { description: 대상 없음 또는 비관리자(은닉) }
   /admin/users/{userId}/session-revocation:
     post:
       tags: [admin]
@@ -668,6 +699,8 @@ paths:
         content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string } } } } }
       responses:
         '204': { description: 폐기됨 }
+        '404': { description: 대상 없음 또는 비관리자(은닉) }
+        '422': { description: 사유 누락 }
 
 components:
   securitySchemes:
