@@ -5,6 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import { canTransitionParticipantStatus, type ParticipantStatus } from "@pacefolio/domain";
 import { newId } from "../crypto";
+import { hashPhone, encryptPii } from "../crypto-pii";
 import { recordAudit, recordOutbox } from "../audit";
 import type { Db } from "../sessions/service";
 
@@ -32,9 +33,10 @@ export async function createParticipant(db: Db, input: {
       createdAt: nowISO, updatedAt: nowISO,
     });
     if (input.guardianPhone) {
+      const digits = input.guardianPhone.replace(/[^0-9]/g, "");
       await tx.insert(s.registeredGuardianContacts).values({
         id: newId("rgc"), academyId: input.academyId, participantId,
-        phone: input.guardianPhone.replace(/[^0-9]/g, ""),
+        phoneHash: hashPhone(digits), phoneEnc: encryptPii(digits), // #26 원문 미저장
       });
     }
     await recordAudit(tx, {

@@ -70,13 +70,13 @@ export async function requestGuardianLink(
     const session: GuardianVerificationSession | null = sesRow ? {
       id: asId(sesRow.id), issuedToUserId: asId(sesRow.issuedToUserId),
       purpose: sesRow.purpose as "GUARDIAN_LINK",
-      verifiedPhone: sesRow.verifiedPhone, verifiedAt: sesRow.verifiedAt,
+      verifiedPhone: sesRow.verifiedPhoneHash, verifiedAt: sesRow.verifiedAt, // #26 해시 매칭
       expiresAt: sesRow.expiresAt, consumedAt: sesRow.consumedAt,
     } : null;
     const invite: GuardianInvite | null = inviteRow ? {
       codeHash: inviteRow.codeHash, academyId: asId(inviteRow.academyId),
       participantId: asId(inviteRow.participantId),
-      intendedPhone: inviteRow.intendedPhone ?? undefined,
+      intendedPhone: inviteRow.intendedPhoneHash ?? undefined, // #26
       expiresAt: inviteRow.expiresAt, maxUses: inviteRow.maxUses,
       usedCount: inviteRow.usedCount, revokedAt: inviteRow.revokedAt,
     } : null;
@@ -87,7 +87,7 @@ export async function requestGuardianLink(
         id: asId(p.id), academyId: asId(p.academyId), name: p.name, birth: p.birth, ageLabel: p.ageLabel,
       })),
       registeredContacts: contactRows.map((c): RegisteredGuardianContact => ({
-        academyId: asId(c.academyId), participantId: asId(c.participantId), phone: c.phone,
+        academyId: asId(c.academyId), participantId: asId(c.participantId), phone: c.phoneHash, // #26
       })),
       invite,
       requestCodeHash,

@@ -160,13 +160,15 @@ export const registeredGuardianContacts = pgTable("registered_guardian_contacts"
   id: text("id").primaryKey(),                    // rgc_xxx
   academyId: text("academy_id").notNull().references(() => academies.id),
   participantId: text("participant_id").notNull().references(() => participants.id),
-  phone: text("phone").notNull(),                 // 정규화 저장(normalizePhone)
+  /* #26(docs/16 §D): 전화 원문 저장 금지 — 매칭=HMAC 해시 / 표시=AES-GCM */
+  phoneHash: text("phone_hash").notNull(),
+  phoneEnc: text("phone_enc").notNull(),
   relationshipType: relationshipTypeEnum("relationship_type"),
   createdAt: createdAt(),
 }, (t) => [
   index("ix_rgc_participant").on(t.participantId),
   foreignKey({ name: "fk_rgc_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
-  index("ix_rgc_phone").on(t.academyId, t.phone),
+  index("ix_rgc_phone").on(t.academyId, t.phoneHash),
 ]);
 
 /* OTP 검증 세션 — actor 귀속·목적 고정·1회 소비(docs/11 §D, R4 P0-6) */
@@ -174,7 +176,8 @@ export const guardianVerificationSessions = pgTable("guardian_verification_sessi
   id: text("id").primaryKey(),                    // gvs_xxx
   issuedToUserId: text("issued_to_user_id").notNull().references(() => users.id),
   purpose: text("purpose").notNull(),             // "GUARDIAN_LINK" 고정(도메인 계약)
-  verifiedPhone: text("verified_phone").notNull(),
+  verifiedPhoneHash: text("verified_phone_hash").notNull(), // #26 — 원문 대신 해시(매칭)+enc(표시)
+  verifiedPhoneEnc: text("verified_phone_enc").notNull(),
   verifiedAt: timestamp("verified_at", { withTimezone: true, mode: "string" }).notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
   consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "string" }), // 1회 소비
@@ -190,7 +193,7 @@ export const guardianInvites = pgTable("guardian_invites", {
   codeHash: text("code_hash").notNull(),
   academyId: text("academy_id").notNull().references(() => academies.id),
   participantId: text("participant_id").notNull().references(() => participants.id),
-  intendedPhone: text("intended_phone"),
+  intendedPhoneHash: text("intended_phone_hash"), // #26 — 결합 검증은 해시로 충분(표시 불필요)
   /* R7 P0-7: 초대로 부여할 권한 scope — 미지정 시 최소(일정·출결).
      건강정보·사진·결제·환불은 발급자(원장)가 명시적으로 부여해야 함. */
   allowedScopes: text("allowed_scopes").array().notNull().default(sql`ARRAY['VIEW_SCHEDULE','VIEW_ATTENDANCE']::text[]`),

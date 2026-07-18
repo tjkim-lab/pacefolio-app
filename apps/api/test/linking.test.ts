@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { schema as s } from "@pacefolio/db";
 import { createApp } from "../src/app";
 import { sha256Hex } from "../src/crypto";
+import { hashPhone, encryptPii } from "../src/crypto-pii";
 import type { OAuthProvider } from "../src/auth/provider";
 
 const migrationsFolder = join(
@@ -48,7 +49,7 @@ before(async () => {
     id: "p_dodam", academyId: "a_wg", name: "김도담", birth: "2017-04-10", ageLabel: "8세",
   });
   await db.insert(s.registeredGuardianContacts).values({
-    id: "rgc_1", academyId: "a_wg", participantId: "p_dodam", phone: "01030001234",
+    id: "rgc_1", academyId: "a_wg", participantId: "p_dodam", phoneHash: hashPhone("01030001234"), phoneEnc: encryptPii("01030001234"),
   });
 });
 
@@ -68,7 +69,7 @@ async function loginAndOtp(code: string, phone = "010-3000-1234") {
   const otpId = `gvs_${code}_${++seq}`;
   await db.insert(s.guardianVerificationSessions).values({
     id: otpId, issuedToUserId: userId, purpose: "GUARDIAN_LINK",
-    verifiedPhone: phone, verifiedAt: NOW,
+    verifiedPhoneHash: hashPhone(phone), verifiedPhoneEnc: encryptPii(phone), verifiedAt: NOW,
     expiresAt: new Date(Date.parse(NOW) + 10 * 60_000).toISOString(),
   });
   return { cookie, csrf, userId, otpId };
@@ -208,7 +209,7 @@ test("R7: 초대코드 연결 = invite.allowedScopes 만(기본: 일정·출결)
 
 test("R7: 두 번째 보호자는 primary 아님(원생당 1명) + 선등록 결합은 전체 권한", async () => {
   await db.insert(s.registeredGuardianContacts).values({
-    id: "rgc_scope", academyId: "a_wg", participantId: "p_scope", phone: "01055550002",
+    id: "rgc_scope", academyId: "a_wg", participantId: "p_scope", phoneHash: hashPhone("01055550002"), phoneEnc: encryptPii("01055550002"),
   });
   const { cookie, csrf, otpId } = await loginAndOtp("scopemom", "010-5555-0002");
   const res = await postLink(cookie, csrf, linkBody(otpId, {

@@ -17,6 +17,7 @@ import { randomBytes } from "node:crypto";
 import { schema as s } from "@pacefolio/db";
 import { requestGuardianLink } from "../src/linking/service";
 import { sha256Hex } from "../src/crypto";
+import { hashPhone, encryptPii } from "../src/crypto-pii";
 
 const DATABASE_URL_TEST = process.env.DATABASE_URL_TEST;
 const skip = !DATABASE_URL_TEST && "DATABASE_URL_TEST 미설정 — CI postgres 에서 실행";
@@ -74,7 +75,7 @@ async function seedActors(w: World, n: number, phone = "010-9999-0000") {
     await w.db.insert(s.users).values({ id: userId, name: `보호자${i}`, phone: `010-0000-${String(i).padStart(4, "0")}` });
     await w.db.insert(s.guardianVerificationSessions).values({
       id: otpId, issuedToUserId: userId, purpose: "GUARDIAN_LINK",
-      verifiedPhone: phone, verifiedAt: NOW(),
+      verifiedPhoneHash: hashPhone(phone), verifiedPhoneEnc: encryptPii(phone), verifiedAt: NOW(),
       expiresAt: new Date(Date.now() + 600_000).toISOString(),
     });
     actors.push({ userId, otpId });
@@ -129,7 +130,7 @@ test("동일 OTP session 20개 동시 요청 → 정확히 1개만 성공", { sk
   const w = await setup();
   // 등록 연락처 경로(invite 없이) — 같은 사용자·같은 OTP 세션으로 20회 동시
   await w.db.insert(s.registeredGuardianContacts).values({
-    id: rid("rgc"), academyId: w.academyId, participantId: w.participantId, phone: "01030001234",
+    id: rid("rgc"), academyId: w.academyId, participantId: w.participantId, phoneHash: hashPhone("01030001234"), phoneEnc: encryptPii("01030001234"),
   });
   const [actor] = await seedActors(w, 1, "010-3000-1234");
   const results = await Promise.all(

@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { schema as s } from "@pacefolio/db";
 import { createApp } from "../src/app";
+import { hashPhone } from "../src/crypto-pii";
 import type { OAuthProvider } from "../src/auth/provider";
 
 const migrationsFolder = join(
@@ -84,7 +85,8 @@ test("학생 등록: staff 201(+선등록 연락처) · 코치 403 — 수명주
   const contacts = await db.select().from(s.registeredGuardianContacts)
     .where(eq(s.registeredGuardianContacts.participantId, kidA));
   assert.equal(contacts.length, 1);
-  assert.equal(contacts[0].phone, "01030001234"); // 정규화
+  assert.equal(contacts[0].phoneHash, hashPhone("01030001234")); // #26: 원문 미저장 — 해시 매칭
+  assert.ok(!("phone" in contacts[0])); // 평문 컬럼 자체가 없음
   const r2 = await post(owner, "/academies/a_wg/participants", {
     name: "이하나", birth: "2018-05-05", ageLabel: "7세", status: "TRIAL",
   });

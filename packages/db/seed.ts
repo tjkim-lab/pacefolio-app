@@ -6,6 +6,7 @@
    ⚠️ 결제 데모를 위해 도담·서준 청구서를 ISSUED(미납)로 심는다 —
       웹 fixture 정본(PAID)과 이 지점만 다름(결제 플로우 시연 목적, 주석 명시).
    ========================================================= */
+import { hashPhone, encryptPii } from "./pii";
 import { eq } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import * as s from "./schema";
