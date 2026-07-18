@@ -19,6 +19,11 @@ import {
 import {
   recordAttendance, completeSession, listSessionAttendance, createAttendanceNotice,
 } from "./attendance/service";
+import {
+  createBillingPeriod, createInvoice, issueInvoice, voidInvoice, recordOfflinePayment,
+} from "./billing/issue";
+import { publishNotice, markNoticeRead, listNotices } from "./notices/service";
+import { createAcademy, inviteMember, acceptInvite } from "./academies/service";
 import { preparePayment, processPgWebhook } from "./billing/service";
 import { requestRefund, approveRefund, processRefundWebhook } from "./billing/refunds";
 import { listGuardianInvoices, getPaymentStatus } from "./billing/queries";
@@ -268,6 +273,176 @@ export function createApp(cfg: ApiConfig) {
     if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
     if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
     return c.json({ sessionId: r.sessionId, status: "CANCELED" }, 200);
+  });
+
+  /* ── 기본선 3단계(#24): 학원 생성 · 직원 초대 ── */
+  const CreateAcademyBody = z.object({
+    name: z.string().min(1).max(60),
+    ownerName: z.string().min(1).max(30),
+    themeColor: z.string().max(9).optional(),
+    themeInk: z.string().max(9).optional(),
+    logoEmoji: z.string().max(8).optional(),
+    billingCycleDefault: z.union([z.literal(1), z.literal(3)]).optional(),
+  }).strict();
+  app.post("/academies", guard, csrf, async (c) => {
+    const parsed = CreateAcademyBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth");
+    const r = await createAcademy(cfg.db, { actorUserId: auth.userId, ...parsed.data }, now());
+    if (r.kind !== "OK") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ academyId: r.academyId }, 201);
+  });
+  const InviteBody = z.object({
+    targetUserId: z.string().min(1).max(64),
+    roles: z.array(z.enum(["COACH", "DESK", "OWNER"])).min(1).max(3),
+  }).strict();
+  app.post("/academies/:academyId/members/invites", guard, csrf, academyCtx, async (c) => {
+    const parsed = InviteBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await inviteMember(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ membershipId: r.membershipId, status: r.status }, 201);
+  });
+  // 수락은 본인 — academyCtx(ACTIVE 요구) 밖에서 guard 만
+  app.post("/academies/:academyId/members/accept", guard, csrf, async (c) => {
+    const auth = c.get("auth");
+    const r = await acceptInvite(cfg.db, {
+      actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+    }, now());
+    if (r.kind !== "OK") {
+      const code = r.kind === "CONFLICT" ? 409 : r.kind === "FORBIDDEN" ? 403 : 422;
+      return c.json({ error: r.kind, reason: r.reason }, code);
+    }
+    return c.json({ membershipId: r.membershipId, status: r.status }, 200);
+  });
+
+  /* ── 기본선 3단계(#24): 청구 발행 · 오프라인 수납 ── */
+  const PeriodBody = z.object({
+    periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    cycleMonths: z.union([z.literal(1), z.literal(3)]),
+  }).strict();
+  app.post("/academies/:academyId/billing-periods", guard, csrf, academyCtx, async (c) => {
+    const parsed = PeriodBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await createBillingPeriod(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind !== "OK") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ billingPeriodId: r.billingPeriodId }, 201);
+  });
+  const InvoiceBody = z.object({
+    participantId: z.string().min(1).max(64),
+    billingPeriodId: z.string().min(1).max(64),
+    dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    lines: z.array(z.object({
+      type: z.enum(["TUITION", "VEHICLE", "DISCOUNT", "OTHER"]),
+      label: z.string().min(1).max(80),
+      amount: z.number().int(),
+    }).strict()).min(1).max(20),
+  }).strict();
+  app.post("/academies/:academyId/invoices", guard, csrf, academyCtx, async (c) => {
+    const parsed = InvoiceBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await createInvoice(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ invoiceId: r.invoiceId, total: r.total, status: "DRAFT" }, 201);
+  });
+  app.post("/academies/:academyId/invoices/:invoiceId/issue", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await issueInvoice(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, invoiceId: c.req.param("invoiceId")!,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ invoiceId: r.invoiceId, status: "ISSUED" }, 200);
+  });
+  const VoidBody = z.object({ reason: z.string().min(1).max(200) }).strict();
+  app.post("/academies/:academyId/invoices/:invoiceId/void", guard, csrf, academyCtx, async (c) => {
+    const parsed = VoidBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await voidInvoice(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, invoiceId: c.req.param("invoiceId")!,
+      reason: parsed.data.reason,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ invoiceId: r.invoiceId, status: "VOID" }, 200);
+  });
+  const OfflineBody = z.object({
+    invoiceId: z.string().min(1).max(64),
+    channel: z.enum(["BANK_TRANSFER", "CASH", "CARD_OFFLINE"]),
+    amount: z.number().int().positive().optional(),
+    evidenceNote: z.string().min(1).max(300), // 증빙 필수 — 화면 토글 수납 금지
+  }).strict();
+  app.post("/academies/:academyId/payments/offline", guard, csrf, academyCtx, async (c) => {
+    const idempotencyKey = c.req.header("idempotency-key");
+    if (!idempotencyKey || idempotencyKey.length > 128) {
+      return c.json({ error: "IDEMPOTENCY_KEY_REQUIRED" }, 422);
+    }
+    const parsed = OfflineBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await recordOfflinePayment(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data, idempotencyKey,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ paymentId: r.paymentId, invoiceId: r.invoiceId, amount: r.total }, 201);
+  });
+
+  /* ── 기본선 3단계(#24): 공지 ── */
+  const NoticePubBody = z.object({
+    title: z.string().min(1).max(80),
+    body: z.string().min(1).max(4000),
+    audience: z.string().min(1).max(200),
+  }).strict();
+  app.post("/academies/:academyId/notices", guard, csrf, academyCtx, async (c) => {
+    const parsed = NoticePubBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await publishNotice(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    return c.json({ noticeId: r.noticeId, recipients: r.recipients }, 201);
+  });
+  app.get("/academies/:academyId/notices", guard, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    return c.json({ notices: await listNotices(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles, academyId: c.req.param("academyId")!,
+    }) });
+  });
+  app.post("/academies/:academyId/notices/:noticeId/read", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth");
+    await markNoticeRead(cfg.db, {
+      actorUserId: auth.userId, academyId: c.req.param("academyId")!,
+      noticeId: c.req.param("noticeId")!,
+    }, now());
+    return c.json({ ok: true }, 200);
   });
 
   /* ── 기본선 2단계(#23): 학생 수명주기 · 반 배정 · 출결 ── */

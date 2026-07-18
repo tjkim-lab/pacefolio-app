@@ -578,6 +578,32 @@ export const outboxEvents = pgTable("outbox_events", {
   index("ix_outbox_unpublished").on(t.publishedAt, t.createdAt), // publisher 폴링
 ]);
 
+/* ── 기본선 3단계(#24): 공지 — 발행·읽음 추적(미열람 명단의 서버 정본) ── */
+export const dbNotices = pgTable("notices", {
+  id: text("id").primaryKey(),                     // nt_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  audience: text("audience").notNull(),            // 대상 서술(AudienceFilter 직렬화 — v1 텍스트)
+  publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" }).notNull(),
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => [
+  index("ix_notice_academy_published").on(t.academyId, t.publishedAt),
+  uniqueIndex("uq_notice_id_academy").on(t.id, t.academyId),
+]);
+
+export const noticeReceipts = pgTable("notice_receipts", {
+  id: text("id").primaryKey(),                     // ntr_xxx
+  noticeId: text("notice_id").notNull(),
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  userId: text("user_id").notNull().references(() => users.id),
+  readAt: timestamp("read_at", { withTimezone: true, mode: "string" }),
+}, (t) => [
+  uniqueIndex("uq_notice_receipt").on(t.noticeId, t.userId),
+  foreignKey({ name: "fk_receipt_notice_academy", columns: [t.noticeId, t.academyId], foreignColumns: [dbNotices.id, dbNotices.academyId] }),
+]);
+
 /* ── R7 배치 5: 환불 persistence (domain Refund·RefundAllocation 이행) ──
    정책(코드·OpenAPI·docs 동일): 부분승인 미지원(approved=requested) ·
    Refund 1건=원생 1명 · 요청자=실제 결제자 · 상호 승인(동일인 금지). */
