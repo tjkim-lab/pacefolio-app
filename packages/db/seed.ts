@@ -6,7 +6,7 @@
    ⚠️ 결제 데모를 위해 도담·서준 청구서를 ISSUED(미납)로 심는다 —
       웹 fixture 정본(PAID)과 이 지점만 다름(결제 플로우 시연 목적, 주석 명시).
    ========================================================= */
-import { hashPhone, encryptPii } from "./pii";
+import { hashPhone, encryptPii, hashPii } from "./pii";
 import { eq } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import * as s from "./schema";
@@ -52,6 +52,18 @@ export async function seedWondergym(db: Db, nowISO: string): Promise<void> {
   await db.insert(s.guardianParticipantLinks).values([
     { id: "gl_dodam", guardianId: "gd_psy", participantId: "p_dodam", academyId: "a_wondergym", ...perms },
     { id: "gl_seojun", guardianId: "gd_psy", participantId: "p_seojun", academyId: "a_wondergym", ...perms },
+  ]);
+  /* 학원 초대코드(데모) — 학부모 온보딩 실연결: WG2025 → 원더짐 (슬라이스 B 가 대량 발급) */
+  await db.insert(s.academyInviteCodes).values({
+    id: "aic_wg2025", academyId: "a_wondergym", codeHash: hashPii("WG2025"), label: "데모 초대코드",
+  });
+  /* 프로그램 — 온보딩 아이 등록 시 선택지(연령형 PLAY + 종목). 실제 반 배정은 학원 몫 */
+  await db.insert(s.programs).values([
+    { id: "prog_play1", academyId: "a_wondergym", name: "PLAY 1", targetAgeLabel: "만 4~5세", createdByUserId: "u_owner", createdAt: nowISO, updatedAt: nowISO },
+    { id: "prog_play2", academyId: "a_wondergym", name: "PLAY 2", targetAgeLabel: "만 6~7세", createdByUserId: "u_owner", createdAt: nowISO, updatedAt: nowISO },
+    { id: "prog_play3", academyId: "a_wondergym", name: "PLAY 3", targetAgeLabel: "만 8세~", createdByUserId: "u_owner", createdAt: nowISO, updatedAt: nowISO },
+    { id: "prog_soccer", academyId: "a_wondergym", name: "축구", createdByUserId: "u_owner", createdAt: nowISO, updatedAt: nowISO },
+    { id: "prog_basket", academyId: "a_wondergym", name: "농구", createdByUserId: "u_owner", createdAt: nowISO, updatedAt: nowISO },
   ]);
   await db.insert(s.billingPeriods).values({
     id: "bp_2025q4", academyId: "a_wondergym", periodStart: "2025-09-01", periodEnd: "2025-11-30", cycleMonths: 3,

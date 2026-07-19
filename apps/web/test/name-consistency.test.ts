@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
 import * as fx from "../lib/fixtures";
 import { COACHES as PC_COACHES } from "../app/pc/_data";
 import { COACHES as OWNER_COACHES } from "../app/owner/_data";
-import { ACADEMIES } from "../app/admin/_data";
+/* B5(#55): admin 은 apps/console-admin 로 분리됨 — admin 원장 이름 정합 검사는
+   console-admin/test/name-consistency.test.ts 로 이관(여기서 참조하면 모듈 없음). */
 import { coach as coachApp } from "../app/coach/_data";
 
 const fixtureNames = new Set(fx.users.map((u) => u.name));
@@ -34,11 +35,6 @@ test("owner 앱 COACHES = 정본 실명 + 화면 호칭('N 코치') 분리", () 
     const realName = c.name.replace(/ 코치$/, "");
     assert.ok(fixtureNames.has(realName), `owner 코치 '${c.name}' 실명이 정본에 없음`);
   }
-});
-
-test("admin 원더짐 행 원장 이름 = fixture 정본", () => {
-  const wg = ACADEMIES.find((a) => a.id === "wondergym")!;
-  assert.equal(wg.owner, fx.academy.ownerName); // 김도윤
 });
 
 test("coach 앱 로그인 코치 = fixture 김선재 (같은 인물, 같은 이름)", () => {

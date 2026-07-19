@@ -21,6 +21,9 @@ import { hqCrawlerFromEnv, HqCrawlerError } from "./hq/service";
 import { requestGuardianLink } from "./linking/service";
 import { revokeGuardianLink } from "./linking/revoke";
 import {
+  resolveInviteCode, createVerifiedPhoneSession, selfRegisterGuardianChildren,
+} from "./guardian/onboarding";
+import {
   createClass, generateSessions, cancelSession, listClasses, listSessions, listClassRoster,
 } from "./classes/service";
 import {
@@ -237,6 +240,71 @@ export function createApp(cfg: ApiConfig) {
       return c.json({ error: "OTP_SESSION_ALREADY_USED" }, 409); // LCV1 6.5 — 수동심사 아님
     }
     return c.json(result, 202); // PENDING(수동 심사)·REJECTED — 본문에 status
+  });
+
+  /* ── 보호자 온보딩 실연결 (슬라이스 A · 2026-07-19) ──
+     초대코드→학원 / 휴대폰 본인인증(세션) / 부모 아이 직접 등록.
+     ⚠️ SMS/PASS 스텁: dev 가 인증코드 반환·000000=오류 — 실서비스는 SMS challenge 대조.
+     docs/design/guardian-zem-benchmark.md §6. */
+  app.get("/guardian/invites/:code", guard, async (c) => {
+    const code = c.req.param("code");
+    if (!code) return c.json({ error: "INVALID_BODY" }, 422);
+    const r = await resolveInviteCode(cfg.db, code, now());
+    if (!r) return c.json({ error: "NOT_FOUND" }, 404);
+    return c.json(r, 200);
+  });
+
+  const OtpIssueBody = z.object({ phone: z.string().min(3).max(20) }).strict();
+  app.post("/guardian/otp/issue", guard, csrf, async (c) => {
+    const parsed = OtpIssueBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    // ⚠️ 실 SMS 미연동 — dev 만 코드 반환(스텁). 실서비스는 여기서 SMS 발송 + challenge 저장.
+    return c.json({ sent: true, devCode: cfg.enableDevLogin ? "123456" : undefined }, 200);
+  });
+
+  const OtpVerifyBody = z.object({
+    phone: z.string().min(3).max(20),
+    code: z.string().regex(/^\d{6}$/),
+  }).strict();
+  app.post("/guardian/otp/verify", guard, csrf, async (c) => {
+    const parsed = OtpVerifyBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    // ⚠️ 스텁: 발송코드 대조 없음(challenge 미저장) — 000000 만 오류 시뮬. 실서비스는 실제 대조.
+    if (parsed.data.code === "000000") return c.json({ error: "INVALID_CODE" }, 422);
+    const auth = c.get("auth");
+    const r = await createVerifiedPhoneSession(cfg.db, { userId: auth.userId, phone: parsed.data.phone }, now());
+    return c.json(r, 201);
+  });
+
+  const SelfRegisterBody = z.object({
+    verificationSessionId: z.string().min(1).max(64),
+    relationshipType: z.enum(["MOTHER", "FATHER", "GRANDPARENT", "LEGAL_GUARDIAN", "OTHER"]).default("OTHER"),
+    consentPolicyVersion: z.string().min(1).max(20),
+    consentAgreed: z.boolean(),
+    children: z.array(z.object({
+      name: z.string().min(1).max(50),
+      birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD"),
+      programId: z.string().max(64).optional(),
+    })).min(1).max(10),
+  }).strict();
+  app.post("/academies/:academyId/guardian/self-register", guard, csrf, academyAlive, async (c) => {
+    const parsed = SelfRegisterBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: "INVALID_BODY", issues: parsed.error.issues.map((i) => i.path.join(".")) }, 422);
+    }
+    const academyId = c.req.param("academyId");
+    if (!academyId) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth");
+    const r = await selfRegisterGuardianChildren(cfg.db, {
+      actorUserId: auth.userId, academyId, ...parsed.data,
+    }, now()).catch((e: Error) => {
+      console.warn(`[guardian self-register] tx rejected: ${e.message}`);
+      return null;
+    });
+    if (!r) return c.json({ error: "CONFLICT" }, 409);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
+    return c.json({ children: r.children }, 201);
   });
 
   /* 13차 D P0-1: 링크 철회 — 실제 제품 기능(raw SQL 테스트 대체).

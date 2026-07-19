@@ -36,6 +36,19 @@ export type PrepareResult = z.infer<typeof PrepareResult>;
 
 const DevLoginResult = z.object({ userId: z.string() });
 
+/* 보호자 온보딩(슬라이스 A) — 초대코드·본인인증·아이 등록 */
+const InviteResolve = z.object({
+  academyId: z.string(), academyName: z.string(), themeColor: z.string(),
+  programs: z.array(z.object({ id: z.string(), label: z.string(), hint: z.string().optional() })),
+});
+export type InviteResolve = z.infer<typeof InviteResolve>;
+const OtpIssue = z.object({ sent: z.boolean(), devCode: z.string().optional() });
+const OtpVerify = z.object({ verificationSessionId: z.string(), expiresAt: z.string() });
+const SelfRegisterResult = z.object({
+  children: z.array(z.object({ participantId: z.string(), name: z.string(), ageLabel: z.string() })),
+});
+export type SelfRegisterResult = z.infer<typeof SelfRegisterResult>;
+
 const PaymentStatus = z.object({
   paymentId: z.string(), status: z.string(), amount: z.number().int().positive(),
   invoices: z.array(z.object({ invoiceId: z.string(), status: z.string() })),
@@ -892,6 +905,21 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
     /* PS6 보호자 */
     myChildren: (academyId: string) =>
       call(MyChildren, `/academies/${academyId}/my-children`),
+    /* 보호자 온보딩(슬라이스 A) — 초대코드·본인인증(시뮬)·아이 직접 등록 */
+    resolveInvite: (code: string) =>
+      call(InviteResolve, `/guardian/invites/${encodeURIComponent(code)}`),
+    issueGuardianOtp: (phone: string) =>
+      call(OtpIssue, `/guardian/otp/issue`, { method: "POST", csrf: true, body: JSON.stringify({ phone }) }),
+    verifyGuardianOtp: (phone: string, code: string) =>
+      call(OtpVerify, `/guardian/otp/verify`, { method: "POST", csrf: true, body: JSON.stringify({ phone, code }) }),
+    selfRegisterChildren: (academyId: string, body: {
+      verificationSessionId: string; consentPolicyVersion: string; consentAgreed: boolean;
+      relationshipType?: "MOTHER" | "FATHER" | "GRANDPARENT" | "LEGAL_GUARDIAN" | "OTHER";
+      children: { name: string; birth: string; programId?: string }[];
+    }) =>
+      call(SelfRegisterResult, `/academies/${academyId}/guardian/self-register`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
     /* PS7 준비 */
     duplicateProgram: (academyId: string, programId: string) =>
       call(z.object({ kind: z.string(), programId: z.string(), versionId: z.string() }),

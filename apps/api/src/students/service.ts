@@ -32,7 +32,12 @@ export async function createParticipant(db: Db, input: {
 }, nowISO: string): Promise<CreateStudentResult> {
   if (!isStaff(input.actorRoles)) return { kind: "FORBIDDEN", reason: "학생 등록은 원장·데스크만" };
   return db.transaction(async (tx) => {
-    /* #49: FREE 원생 상한(퇴원 제외 재적) — 같은 tx 안에서 세어 동시 등록 초과 방지.
+    /* 리뷰 P1: FREE 원생 상한 경쟁 방지 — 학원 행을 FOR UPDATE 로 잠가 같은 학원의
+       동시 등록을 직렬화한다. 잠금 없이 count→insert 만 하면 READ COMMITTED 에서
+       두 tx 가 같은 수를 읽어 상한을 초과할 수 있다(다른 학원은 다른 행이라 무관). */
+    await tx.select({ id: s.academies.id }).from(s.academies)
+      .where(eq(s.academies.id, input.academyId)).for("update");
+    /* #49: FREE 원생 상한(퇴원 제외 재적) — 위 잠금으로 직렬화된 count.
        상한 도달 = 402 안내(업그레이드). #50: UNLIMITED_PARTICIPANTS grant 예외 인정. */
     const denied = await checkFeature(tx, input.academyId, "UNLIMITED_PARTICIPANTS", nowISO);
     if (denied) {

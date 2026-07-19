@@ -7,7 +7,7 @@
 ## 한 줄
 백엔드 착공(R5 GO 8.7) 이후 **기본선 수명주기 전 구간 실 API + 4역할 화면 실연결 +
 가격 확정·Admin 관제 + 13차 A~E·14차 A–D 리뷰 반영 + 사진 파이프라인 코어**까지 완료.
-테스트 **api 212 · domain 141 · db 15 · web 10 · Playwright e2e 13** — CI 2 job(verify+e2e) 그린.
+테스트 **api 216 · domain 141 · db 15 · web 10 · Playwright e2e 15** — CI 2 job(verify+e2e) 그린.
 
 ## 검증 방법 (재현 가능)
 ```bash
@@ -44,6 +44,7 @@ npm run dev                      # :3000 웹 + :3001 API(PGlite in-memory 자동
 | 원장 대시보드 완결(#49·#50 e2e) | 반별 정원 서버 집계(listClasses enrolled=ACTIVE 등록·READY 정원 패널 복원) + PC 대시보드 E2E(KPI·정원·공지 재알림 왕복 — 긴급결석·미납 왕복은 owner-home.spec 이 같은 엔드포인트 검증) | classes.test·pc-dashboard.spec |
 | owner·PC 원생 여정(#51~54) | listParticipants 에 반·미납 동봉(#51) → getParticipantDetail 서버 정본(#52: 반·담당코치·보호자 연결(관계·검증·결제권한, **연락처·이름 미포함**)·청구서(금액 포함)) → 출석 집계 동봉(#53: 실제 출결 기록만·예정 통보 미합산·ratePct=출석+지각+조퇴/전체) → PC 상세도 같은 API 재사용(#54). owner·PC 양쪽 목록→상세 서버정본 완결. READY 없는 차량·보강 카드는 미표시(위장 금지) | students/service.ts·owner-dashboard.test |
 | B5 admin 물리분리(#55) | apps/console-admin 신설(:3002) — 교차테넌트 개인정보 최대 리스크 표면을 학원 앱 배포에서 격리(아키텍처 B 완결). app/admin 전체 이동·admin 전용 proxy(PLATFORM_ADMIN 정본 검증·전 응답 no-store/noindex·실패 전부 404 은닉)·API Origin allowlist :3002 추가·web 에서 admin 표면 제거. 공용 UI·fixtures 는 임시 복제(packages/ui 승격 전) | console-admin/·e2e 16/16 |
+| 보호자 온보딩 실연결(슬라이스 A) | ZEM 벤치마크 온보딩·가입 신규 흐름(`app/onboarding` — 하단탭 없는 자체 PhoneFrame) — 초대코드로 학원 진입 → 휴대폰 본인인증(세션) → 약관 → **부모가 아이 직접 등록**(아이 검색·연결코드·QR·승인 **없음**·형제 추가). 모델 개정: 학원 선등록 원생 매칭 아님(유저 확정). 실 서버·DB = migration 0030 `academy_invite_codes`+seed(WG2025→원더짐·프로그램) + 엔드포인트 4(invite 검증·OTP issue/verify·self-register=participant·link(VERIFIED)·GUARDIAN 멤버십·세션 1회소비 한 tx) + api-client 4 + 웹 LIVE(probe→devLogin 박서연 폴백, API 불통 시 FIXTURE). ⚠️SMS/PASS·OAuth 스텁(dev 코드 123456·000000=오류)·program FK 없음(등록의도만). 설계 = docs/design/guardian-zem-benchmark.md | guardian/onboarding.ts·guardian-onboarding.test 4건·e2e LIVE 왕복 2건 |
 
 ### ⏸️ 결정 대기 (TJ) — 이것만 정하면 다음이 풀림
 1. ~~사진 저장소 사업자~~ → **NCP 확정 (2026-07-19 TJ: "쓰던 곳을 쓴다")**. 코드 완성·주입 배선 완료 —
@@ -56,6 +57,7 @@ npm run dev                      # :3000 웹 + :3001 API(PGlite in-memory 자동
 ### ▶️ 다음 개발 후보 (결정 무관)
 - ~~AudienceFilter 2단계~~ ✅#44 · ~~양방향 채팅 UI~~ ✅#46 · ~~E2E 확대~~ ✅#47 · ~~owner 모바일 홈~~ ✅#48 · ~~원장 대시보드 완결~~ ✅#49·50 · ~~owner·PC 원생 여정~~ ✅#51~54
 - **남은 소품 후보**: 원생 상세에 안전 특이사항 동봉 · 출결 이력 목록(상세) · PC students 목록/상세 통합 · E2E 계속 확대
+- **보호자 온보딩 후속**: 슬라이스 B 학원 대량 초대(학부모 명단 엑셀→초대코드 대량 생성·발송 — CSV 스테이징+`guardianInvites` 재사용, docs/design §9) · 실 SMS/PASS·OAuth(현 dev 세션 스텁 대체) · 보호자 홈 ZEM 원칙 재구성
 - **대형 트랙**: B5(console-admin 물리분리, **옆 터미널 진행 중 2026-07-19**) · AudienceFilter 저장 프리셋 · 외부 준비물 해소 후 Gate 3(실 로그인·PG)
 
 ### 🔌 외부 준비물 (Gate 3 전제)

@@ -68,6 +68,9 @@ export default function LoginPage() {
             <Link href="/demo" className="text-accent hover:underline">역할 허브(데모) →</Link>
             <Link href="/stage" className="text-ink3 hover:underline">라이브 스테이지 →</Link>
           </div>
+          <div className="mt-2.5 text-center">
+            <Link href="/onboarding?again=1" className="text-[12.5px] font-semibold text-accent hover:underline">보호자 온보딩(신규) →</Link>
+          </div>
         </div>
       </div>
     </div>

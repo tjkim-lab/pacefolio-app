@@ -263,6 +263,22 @@ export const guardianParticipantLinks = pgTable("guardian_participant_links", {
     .where(sql`${t.isPrimaryGuardian} = true`),
 ]);
 
+/* 학원 단위 초대코드 — 학부모가 "어느 학원"에 등록할지 결정(= 아이 연결용 아님).
+   학원이 학부모 명단(엑셀) 업로드 → 코드 대량 발급·발송(슬라이스 B)의 대상 테이블.
+   code 원문 저장 금지 — hash 만(guardian_invites 와 동일 규약). */
+export const academyInviteCodes = pgTable("academy_invite_codes", {
+  id: text("id").primaryKey(),                    // aic_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  codeHash: text("code_hash").notNull(),
+  label: text("label"),                           // 발송 배치·용도 메모(선택)
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+  createdAt: createdAt(),
+}, (t) => [
+  uniqueIndex("uq_academy_invite_code_hash").on(t.codeHash),
+  index("ix_academy_invite_academy").on(t.academyId),
+]);
+
 /* ── 기본선 1단계(#22): 반 · 수업 일정 (경쟁 비교 반영 — docs/15) ──
    수업 유형 3종 + 반복 일정 전개(세션 인스턴스) + 코치 담당(assignment).
    assignment 는 채팅 HEALTH 코치 담당 검증(13차 C 잔여)의 전제 테이블. */

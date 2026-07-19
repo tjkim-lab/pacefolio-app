@@ -12,6 +12,7 @@
     "start": "npm run start -w web",
     "lint": "npm run lint -w web && npm run lint -w console-admin",
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "verify": "npm run typecheck && npm test && npx --yes @redocly/cli@1.34.2 lint api/openapi.yaml && npm run lint && npm run build"
   }
 }
