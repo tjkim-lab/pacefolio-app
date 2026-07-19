@@ -7,6 +7,7 @@ import {
   createContext, useCallback, useContext, useEffect, useState, type ReactNode,
 } from "react";
 import { createApiClient, ApiError } from "@pacefolio/api-client";
+import { DemoBadge } from "@/components/ui/DemoBadge";
 
 const api = createApiClient({ baseUrl: "/api" });
 /** READY 상태의 화면이 추가 admin 호출(SupportView 등)에 재사용 */
@@ -131,6 +132,7 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ state, errorMsg, overview, academies, setPlan, suspend, unsuspend, refresh: load }}>
       {children}
+      <DemoBadge show={state === "FIXTURE"} />
     </Ctx.Provider>
   );
 }

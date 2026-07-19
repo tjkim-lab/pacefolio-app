@@ -27,6 +27,9 @@ export default defineConfig({
       url: "http://localhost:3000",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
+      /* 학부모 결제 E2E: mockpg 시뮬 플래그 — 브라우저가 PG 웹훅을 대행하는
+         명시 게이트(parent/_live.tsx). 실 PG(Gate 3) 전환 시 이 env 와 함께 제거. */
+      env: { NEXT_PUBLIC_PACEFOLIO_PG_SIMULATION: "1" },
     },
   ],
 });

@@ -722,3 +722,105 @@ export async function setSessionActivities(db: Db, input: Actor & {
     return { kind: "UPDATED" as const, count: input.activities.length };
   });
 }
+
+/* ══ 7. 프로그램 복제 — PS7 준비(docs/23) ══
+   같은 학원 안에서 프로그램 전체를 새 프로그램(+DRAFT v1)으로 복사.
+   원본 우선순위: 최신 PUBLISHED → 없으면 최신 버전. 활동은 학원 공유 자산이라
+   개정판 참조를 그대로 유지(복사 아님). 상품화(타 학원 설치)는 docs/23 설계 —
+   이 함수는 그 "복사본 생성" 경로의 학원 내 선행 구현. */
+export async function duplicateProgram(db: Db, input: Actor & { programId: string }, nowISO: string) {
+  if (!isOwner(input.actorRoles)) return FORBIDDEN_OWNER;
+  return db.transaction(async (tx) => {
+    const src = (await tx.select().from(s.programs).where(and(
+      eq(s.programs.id, input.programId), eq(s.programs.academyId, input.academyId),
+    )))[0];
+    if (!src) return { kind: "NOT_FOUND" as const };
+    const versions = await tx.select().from(s.programVersions)
+      .where(eq(s.programVersions.programId, src.id));
+    const base = versions.filter((v) => v.status === "PUBLISHED")
+      .sort((a, b) => (a.publishedAt ?? "").localeCompare(b.publishedAt ?? "")).at(-1)
+      ?? versions.sort((a, b) => a.createdAt.localeCompare(b.createdAt)).at(-1);
+    const modes = await tx.select().from(s.programModes)
+      .where(eq(s.programModes.programId, src.id));
+    const newProgramId = newId("prog");
+    const newVersionId = newId("pv");
+    await tx.insert(s.programs).values({
+      id: newProgramId, academyId: input.academyId, name: `${src.name} (복제)`,
+      description: src.description, targetAgeLabel: src.targetAgeLabel,
+      createdByUserId: input.actorUserId, createdAt: nowISO, updatedAt: nowISO,
+    });
+    if (modes.length) {
+      await tx.insert(s.programModes).values(modes.map((m) => ({
+        id: newId("pmode"), programId: newProgramId, academyId: input.academyId, mode: m.mode,
+      })));
+    }
+    await tx.insert(s.programVersions).values({
+      id: newVersionId, academyId: input.academyId, programId: newProgramId,
+      versionLabel: "v1", basedOnVersionId: base?.id ?? null,
+      createdByUserId: input.actorUserId, createdAt: nowISO, updatedAt: nowISO,
+    });
+    if (base) {
+      // 레벨 → 섹션(부모 리매핑) → 회차 → 회차활동 딥카피 (createVersion 과 동일 규칙)
+      const levels = await tx.select().from(s.programLevels)
+        .where(eq(s.programLevels.programVersionId, base.id));
+      const levelMap = new Map(levels.map((lv) => [lv.id, newId("plv")]));
+      if (levels.length) {
+        await tx.insert(s.programLevels).values(levels.map((lv) => ({
+          ...lv, id: levelMap.get(lv.id)!, programVersionId: newVersionId,
+          createdAt: nowISO, updatedAt: nowISO,
+        })));
+      }
+      const sections = await tx.select().from(s.curriculumSections)
+        .where(eq(s.curriculumSections.programVersionId, base.id));
+      const secMap = new Map(sections.map((sec) => [sec.id, newId("csec")]));
+      if (sections.length) {
+        await tx.insert(s.curriculumSections).values(sections.map((sec) => ({
+          ...sec, id: secMap.get(sec.id)!, programVersionId: newVersionId,
+          parentSectionId: sec.parentSectionId ? secMap.get(sec.parentSectionId) ?? null : null,
+          createdAt: nowISO,
+        })));
+      }
+      const sessions = await tx.select().from(s.curriculumSessions)
+        .where(eq(s.curriculumSessions.programVersionId, base.id));
+      const sesMap = new Map(sessions.map((se) => [se.id, newId("cses")]));
+      if (sessions.length) {
+        await tx.insert(s.curriculumSessions).values(sessions.map((se) => ({
+          ...se, id: sesMap.get(se.id)!, programVersionId: newVersionId,
+          sectionId: secMap.get(se.sectionId)!, createdAt: nowISO, updatedAt: nowISO,
+        })));
+        const acts = await tx.select().from(s.curriculumSessionActivities)
+          .where(inArray(s.curriculumSessionActivities.curriculumSessionId, sessions.map((x) => x.id)));
+        if (acts.length) {
+          await tx.insert(s.curriculumSessionActivities).values(acts.map((a) => ({
+            ...a, id: newId("csa"), curriculumSessionId: sesMap.get(a.curriculumSessionId)!,
+          })));
+        }
+      }
+      // 기술·기준도 복사(레벨 리매핑) — 뱃지 정의는 운영물이라 복사 안 함
+      const skillRows = await tx.select().from(s.skills)
+        .where(eq(s.skills.programVersionId, base.id));
+      const skillMap = new Map(skillRows.map((sk) => [sk.id, newId("skl")]));
+      if (skillRows.length) {
+        await tx.insert(s.skills).values(skillRows.map((sk) => ({
+          ...sk, id: skillMap.get(sk.id)!, programVersionId: newVersionId,
+          programLevelId: levelMap.get(sk.programLevelId)!,
+          previousSkillId: sk.previousSkillId ? skillMap.get(sk.previousSkillId) ?? null : null,
+          createdAt: nowISO, updatedAt: nowISO,
+        })));
+        const criteria = await tx.select().from(s.skillClearanceCriteria)
+          .where(inArray(s.skillClearanceCriteria.skillId, skillRows.map((x) => x.id)));
+        if (criteria.length) {
+          await tx.insert(s.skillClearanceCriteria).values(criteria.map((c) => ({
+            ...c, id: newId("scc"), skillId: skillMap.get(c.skillId)!,
+          })));
+        }
+      }
+    }
+    await recordAudit(tx, {
+      academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "OWNER",
+      action: "program.duplicated", targetType: "Program", targetId: newProgramId,
+      detail: { sourceProgramId: src.id, sourceVersionId: base?.id }, success: true,
+    }, nowISO);
+    return { kind: "CREATED" as const, programId: newProgramId, versionId: newVersionId };
+  });
+}

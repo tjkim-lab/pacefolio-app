@@ -68,10 +68,12 @@ export default function PCPrograms() {
         {programs && programs.length > 0 && (
           <div className="grid gap-3">
             {programs.map((p) => (
-              <button
+              <div
                 key={p.programId}
-                className="text-left rounded-xl border border-line bg-surface px-4 py-3.5 hover:border-accent transition"
+                role="button" tabIndex={0}
+                className="text-left rounded-xl border border-line bg-surface px-4 py-3.5 hover:border-accent transition cursor-pointer"
                 onClick={() => router.push(`/pc/programs/${p.programId}`)}
+                onKeyDown={(e) => { if (e.key === "Enter") router.push(`/pc/programs/${p.programId}`); }}
               >
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[14px] font-extrabold text-ink">{p.name}</span>
@@ -82,6 +84,20 @@ export default function PCPrograms() {
                     const sp = statusPill(v.status);
                     return <Pill key={v.versionId} kind={sp.kind}>{v.versionLabel} · {sp.label}</Pill>;
                   })}
+                  {gate.isOwner && (
+                    <button
+                      className="h-7 px-2.5 rounded-lg text-[11px] font-bold border border-line text-ink2 hover:border-ink3"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!gate.academyId) return;
+                        api.duplicateProgram(gate.academyId, p.programId)
+                          .then(() => { toast("프로그램을 복제했어요(초안으로)."); void refresh(); })
+                          .catch((err2) => toast(`복제하지 못했어요. (${err2 instanceof Error ? err2.message : err2})`));
+                      }}
+                    >
+                      복제
+                    </button>
+                  )}
                 </div>
                 <div className="mt-1.5 flex gap-1.5 flex-wrap">
                   {p.modes.map((m) => (
@@ -91,7 +107,7 @@ export default function PCPrograms() {
                   ))}
                   {p.description && <span className="text-[12px] text-ink3">{p.description}</span>}
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         )}

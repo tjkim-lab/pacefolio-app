@@ -8,6 +8,7 @@ import {
   createContext, useCallback, useContext, useEffect, useState, type ReactNode,
 } from "react";
 import { createApiClient, ApiError } from "@pacefolio/api-client";
+import { DemoBadge } from "@/components/ui/DemoBadge";
 import type { AttStatus } from "./_data";
 
 const api = createApiClient({ baseUrl: "/api" });
@@ -234,6 +235,7 @@ export function CoachLiveProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ state, errorMsg, academyId, sessionId, sessionLabel, roster, saveAttendance, complete, brief, ackBrief, reportIncident, verifyPhotoConsent }}>
       {children}
+      <DemoBadge show={state === "FIXTURE"} />
     </Ctx.Provider>
   );
 }

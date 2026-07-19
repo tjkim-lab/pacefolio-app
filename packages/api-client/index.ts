@@ -328,6 +328,74 @@ const ImportCommitResult = z.object({
   kind: z.string(), created: z.number(), skipped: z.number(), invalid: z.number(),
 });
 
+/* 프로그램 실행·성장 스키마(PS4~PS6) */
+const ClassAssignmentList = z.object({
+  assignments: z.array(z.object({
+    assignmentId: z.string(), programVersionId: z.string(),
+    programLevelId: z.string().optional(), effectiveFrom: z.string(),
+  })),
+});
+const SessionPlanView = z.object({
+  classSessionId: z.string(), date: z.string(),
+  plans: z.array(z.object({
+    assignmentId: z.string(), programVersionId: z.string(),
+    planId: z.string().optional(), planned: z.boolean(),
+    curriculumSession: z.object({
+      curriculumSessionId: z.string(), name: z.string(), sequence: z.number(),
+    }).optional(),
+    activities: z.array(z.object({
+      activityRevisionId: z.string(), name: z.string(),
+      recommendedMinutes: z.number().optional(), result: z.string().optional(),
+    })),
+  })),
+});
+export type SessionPlanView = z.infer<typeof SessionPlanView>;
+const ExperienceMap = z.object({
+  participantId: z.string(), name: z.string(), totalSessions: z.number(),
+  domains: z.array(z.object({
+    growthDomainId: z.string(), name: z.string(),
+    experienceCount: z.number(), distinctActivities: z.number(),
+    lastExperiencedAt: z.string(),
+  })),
+});
+export type ExperienceMap = z.infer<typeof ExperienceMap>;
+const VersionSkillList = z.object({
+  skills: z.array(z.object({
+    skillId: z.string(), programLevelId: z.string(), name: z.string(),
+    description: z.string().optional(), sortOrder: z.number(),
+    recommendedPracticeMin: z.number().optional(), recommendedPracticeMax: z.number().optional(),
+    previousSkillId: z.string().optional(), active: z.boolean(),
+    criteria: z.array(z.object({ criterionId: z.string(), label: z.string(), required: z.boolean() })),
+    badge: z.object({ badgeDefinitionId: z.string(), name: z.string() }).optional(),
+  })),
+});
+export type VersionSkillList = z.infer<typeof VersionSkillList>;
+const SkillBoard = z.object({
+  participants: z.array(z.object({
+    participantId: z.string(), name: z.string(),
+    skills: z.array(z.object({
+      skillId: z.string(), name: z.string(), status: z.string(), practiceCount: z.number(),
+    })),
+  })),
+});
+export type SkillBoard = z.infer<typeof SkillBoard>;
+const SkillBook = z.object({
+  participantId: z.string(), name: z.string(),
+  skills: z.array(z.object({
+    skillId: z.string(), name: z.string(), status: z.string(), practiceCount: z.number(),
+    firstPracticedAt: z.string().optional(), clearedAt: z.string().optional(),
+  })),
+  badges: z.array(z.object({
+    awardId: z.string(), name: z.string(), skillId: z.string().optional(), awardedAt: z.string(),
+  })),
+});
+export type SkillBook = z.infer<typeof SkillBook>;
+const MyChildren = z.object({
+  children: z.array(z.object({
+    participantId: z.string(), name: z.string(), ageLabel: z.string(),
+  })),
+});
+
 export function createApiClient(cfg: ApiClientConfig = {}) {
   const base = cfg.baseUrl ?? "";
   const fetchFn: FetchLike = cfg.fetchFn ?? ((i, init) => fetch(i, init));
@@ -636,6 +704,63 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
     revertImport: (academyId: string, batchId: string) =>
       call(z.object({ kind: z.string(), archived: z.number() }),
         `/academies/${academyId}/imports/${batchId}/revert`, { method: "POST", csrf: true }),
+    /* 프로그램 실행 PS4~PS6 — 반 적용·오늘 계획·결과 확정·성장 조회 */
+    assignProgramToClass: (academyId: string, classId: string, body: {
+      programVersionId: string; programLevelId?: string; effectiveFrom: string;
+    }) =>
+      call(z.object({ kind: z.string(), assignmentId: z.string() }),
+        `/academies/${academyId}/classes/${classId}/program-assignments`, {
+          method: "POST", csrf: true, body: JSON.stringify(body),
+        }),
+    listClassProgramAssignments: (academyId: string, classId: string) =>
+      call(ClassAssignmentList, `/academies/${academyId}/classes/${classId}/program-assignments`),
+    getSessionPlan: (academyId: string, sessionId: string) =>
+      call(SessionPlanView, `/academies/${academyId}/sessions/${sessionId}/plan`),
+    createSessionPlan: (academyId: string, sessionId: string, body: {
+      assignmentId: string; curriculumSessionId?: string;
+    }) =>
+      call(z.object({ kind: z.string(), planId: z.string() }),
+        `/academies/${academyId}/sessions/${sessionId}/plan`, {
+          method: "POST", csrf: true, body: JSON.stringify(body),
+        }),
+    confirmSessionResults: (academyId: string, planId: string, body: {
+      results: { activityRevisionId: string; result: string; replacementActivityRevisionId?: string; coachNote?: string }[];
+      participantOverrides?: { participantId: string; participation: string }[];
+    }) =>
+      call(z.object({ kind: z.string(), resultsSaved: z.number(), participants: z.number(), experienceEvents: z.number() }),
+        `/academies/${academyId}/session-plans/${planId}/results`, {
+          method: "POST", csrf: true, body: JSON.stringify(body),
+        }),
+    experienceMap: (academyId: string, participantId: string) =>
+      call(ExperienceMap, `/academies/${academyId}/participants/${participantId}/experience-map`),
+    /* 기술·뱃지 PS5 */
+    listVersionSkills: (academyId: string, versionId: string) =>
+      call(VersionSkillList, `/academies/${academyId}/versions/${versionId}/skills`),
+    recordSkillPractice: (academyId: string, participantId: string, skillId: string, body: {
+      result: string; classSessionId?: string; coachNote?: string;
+    }) =>
+      call(z.object({ kind: z.string(), status: z.string(), practiceCount: z.number() }),
+        `/academies/${academyId}/participants/${participantId}/skills/${skillId}/practice`, {
+          method: "POST", csrf: true, body: JSON.stringify(body),
+        }),
+    clearSkill: (academyId: string, participantId: string, skillId: string, body: {
+      checkedCriteriaIds: string[]; classSessionId?: string;
+    }) =>
+      call(z.object({ kind: z.string(), alreadyCleared: z.boolean(), badgeAwarded: z.boolean() }),
+        `/academies/${academyId}/participants/${participantId}/skills/${skillId}/clearance`, {
+          method: "POST", csrf: true, body: JSON.stringify(body),
+        }),
+    classSkillBoard: (academyId: string, classId: string) =>
+      call(SkillBoard, `/academies/${academyId}/classes/${classId}/skill-board`),
+    skillBook: (academyId: string, participantId: string) =>
+      call(SkillBook, `/academies/${academyId}/participants/${participantId}/skill-book`),
+    /* PS6 보호자 */
+    myChildren: (academyId: string) =>
+      call(MyChildren, `/academies/${academyId}/my-children`),
+    /* PS7 준비 */
+    duplicateProgram: (academyId: string, programId: string) =>
+      call(z.object({ kind: z.string(), programId: z.string(), versionId: z.string() }),
+        `/academies/${academyId}/programs/${programId}/duplicate`, { method: "POST", csrf: true }),
   };
 }
 

@@ -40,7 +40,7 @@ export interface Kid {
 }
 
 /* ---------- fixture 파생 헬퍼 ---------- */
-const fmtWon = (n: number) => `₩${n.toLocaleString("ko-KR")}`;
+import { fmtWon } from "@/lib/format"; // #2: 공용 포맷으로 이관(출력 동일)
 /* "010-3000-1234" → "010-****-1234" (금액·연락처는 개인정보 — 마스킹 표시) */
 function maskPhone(phone: string): string {
   const [a, , c] = phone.split("-");

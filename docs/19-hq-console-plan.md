@@ -68,3 +68,14 @@ stateless(요청/응답)라 이식 쉬움(조사 소견):
 - 크롤러 쪽 "최소 변경"(API 토큰)도 저장소 수정임 — **크롤러 작업은 별도 승인 후**(현 원칙: 읽기 전용)
 - SQLite(크롤러) ↔ PostgreSQL(PACEFOLIO) 이중 정본 기간의 데이터 소유권: 커머스·콘텐츠 정본은
   당분간 크롤러 SQLite, 콘솔은 소비자 — 이식 완료 축부터 정본 이동
+
+## F. 진행 기록
+- **2026-07-19 HQ-1 콘솔 골격 구현(#43)**: `apps/api/src/hq/service.ts` + `/admin/hq/{health,products,jobs}`
+  (PLATFORM_ADMIN 전용, env 미설정 = 501). 크롤러 실코드 조사(읽기 전용) 결과 반영:
+  - 크롤러 인증 = **세션 쿠키(SessionMiddleware) + IP 화이트리스트** — 서비스 토큰 없음.
+    현 골격은 `PACEFOLIO_HQ_CRAWLER_BASE_URL` + `PACEFOLIO_HQ_CRAWLER_COOKIE`(로그인 세션) env 주입.
+    **서비스 토큰 전환 = 크롤러 최소 변경 필요 → 별도 승인 후.**
+  - 소비 엔드포인트(전부 GET·JSON): `/api/v1/health`(인증 우회)·`/api/v1/products`(limit≤200,
+    reg_status)·`/api/v1/jobs/active`·`/api/v1/jobs/recent`·`/api/v1/last-crawl-summary`.
+  - 활동로그·서버점검·worker-status 는 HTML(HTMX 조각) 응답이라 프록시 부적합 — JSON 화는 크롤러 변경 필요.
+  - 남은 것: TJ env 주입(내부망/터널 + 크롤러 로그인 쿠키) → 콘솔 admin 화면(HQ 메뉴 IA = 디자인 협업 HQ-0).

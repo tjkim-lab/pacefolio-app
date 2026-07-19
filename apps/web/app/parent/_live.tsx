@@ -13,6 +13,7 @@ import {
   createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode,
 } from "react";
 import { createApiClient, ApiError } from "@pacefolio/api-client";
+import { DemoBadge } from "@/components/ui/DemoBadge";
 
 const api = createApiClient({ baseUrl: "/api" });
 
@@ -216,7 +217,12 @@ export function LiveBillingProvider({ children }: { children: ReactNode }) {
     invoices, sel, toggle, selIds, selAmount,
     paying, payResult, pay, resetPay, refresh, retry,
   };
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={value}>
+      {children}
+      <DemoBadge show={state === "FIXTURE_PREVIEW"} />
+    </Ctx.Provider>
+  );
 }
 
 /* 실연결 상태 배지 — 상태 모델을 그대로 표시(P0-2: 오류를 숨기지 않음) */

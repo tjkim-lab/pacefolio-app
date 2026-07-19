@@ -156,6 +156,10 @@ export default function PCProgramEditor() {
                 </Pill>
               )}
             </div>
+            {detail?.status === "PUBLISHED" && gate.isOwner && (
+              <ApplyToClassPane academyId={gate.academyId!} versionId={detail.versionId}
+                onDone={(m) => toast(m)} />
+            )}
             {!detail && <div className="flex items-center gap-2 py-10 justify-center text-ink3 text-[13px]"><Spinner /> 버전 불러오는 중…</div>}
             {detail && (
               <div className="grid gap-3 lg:grid-cols-[260px_1fr_280px] items-start">
@@ -359,5 +363,46 @@ function LevelsPane({ detail, editable, academyId, onChanged }: {
         </div>
       )}
     </Panel>
+  );
+}
+
+/* ── 반에 적용(PS7 준비) — 게시된 버전만·중복 적용은 서버가 거부 ── */
+function ApplyToClassPane({ academyId, versionId, onDone }: {
+  academyId: string; versionId: string; onDone: (msg: string) => void;
+}) {
+  const [classes, setClasses] = useState<{ classId: string; name: string }[]>([]);
+  const [sel, setSel] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api.listClasses(academyId).then((r) => {
+      if (alive) setClasses(r.classes.map((c) => ({ classId: c.classId, name: c.name })));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [academyId]);
+  const apply = async () => {
+    if (!sel || busy) return;
+    setBusy(true);
+    try {
+      await api.assignProgramToClass(academyId, sel, {
+        programVersionId: versionId,
+        effectiveFrom: new Date().toISOString().slice(0, 10),
+      });
+      onDone("반에 적용했어요. 코치 화면에 오늘 수업 계획이 떠요.");
+      setSel("");
+    } catch (e) { onDone(`적용하지 못했어요. (${e instanceof Error ? e.message : e})`); }
+    setBusy(false);
+  };
+  return (
+    <div className="mb-3 rounded-xl border border-line bg-surface px-4 py-3 flex items-center gap-2 flex-wrap">
+      <span className="text-[12.5px] font-extrabold text-ink">이 버전을 반에 적용</span>
+      <select className={inputCls + " !w-56 !h-8"} value={sel} onChange={(e) => setSel(e.target.value)}>
+        <option value="">— 반 선택 —</option>
+        {classes.map((c) => <option key={c.classId} value={c.classId}>{c.name}</option>)}
+      </select>
+      <ActBtn soft disabled={!sel || busy} onClick={() => void apply()}>
+        {busy ? "적용 중…" : "적용"}
+      </ActBtn>
+    </div>
   );
 }

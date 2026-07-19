@@ -8,7 +8,8 @@
    ========================================================= */
 import * as fx from "@/lib/fixtures";
 
-export const fmt = (n: number) => n.toLocaleString("ko-KR");
+import { fmt } from "@/lib/format"; // #2: 공용 포맷으로 이관(출력 동일)
+export { fmt };
 /* 청구서 표기용 금액 — 음수는 화면 표기 규칙(−) 따름 */
 const money = (n: number) => (n < 0 ? `−${fmt(-n)}` : fmt(n));
 

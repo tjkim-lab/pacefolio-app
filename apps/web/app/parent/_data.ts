@@ -263,4 +263,4 @@ export const WEEK_DAYS = [
 
 /* ---------- 헬퍼 ---------- */
 export const pkeyOf = (child: ChildName, academy: AcademyName) => `${child}|${academy}`;
-export const won = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",") + "원";
+export { won } from "@/lib/format"; // #2: 공용 포맷으로 이관(출력 동일)

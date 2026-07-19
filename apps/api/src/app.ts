@@ -16,6 +16,7 @@ import {
 } from "./admin/service";
 import { rateLimit } from "./rate-limit";
 import { naverFromEnv } from "./naver/service";
+import { hqCrawlerFromEnv, HqCrawlerError } from "./hq/service";
 import { requestGuardianLink } from "./linking/service";
 import { revokeGuardianLink } from "./linking/revoke";
 import {
@@ -42,6 +43,8 @@ import {
   createSkill, setSkillCriteria, listSkills, createBadgeDefinition,
   recordSkillPractice, clearSkill, correctBadgeAward, getSkillBook, getClassSkillBoard,
 } from "./programs/mastery";
+import { canViewGrowth, listMyChildren, listClassAssignments } from "./programs/access";
+import { duplicateProgram } from "./programs/service";
 import {
   recordAttendance, completeSession, listSessionAttendance, createAttendanceNotice,
 } from "./attendance/service";
@@ -679,7 +682,14 @@ export function createApp(cfg: ApiConfig) {
     }, now()));
   });
   app.get("/academies/:academyId/participants/:participantId/experience-map", guard, academyCtx, async (c) => {
-    const r = await getExperienceMap(cfg.db, { ...actor(c), participantId: c.req.param("participantId")! });
+    const a = actor(c);
+    const pid = c.req.param("participantId")!;
+    // PS6 경계: 보호자는 검증된 자기 아이만(불허 = 404 은닉)
+    const allowed = await canViewGrowth(cfg.db, {
+      userId: a.actorUserId, roles: a.actorRoles, academyId: a.academyId, participantId: pid,
+    });
+    if (!allowed) return c.json({ error: "NOT_FOUND" }, 404);
+    const r = await getExperienceMap(cfg.db, { ...a, participantId: pid });
     if (!r) return c.json({ error: "NOT_FOUND" }, 404);
     return c.json(r);
   });
@@ -762,9 +772,28 @@ export function createApp(cfg: ApiConfig) {
     }, now()));
   });
   app.get("/academies/:academyId/participants/:participantId/skill-book", guard, academyCtx, async (c) => {
-    const r = await getSkillBook(cfg.db, c.req.param("academyId")!, c.req.param("participantId")!);
+    const a = actor(c);
+    const pid = c.req.param("participantId")!;
+    const allowed = await canViewGrowth(cfg.db, {
+      userId: a.actorUserId, roles: a.actorRoles, academyId: a.academyId, participantId: pid,
+    });
+    if (!allowed) return c.json({ error: "NOT_FOUND" }, 404); // PS6 보호자 경계
+    const r = await getSkillBook(cfg.db, a.academyId, pid);
     if (!r) return c.json({ error: "NOT_FOUND" }, 404);
     return c.json(r);
+  });
+  /* PS6 — 보호자 자녀 목록(VERIFIED·미철회 링크만) */
+  app.get("/academies/:academyId/my-children", guard, academyCtx, async (c) => {
+    const a = actor(c);
+    return c.json({ children: await listMyChildren(cfg.db, { userId: a.actorUserId, academyId: a.academyId }) });
+  });
+  /* 코치 기술 화면 진입점 — 반의 ACTIVE 프로그램 적용 목록 */
+  app.get("/academies/:academyId/classes/:classId/program-assignments", guard, academyCtx, async (c) => {
+    return c.json({ assignments: await listClassAssignments(cfg.db, c.req.param("academyId")!, c.req.param("classId")!) });
+  });
+  /* PS7 준비 — 프로그램 복제(학원 내) */
+  app.post("/academies/:academyId/programs/:programId/duplicate", guard, csrf, academyCtx, async (c) => {
+    return studioResult(c, await duplicateProgram(cfg.db, { ...actor(c), programId: c.req.param("programId")! }, now()));
   });
   app.get("/academies/:academyId/classes/:classId/skill-board", guard, academyCtx, async (c) => {
     const r = await getClassSkillBoard(cfg.db, { ...actor(c), classId: c.req.param("classId")! });
@@ -1720,6 +1749,33 @@ export function createApp(cfg: ApiConfig) {
 
   /* #39-⑥(HQ-2): 네이버 검색·데이터랩 — 본부 전용, env 미설정 = 501 fail-closed */
   const naver = naverFromEnv();
+  /* ── 본부(HQ) ← crawler-tool 조회 프록시 (#37 HQ-1, docs/19) ──
+     PLATFORM_ADMIN 전용. env 미설정 = 501(연동 전 상태 정직 표시).
+     크롤러는 무수정 존속 — 콘솔이 입구, 결과만 JSON 으로 소비. */
+  const hq = hqCrawlerFromEnv(process.env);
+  const hqCall = async (c: Context, run: () => Promise<unknown>) => {
+    if (!hq) return c.json({ error: "HQ_CRAWLER_NOT_CONFIGURED" }, 501);
+    try {
+      return c.json({ result: await run() });
+    } catch (e) {
+      if (e instanceof HqCrawlerError) return c.json({ error: "UPSTREAM_FAILED", status: e.status, reason: e.message }, 502);
+      return c.json({ error: "UPSTREAM_FAILED" }, 502);
+    }
+  };
+  app.get("/admin/hq/health", guard, adminOnly, (c) => hqCall(c, () => hq!.health()));
+  app.get("/admin/hq/products", guard, adminOnly, (c) => hqCall(c, () => hq!.products({
+    brand: c.req.query("brand"), search: c.req.query("search"),
+    page: c.req.query("page") ? Number(c.req.query("page")) : undefined,
+    limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
+    regStatus: c.req.query("regStatus") as "done" | "pending" | undefined,
+    sort: c.req.query("sort"), order: c.req.query("order") as "asc" | "desc" | undefined,
+  })));
+  app.get("/admin/hq/jobs", guard, adminOnly, (c) => hqCall(c, async () => ({
+    active: await hq!.activeJobs(),
+    recent: await hq!.recentJobs(c.req.query("limit") ? Number(c.req.query("limit")) : 5),
+    lastCrawl: await hq!.lastCrawlSummary(),
+  })));
+
   app.get("/admin/naver/search", guard, adminOnly, async (c) => {
     if (!naver) return c.json({ error: "NAVER_NOT_CONFIGURED" }, 501);
     const type = c.req.query("type"); const q = c.req.query("q");

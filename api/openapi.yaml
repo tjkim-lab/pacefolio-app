@@ -234,6 +234,21 @@ paths:
       responses:
         '201': { description: '{ billingPeriodId, periodStart, periodEnd } — 기존 행 반환 시에도 동일 형식' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/hq/health:
+    get:
+      tags: [admin]
+      summary: 본부(HQ) 크롤러 연동 상태 — env(BASE_URL·세션쿠키) 미설정 = 501, 업스트림 오류 = 502. PLATFORM_ADMIN 전용. (구현됨 #37 HQ-1)
+      responses: { '200': { description: '{ result }' }, '501': { description: 연동 미설정 }, '502': { description: 업스트림 오류 } }
+  /admin/hq/products:
+    get:
+      tags: [admin]
+      summary: 크롤러 상품 미러 조회 프록시(brand·search·page·limit≤200·regStatus·sort·order). PLATFORM_ADMIN 전용. (구현됨 #37 HQ-1)
+      responses: { '200': { description: '{ result: { items[], total, page, pages } }' }, '501': { description: 연동 미설정 } }
+  /admin/hq/jobs:
+    get:
+      tags: [admin]
+      summary: 크롤러 작업 관제(active·recent·lastCrawl 묶음). PLATFORM_ADMIN 전용. (구현됨 #37 HQ-1)
+      responses: { '200': { description: '{ result: { active, recent, lastCrawl } }' }, '501': { description: 연동 미설정 } }
   /academies/{academyId}/coach-swaps:
     post:
       tags: [attendance]

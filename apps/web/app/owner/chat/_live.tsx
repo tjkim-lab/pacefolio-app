@@ -7,6 +7,7 @@ import {
   createContext, useCallback, useContext, useEffect, useState, type ReactNode,
 } from "react";
 import { createApiClient, ApiError } from "@pacefolio/api-client";
+import { DemoBadge } from "@/components/ui/DemoBadge";
 
 const api = createApiClient({ baseUrl: "/api" });
 
@@ -109,6 +110,7 @@ export function OwnerChatLiveProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ state, errorMsg, academyId, myUserId, rooms, refreshRooms, loadMessages, send }}>
       {children}
+      <DemoBadge show={state === "FIXTURE"} />
     </Ctx.Provider>
   );
 }

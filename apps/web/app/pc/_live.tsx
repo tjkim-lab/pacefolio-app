@@ -7,6 +7,7 @@ import {
   createContext, useCallback, useContext, useEffect, useState, type ReactNode,
 } from "react";
 import { createApiClient, ApiError } from "@pacefolio/api-client";
+import { DemoBadge } from "@/components/ui/DemoBadge";
 
 const api = createApiClient({ baseUrl: "/api" });
 
@@ -308,6 +309,7 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
       swapCoach, refreshClasses,
     }}>
       {children}
+      <DemoBadge show={state === "FIXTURE"} />
     </Ctx.Provider>
   );
 }
