@@ -244,3 +244,35 @@ test("#41: 그룹(반) 일괄 — 초안 전수(기존 청구 원생 제외) →
   // 멱등: 재발행 = 0건
   assert.equal(((await (await post(owner, `/academies/a_wg/classes/${clsId()}/bulk-invoice-issue`, { billingPeriodId: bpId })).json()) as { issued: number }).issued, 0);
 });
+
+test("겹친 휴무: A 철회해도 B 가 덮으면 세션 복원 안 됨(소유권 B 이전) → B 철회 시 복원", async () => {
+  // 현재 SCHEDULED 세션 하나 확보(상태 독립) — 활성 휴무가 덮지 않는 날
+  const sched = (await db.select().from(s.classSessions).where(and(
+    eq(s.classSessions.academyId, "a_wg"), eq(s.classSessions.status, "SCHEDULED"),
+  )))[0];
+  assert.ok(sched, "테스트에 SCHEDULED 세션 필요");
+  const d = sched.date;
+
+  // 휴무 A(그 날) → 세션 CANCELED, closureId=A
+  const aId = ((await (await post(owner, "/academies/a_wg/closures", {
+    scope: "ACADEMY", dateStart: d, dateEnd: d, closureType: "공휴일", reason: "휴무 A", deductSessions: true,
+  })).json()) as { closureId: string }).closureId;
+  // 휴무 B(같은 날, 겹침) → 그 세션은 이미 CANCELED 라 no-op
+  const bId = ((await (await post(owner, "/academies/a_wg/closures", {
+    scope: "ACADEMY", dateStart: d, dateEnd: d, closureType: "행사", reason: "휴무 B", deductSessions: true,
+  })).json()) as { closureId: string }).closureId;
+
+  // A 철회 → 복원 0(B 가 덮음), closureId 는 B 로 이전, 여전히 CANCELED
+  const rvA = await post(owner, `/academies/a_wg/closures/${aId}/revocation`);
+  assert.equal(((await rvA.json()) as { restoredSessions: number }).restoredSessions, 0);
+  const mid = (await db.select().from(s.classSessions).where(eq(s.classSessions.id, sched.id)))[0];
+  assert.equal(mid.status, "CANCELED");
+  assert.equal(mid.closureId, bId);
+
+  // B 철회 → 이제 아무 휴무도 안 덮음 → SCHEDULED 복원
+  const rvB = await post(owner, `/academies/a_wg/closures/${bId}/revocation`);
+  assert.ok(((await rvB.json()) as { restoredSessions: number }).restoredSessions >= 1);
+  const fin = (await db.select().from(s.classSessions).where(eq(s.classSessions.id, sched.id)))[0];
+  assert.equal(fin.status, "SCHEDULED");
+  assert.equal(fin.closureId, null);
+});

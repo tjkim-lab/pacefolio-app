@@ -218,14 +218,23 @@ export async function setSubscription(db: Db, input: {
         startedAt: nowISO, createdAt: nowISO, updatedAt: nowISO,
       });
     }
-    await recordLedger(tx, {
-      academyId: input.academyId, subscriptionId,
-      eventType: prev ? (prev.status === "CANCELED" ? "REACTIVATED" : "PLAN_CHANGED") : "CREATED",
-      fromPlan: prev?.plan ?? null, toPlan: input.plan,
-      fromPriceKrw: prev?.priceKrwMonthly ?? null, toPriceKrw: price,
-      fromStatus: prev?.status ?? null, toStatus: "ACTIVE",
-      actorUserId: input.actorUserId,
-    }, nowISO);
+    /* #59: ledger 정확화 — 실제 변화 없는 재지정(같은 플랜·ACTIVE·같은 가격)은
+       ledger 행을 남기지 않는다(ledger = 변화 이력). 죽은 상태(CANCELED·PAST_DUE)→
+       ACTIVE 는 REACTIVATED, 플랜 변경은 PLAN_CHANGED. (감사 로그는 무변화라도 기록) */
+    const noLedgerChange = !!prev && prev.plan === input.plan
+      && prev.status === "ACTIVE" && prev.priceKrwMonthly === price;
+    if (!noLedgerChange) {
+      await recordLedger(tx, {
+        academyId: input.academyId, subscriptionId,
+        eventType: !prev ? "CREATED"
+          : prev.plan !== input.plan ? "PLAN_CHANGED"
+          : "REACTIVATED", // 여기 도달 = 같은 플랜인데 status !== ACTIVE (죽은 상태 복귀)
+        fromPlan: prev?.plan ?? null, toPlan: input.plan,
+        fromPriceKrw: prev?.priceKrwMonthly ?? null, toPriceKrw: price,
+        fromStatus: prev?.status ?? null, toStatus: "ACTIVE",
+        actorUserId: input.actorUserId,
+      }, nowISO);
+    }
     await recordAudit(tx, {
       academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
       action: "subscription.set", targetType: "AcademySubscription", targetId: subscriptionId,

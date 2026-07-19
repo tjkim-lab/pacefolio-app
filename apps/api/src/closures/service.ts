@@ -87,24 +87,47 @@ export async function revokeClosure(db: Db, input: {
     )).for("update"))[0];
     if (!ce) return { kind: "INVALID" as const, reason: "휴무 이벤트 없음" };
     if (ce.revokedAt) return { kind: "OK" as const, closureId: ce.id, canceledSessions: 0 }; // 멱등
-    /* 이 이벤트가 취소한 세션만 복원 — 다른 사유의 취소는 불변 */
+    /* 이 이벤트가 취소한 세션 — 단, 다른 유효(미철회) 휴무가 아직 그 날짜·범위를 덮으면
+       복원하지 않고 그 휴무로 소유권을 넘긴다(겹친 휴무 복원 갭 수정). 어느 휴무도
+       덮지 않을 때만 SCHEDULED 로 복원. 다른 사유의 취소(closureId 불일치)는 불변. */
     const mine = await tx.select().from(s.classSessions).where(and(
       eq(s.classSessions.academyId, input.academyId),
       eq(s.classSessions.closureId, ce.id),
       eq(s.classSessions.status, "CANCELED"),
     )).for("update");
-    if (mine.length) {
+    const others = (await tx.select().from(s.closureEvents).where(and(
+      eq(s.closureEvents.academyId, input.academyId),
+      isNull(s.closureEvents.revokedAt),
+    ))).filter((o) => o.id !== ce.id);
+    const stillCovering = (sess: { date: string; classId: string }) =>
+      others.find((o) =>
+        o.dateStart <= sess.date && sess.date <= o.dateEnd &&
+        (o.scope === "ACADEMY" || o.classId === sess.classId));
+    const toRestore: string[] = [];
+    let reassigned = 0;
+    for (const sess of mine) {
+      const other = stillCovering(sess);
+      if (other) {
+        await tx.update(s.classSessions).set({
+          closureId: other.id, canceledReason: `휴무: ${other.reason}`, updatedAt: nowISO,
+        }).where(eq(s.classSessions.id, sess.id)); // CANCELED 유지 — 아직 휴무일
+        reassigned += 1;
+      } else {
+        toRestore.push(sess.id);
+      }
+    }
+    if (toRestore.length) {
       await tx.update(s.classSessions).set({
         status: "SCHEDULED", canceledReason: null, closureId: null, updatedAt: nowISO,
-      }).where(inArray(s.classSessions.id, mine.map((t) => t.id)));
+      }).where(inArray(s.classSessions.id, toRestore));
     }
     await tx.update(s.closureEvents).set({ revokedAt: nowISO }).where(eq(s.closureEvents.id, ce.id));
     await recordAudit(tx, {
       academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "ACADEMY",
       action: "closure.revoked", targetType: "ClosureEvent", targetId: ce.id,
-      detail: { restoredSessions: mine.length }, success: true,
+      detail: { restoredSessions: toRestore.length, reassignedSessions: reassigned }, success: true,
     }, nowISO);
-    return { kind: "OK" as const, closureId: ce.id, canceledSessions: mine.length };
+    return { kind: "OK" as const, closureId: ce.id, canceledSessions: toRestore.length };
   });
 }
 

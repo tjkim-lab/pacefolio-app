@@ -265,3 +265,27 @@ test("#39-⑥ 네이버 래퍼: env 미설정 = 501 fail-closed · 비관리자 
   assert.equal((await get(admin, "/admin/naver/search?type=blog&q=test")).status, 501);
   assert.equal((await get(owner2, "/admin/naver/search?type=blog&q=test")).status, 404); // 직전 테스트에서 재로그인됨
 });
+
+test("#59 ledger 라벨: no-op 재지정 무기록 · 죽은상태 복귀=REACTIVATED · 플랜변경=PLAN_CHANGED", async () => {
+  await db.insert(s.academies).values({
+    id: "a_led", organizationId: "o3", name: "레저학원", themeColor: "#12B5A5",
+    themeInk: "#087F73", logoEmoji: "🎾", ownerName: "원장C", billingCycleDefault: 3,
+  });
+  const ledgerOf = async () =>
+    ((await (await get(admin, "/admin/academies/a_led/subscription/ledger")).json()) as
+      { ledger: { eventType: string }[] }).ledger;
+
+  await req(admin, "PUT", "/admin/academies/a_led/subscription", { plan: "BASIC" }); // CREATED
+  await req(admin, "PUT", "/admin/academies/a_led/subscription", { plan: "BASIC" }); // 무변화 → 미기록
+  let led = await ledgerOf();
+  assert.equal(led.length, 1, "no-op 재지정은 ledger 행을 남기지 않아야");
+  assert.equal(led[0].eventType, "CREATED");
+
+  await req(admin, "PUT", "/admin/academies/a_led/subscription", { plan: "PRO" });          // PLAN_CHANGED
+  await req(admin, "POST", "/admin/academies/a_led/subscription/cancellation", {});         // CANCELED
+  await req(admin, "PUT", "/admin/academies/a_led/subscription", { plan: "PRO" });          // 죽은상태→ACTIVE 같은플랜 = REACTIVATED
+  led = await ledgerOf();
+  assert.ok(led.some((l) => l.eventType === "PLAN_CHANGED"));
+  assert.ok(led.some((l) => l.eventType === "REACTIVATED"));
+  assert.equal(led.filter((l) => l.eventType === "CREATED").length, 1); // no-op 재지정 미기록 재확인
+});
