@@ -128,7 +128,7 @@ test("미납 리마인드 — ISSUED 청구 → 보호자 1명 인앱(금액 미
   });
   const r = await post(owner, "/academies/a_wg/billing/remind");
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { invoices: 1, guardians: 1 });
+  assert.deepEqual(await r.json(), { invoices: 1, guardians: 1, cooldown: false });
 
   await dispatchPendingOutbox(db, NOW);
   const ntf = await db.select().from(s.inAppNotifications).where(and(
@@ -140,11 +140,25 @@ test("미납 리마인드 — ISSUED 청구 → 보호자 1명 인앱(금액 미
   assert.equal((await post(coach, "/academies/a_wg/billing/remind")).status, 403);
 });
 
+/* 리뷰 P2: 당일 재발송 금지 — 같은 날 두 번째 리마인드는 cooldown(발송·인앱 없음) */
+test("미납 리마인드 — 당일 2회차는 cooldown(재발송·인앱 없음)", async () => {
+  const r = await post(owner, "/academies/a_wg/billing/remind"); // 위 테스트가 오늘 1회 발송함
+  assert.deepEqual(await r.json(), { invoices: 1, guardians: 0, cooldown: true });
+  await dispatchPendingOutbox(db, NOW);
+  const ntf = await db.select().from(s.inAppNotifications).where(and(
+    eq(s.inAppNotifications.userId, guardian.userId),
+    eq(s.inAppNotifications.category, "BILLING_DUE"),
+  ));
+  assert.equal(ntf.length, 1, "재발송 안 됨 — 인앱은 여전히 1건");
+});
+
 test("미납 리마인드 — canPay=false 보호자는 제외", async () => {
+  // cooldown 격리 — 이 테스트는 canPay 필터만 검증하므로 당일 발송 이력 제거
+  await db.delete(s.auditLogs).where(eq(s.auditLogs.action, "billing.reminded"));
   await db.update(s.guardianParticipantLinks).set({ canPay: false })
     .where(eq(s.guardianParticipantLinks.id, "gl_kid"));
   const r = await post(owner, "/academies/a_wg/billing/remind");
-  assert.deepEqual(await r.json(), { invoices: 1, guardians: 0 });
+  assert.deepEqual(await r.json(), { invoices: 1, guardians: 0, cooldown: false });
   await db.update(s.guardianParticipantLinks).set({ canPay: true })
     .where(eq(s.guardianParticipantLinks.id, "gl_kid"));
 });

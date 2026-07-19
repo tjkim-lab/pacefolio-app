@@ -213,9 +213,11 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
     }
     return {
       ok: true, invoices: r.invoices, guardians: r.guardians,
-      message: r.invoices > 0
-        ? `리마인드 발송 완료 — 미납 ${r.invoices}건 · 보호자 ${r.guardians}명 (결제 완료 아님 — 입금 시 자동 확인)`
-        : "미납 청구가 없어요",
+      message: r.cooldown
+        ? `오늘 이미 리마인드했어요 — 재발송은 내일 가능 (미납 ${r.invoices}건 추적 중)`
+        : r.invoices > 0
+          ? `리마인드 발송 완료 — 미납 ${r.invoices}건 · 보호자 ${r.guardians}명 (결제 완료 아님 — 입금 시 자동 확인)`
+          : "미납 청구가 없어요",
     };
   }, [academyId]);
 

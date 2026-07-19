@@ -110,7 +110,7 @@ const BillingSummary = z.object({
 
 /* 원장 홈 실연결(#45) — 재알림·미납 리마인드·긴급결석 확인 */
 const NoticeRemind = z.object({ reminded: z.number().int() });
-const BillingRemind = z.object({ invoices: z.number().int(), guardians: z.number().int() });
+const BillingRemind = z.object({ invoices: z.number().int(), guardians: z.number().int(), cooldown: z.boolean().optional() });
 const AttendanceNoticeList = z.object({
   notices: z.array(z.object({
     noticeId: z.string(), participantId: z.string(), participantName: z.string(),

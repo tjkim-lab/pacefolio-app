@@ -1116,7 +1116,7 @@ export function createApp(cfg: ApiConfig) {
       actorUserId: auth.userId, actorRoles: m.roles, academyId: c.req.param("academyId")!,
     }, now());
     if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
-    return c.json({ invoices: r.invoices, guardians: r.guardians }, 200);
+    return c.json({ invoices: r.invoices, guardians: r.guardians, cooldown: r.cooldown ?? false }, 200);
   });
 
   /* ── 기본선 2단계(#23): 학생 수명주기 · 반 배정 · 출결 ── */
