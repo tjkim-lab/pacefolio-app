@@ -28,6 +28,7 @@ import {
   type PolicyKey,
   type Msg,
   type ByeKid,
+  type Kid,
 } from "./_data";
 
 /* ---------------- helpers ---------------- */
@@ -84,7 +85,7 @@ interface CoachCtx {
   attSaved: boolean;
   attLog: string[];
   cycleAtt: (name: string) => void;
-  allPresent: () => void;
+  allPresent: (list?: Kid[]) => void; // #56: READY 는 실 로스터를 넘겨 채운다(fixture 아님)
   saveAtt: () => void;
 
   absKid: string | null;
@@ -270,11 +271,13 @@ export function CoachProvider({ children }: { children: ReactNode }) {
     },
     [reportSent, attSaved, showToast],
   );
-  const allPresent = useCallback(() => {
+  /* #56: 채울 목록을 인자로 받는다 — READY 는 실 로스터, FIXTURE 는 KIDS(기본).
+     실 로스터엔 paused/planned 장식이 없어 그 가드는 자연히 통과(전원 출석). */
+  const allPresent = useCallback((list: Kid[] = KIDS) => {
     if (reportSent) return;
     setAtt((prev) => {
       const next = { ...prev };
-      KIDS.forEach((k) => {
+      list.forEach((k) => {
         if (k.paused) return;
         if (k.planned && !overridden[k.n]) return;
         if (!next[k.n]) next[k.n] = "p";

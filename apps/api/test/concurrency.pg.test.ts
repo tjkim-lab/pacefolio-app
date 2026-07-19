@@ -540,3 +540,50 @@ test("FREE 상한: 서로 다른 학원 등록은 서로 직렬화되지 않음(
   assert.equal(ra.kind, "OK");
   assert.equal(rb.kind, "OK");
 });
+
+/* 리뷰 P2: 동일 원생·기간 청구서 동시 생성 → 정확히 1건.
+   근거: createInvoice·bulkCreateClassDrafts 의 academy 행 FOR UPDATE 직렬화 + dup 체크. */
+import { createInvoice, bulkCreateClassDrafts } from "../src/billing/issue";
+
+test("청구서 경쟁: 같은 원생·기간 20개 동시 생성 → 정확히 1건 OK", { skip }, async () => {
+  const w = await setup();
+  const bpId = rid("bp");
+  await w.db.insert(s2.billingPeriods).values({
+    id: bpId, academyId: w.academyId, periodStart: "2026-09-01", periodEnd: "2026-11-30", cycleMonths: 3,
+  });
+  const results = await Promise.all(Array.from({ length: 20 }, () =>
+    createInvoice(w.db, {
+      actorUserId: rid("u"), actorRoles: ["OWNER"], academyId: w.academyId,
+      participantId: w.participantId, billingPeriodId: bpId, dueDate: "2026-09-10",
+      lines: [{ type: "TUITION", label: "수강료", amount: 360000 }],
+    }, NOW()).then((r) => r.kind, () => "ERROR")));
+  assert.equal(results.filter((k) => k === "OK").length, 1, "정확히 1건만 생성");
+  assert.equal(results.filter((k) => k === "CONFLICT").length, 19, "나머지 19건은 409(경쟁·중복)");
+  const invs = await w.db.select().from(s2.invoices).where(eq2(s2.invoices.billingPeriodId, bpId));
+  assert.equal(invs.length, 1, "DB 청구서 정확히 1건");
+});
+
+test("일괄 청구 경쟁: 같은 반·기간 일괄 초안 2회 동시 → 원생당 청구서 1건", { skip }, async () => {
+  const w = await setup();
+  const classId = rid("cls");
+  const bpId = rid("bp");
+  await w.db.insert(s2.dbClasses).values({
+    id: classId, academyId: w.academyId, name: "동시성반", scheduleType: "FIXED_WEEKLY", capacity: 12,
+  });
+  await w.db.insert(s2.dbEnrollments).values({
+    id: rid("en"), academyId: w.academyId, classId, participantId: w.participantId,
+    status: "ACTIVE", startDate: "2026-09-01",
+  });
+  await w.db.insert(s2.billingPeriods).values({
+    id: bpId, academyId: w.academyId, periodStart: "2026-09-01", periodEnd: "2026-11-30", cycleMonths: 3,
+  });
+  const body = { actorUserId: rid("u"), actorRoles: ["OWNER"] as string[], academyId: w.academyId, classId, billingPeriodId: bpId, dueDate: "2026-09-10", baseFee: 360000 };
+  await Promise.all([
+    bulkCreateClassDrafts(w.db, body, NOW()).catch(() => null),
+    bulkCreateClassDrafts(w.db, body, NOW()).catch(() => null),
+  ]);
+  const invs = await w.db.select().from(s2.invoices).where(and2(
+    eq2(s2.invoices.participantId, w.participantId), eq2(s2.invoices.billingPeriodId, bpId),
+  ));
+  assert.equal(invs.length, 1, "원생당 청구서 정확히 1건(중복 초안 없음)");
+});

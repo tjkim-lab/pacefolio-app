@@ -9,14 +9,15 @@
 가격 확정·Admin 관제 + 13차 A~E·14차 A–D 리뷰 반영 + 사진 파이프라인 코어**까지 완료.
 테스트 **api 216 · domain 141 · db 15 · web 10 · Playwright e2e 15** — CI 2 job(verify+e2e) 그린.
 
-## 검증 방법 (재현 가능)
+## 검증 방법 (재현 가능) — 전 과정·게이트는 `docs/RELEASE-GATE.md`
 ```bash
-npm install && npm test          # 전 워크스페이스 (PG 동시성 경쟁은 DATABASE_URL_TEST/CI 에서)
-npm run typecheck && npm run lint && npm run build
-npx @redocly/cli lint api/openapi.yaml
-npm run test:e2e -w web          # Playwright — API(PGlite seed)+web 자동 기동, chromium
-npm run dev                      # :3000 웹 + :3001 API(PGlite in-memory 자동 seed)
+npm ci
+npm run verify                   # ⭐ 커밋 전 게이트: typecheck→test→redocly→lint→build (CI 재현)
+npm run test:e2e -w web          # Playwright — API(PGlite seed)+web+console-admin 자동 기동
+npm run dev                      # :3000 웹 · (별도) npm run dev:api :3001 · dev -w console-admin :3002
 ```
+⚠️ 파일 이동·삭제 후엔 반드시 `npm run verify` 재실행(B5 admin 이동 후 유닛 테스트 미실행 = CI red 교훈).
+실 PostgreSQL 동시성 테스트는 Docker+`DATABASE_URL_TEST` 필요(로컬은 skip, CI 는 실행) — RELEASE-GATE §1.
 
 ## 핸드오프 — 지금 어디까지 (2026-07-19)
 

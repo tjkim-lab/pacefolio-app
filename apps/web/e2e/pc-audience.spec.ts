@@ -2,20 +2,22 @@
    대회 = 같은 필터로 대상 산정 → 공지 엔진 재사용 발송 (seed: 도담·서준·박서연) */
 import { test, expect } from "@playwright/test";
 
-test("PC 원생 — 서버 필터 정본: 요일 축 필터링 + CSV 반출 감사", async ({ page }) => {
+test("PC 원생 — 서버 필터 정본: 반·요일 축 필터링 + CSV 반출 감사", async ({ page }) => {
   await page.goto("/pc/students");
   await expect(page.getByText("실 데이터 · AudienceFilter 서버 정본")).toBeVisible({ timeout: 20_000 });
 
-  // seed 정본: 원생 2(도담·서준) · VERIFIED 보호자 1(박서연)
+  /* 반(플레이2 월수반=도담·서준)으로 고정 — 같은 학원에 다른 e2e(보호자 온보딩)가
+     TRIAL 원생을 추가 등록해도 이 반의 배정 인원은 결정적. VERIFIED 보호자 1(박서연). */
+  await page.getByRole("button", { name: "플레이2 월수반", exact: true }).click();
   await expect(page.getByText("필터 결과 2명 · 보호자 수신 1명")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("김도담")).toBeVisible();
 
-  // 요일 토(6) — 월수반뿐이므로 0명
+  // + 요일 토(6): 월수반이라 교집합 = 0명
   await page.getByRole("button", { name: "토", exact: true }).click();
   await expect(page.getByText("필터 결과 0명 · 보호자 수신 0명")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("해당 조건의 원생이 없어요")).toBeVisible();
 
-  // 해제 + 재원 상태 축 — 미납 축은 parent-pay e2e 가 결제해 변하므로 API 테스트가 검증
+  // 토 해제 + 재원 축: 반 ∩ 재원 = 2명 (도담·서준 ENROLLED)
   await page.getByRole("button", { name: "토", exact: true }).click();
   await page.getByRole("button", { name: "재원", exact: true }).click();
   await expect(page.getByText("필터 결과 2명 · 보호자 수신 1명")).toBeVisible({ timeout: 10_000 });

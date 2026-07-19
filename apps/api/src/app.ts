@@ -256,10 +256,14 @@ export function createApp(cfg: ApiConfig) {
 
   const OtpIssueBody = z.object({ phone: z.string().min(3).max(20) }).strict();
   app.post("/guardian/otp/issue", guard, csrf, async (c) => {
+    /* #57 보안: 실 SMS 미연동 스텁은 비프로덕션 전용 — dev/login·mockpg 와 동일한
+       fail-closed. 실 challenge(발송코드 저장·대조) 연동 전까지 프로덕션은 501. */
+    if (!cfg.enableDevLogin || process.env.NODE_ENV === "production") {
+      return c.json({ error: "SMS_VERIFICATION_NOT_CONFIGURED" }, 501);
+    }
     const parsed = OtpIssueBody.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
-    // ⚠️ 실 SMS 미연동 — dev 만 코드 반환(스텁). 실서비스는 여기서 SMS 발송 + challenge 저장.
-    return c.json({ sent: true, devCode: cfg.enableDevLogin ? "123456" : undefined }, 200);
+    return c.json({ sent: true, devCode: "123456" }, 200); // 스텁 코드(비프로덕션)
   });
 
   const OtpVerifyBody = z.object({
@@ -267,10 +271,16 @@ export function createApp(cfg: ApiConfig) {
     code: z.string().regex(/^\d{6}$/),
   }).strict();
   app.post("/guardian/otp/verify", guard, csrf, async (c) => {
+    /* #57 보안(P1, 멀티에이전트 검증 발견): 이 스텁은 발송코드 대조 없이 임의 전화로
+       "인증됨" 세션을 발급한다. 프로덕션에서 열려 있으면 선등록 연락처 매칭(requestGuardianLink)과
+       결합해 남의 자녀를 VERIFIED 전권으로 클레임 가능 → 프로덕션 fail-closed(501).
+       실 SMS challenge 연동 시 이 게이트를 실제 대조 로직으로 교체. */
+    if (!cfg.enableDevLogin || process.env.NODE_ENV === "production") {
+      return c.json({ error: "SMS_VERIFICATION_NOT_CONFIGURED" }, 501);
+    }
     const parsed = OtpVerifyBody.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
-    // ⚠️ 스텁: 발송코드 대조 없음(challenge 미저장) — 000000 만 오류 시뮬. 실서비스는 실제 대조.
-    if (parsed.data.code === "000000") return c.json({ error: "INVALID_CODE" }, 422);
+    if (parsed.data.code === "000000") return c.json({ error: "INVALID_CODE" }, 422); // 스텁 오류 시뮬
     const auth = c.get("auth");
     const r = await createVerifiedPhoneSession(cfg.db, { userId: auth.userId, phone: parsed.data.phone }, now());
     return c.json(r, 201);

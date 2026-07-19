@@ -128,8 +128,10 @@ function StepAttendance() {
         ))}
       </div>
 
+      {/* #56: 출석 그리드 = 카운트·저장과 같은 목록(kids). READY 는 실 로스터,
+          FIXTURE 는 KIDS(장식 포함). 예전엔 항상 fixture 를 그려 실 원생과 어긋났음. */}
       <div className="mt-3 grid grid-cols-3 gap-2">
-        {KIDS.map((k) => {
+        {kids.map((k) => {
           if (k.paused) {
             return (
               <div key={k.n} className="rounded-xl border border-line bg-surface px-1.5 py-2.5 text-center opacity-50">
@@ -174,7 +176,7 @@ function StepAttendance() {
 
       <div className="mt-2.5 flex justify-end">
         <button
-          onClick={c.allPresent}
+          onClick={() => c.allPresent(kids)}
           className="rounded-full border border-dashed border-line bg-fill px-3 py-1.5 text-[11.5px] font-bold text-ink2"
         >
           안 누른 아이 모두 출석 ⚡
