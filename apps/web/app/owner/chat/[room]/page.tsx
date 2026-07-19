@@ -249,11 +249,22 @@ function LiveRoomView({ roomId }: { roomId: string }) {
   const [note, setNote] = useState<string>();
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const readSent = useRef(new Set<string>()); // #46: 이번 열람에서 read 보낸 메시지
 
   useEffect(() => {
     if (live.state !== "READY") return;
     (async () => {
-      try { setMsgs(await live.loadMessages(roomId)); }
+      try {
+        const list = await live.loadMessages(roomId);
+        setMsgs(list);
+        /* #46 양방향: 수신 메시지 열람 = read 기록 — 상대(보호자·코치)의 "읽음" 표시 정본 */
+        for (const m of list) {
+          if (m.senderUserId !== live.myUserId && !readSent.current.has(m.messageId)) {
+            readSent.current.add(m.messageId);
+            void live.markRead(m.messageId);
+          }
+        }
+      }
       catch { setNote("메시지를 불러오지 못했어요"); }
     })();
   }, [live.state, roomId, live]);

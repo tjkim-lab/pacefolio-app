@@ -189,9 +189,21 @@ export async function listClasses(db: Db, academyId: string) {
     ? await db.select().from(s.classAssignments).where(and(
         inArray(s.classAssignments.classId, ids), eq(s.classAssignments.status, "ACTIVE")))
     : [];
+  // 반별 재원 = ACTIVE 등록 수 — 원장 홈 "반별 정원 현황"(#49)의 서버 정본
+  const enrolled = ids.length
+    ? await db.select({
+        classId: s.dbEnrollments.classId,
+        n: sql<number>`count(*)::int`,
+      }).from(s.dbEnrollments).where(and(
+        inArray(s.dbEnrollments.classId, ids),
+        eq(s.dbEnrollments.status, "ACTIVE"),
+      )).groupBy(s.dbEnrollments.classId)
+    : [];
+  const enrolledBy = new Map(enrolled.map((e) => [e.classId, e.n]));
   return classes.map((c) => ({
     classId: c.id, name: c.name, scheduleType: c.scheduleType,
     capacity: c.capacity, room: c.room, status: c.status,
+    enrolled: enrolledBy.get(c.id) ?? 0,
     slots: slots.filter((sl) => sl.classId === c.id).map((sl) => ({
       weekday: sl.weekday, startTime: sl.startTime, endTime: sl.endTime,
       participantId: sl.participantId ?? undefined,

@@ -13,6 +13,7 @@ import {
   setSubscriptionStatus, listSubscriptionLedger,
   issueSupportView, revokeSupportView, listSupportViews,
   suspendAcademy, unsuspendAcademy, adminRevokeUserSessions,
+  listFeatureGrants, grantFeature, revokeFeatureGrant, grantAllFeatures,
 } from "./admin/service";
 import { rateLimit } from "./rate-limit";
 import { naverFromEnv } from "./naver/service";
@@ -24,6 +25,7 @@ import {
 } from "./classes/service";
 import {
   createParticipant, changeParticipantStatus, enrollParticipant, endEnrollment, listParticipants,
+  getParticipantDetail,
 } from "./students/service";
 import {
   createProgram, listPrograms, updateProgram, createVersion, publishVersion, getVersionDetail,
@@ -47,13 +49,17 @@ import { canViewGrowth, listMyChildren, listClassAssignments } from "./programs/
 import { duplicateProgram } from "./programs/service";
 import {
   recordAttendance, completeSession, listSessionAttendance, createAttendanceNotice,
+  listAttendanceNotices, acknowledgeAttendanceNotice,
 } from "./attendance/service";
 import {
   createBillingPeriod, createInvoice, issueInvoice, voidInvoice, recordOfflinePayment,
   bulkCreateClassDrafts, bulkIssueClassDrafts,
 } from "./billing/issue";
 import { swapCoach, COACH_REVOKE_MODES } from "./coaches/swap";
-import { publishNotice, markNoticeRead, listNotices } from "./notices/service";
+import { resolveAudience, exportAudienceCsv } from "./audience/service";
+import { publishNotice, markNoticeRead, listNotices, remindNotice } from "./notices/service";
+import { remindUnpaid } from "./billing/remind";
+import { checkFeature } from "./billing/plan";
 import { reportIncident, listIncidents } from "./safety/service";
 import { listMyNotifications, markNotificationRead } from "./notifications/service";
 import {
@@ -577,6 +583,8 @@ export function createApp(cfg: ApiConfig) {
     mapping: MappingShape.optional(),
   }).strict();
   app.post("/academies/:academyId/imports", guard, csrf, academyCtx, async (c) => {
+    const gate = await checkFeature(cfg.db, c.req.param("academyId")!, "PROGRAM_IMPORT", now()); // #49 PRO
+    if (gate) return c.json(gate, 402);
     const p = StageImportBody.safeParse(await jsonBody(c));
     if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
     const r = await stageImport(cfg.db, { ...actor(c), ...p.data }, now());
@@ -610,6 +618,8 @@ export function createApp(cfg: ApiConfig) {
     }, now()));
   });
   app.post("/academies/:academyId/imports/:batchId/commit", guard, csrf, academyCtx, async (c) => {
+    const gate = await checkFeature(cfg.db, c.req.param("academyId")!, "PROGRAM_IMPORT", now()); // #49 PRO
+    if (gate) return c.json(gate, 402);
     const r = await commitImport(cfg.db, { ...actor(c), batchId: c.req.param("batchId")! }, now());
     if (r.kind === "CONFLICT") return c.json({ error: "CONFLICT", reason: r.reason }, 409);
     return studioResult(c, r);
@@ -734,6 +744,8 @@ export function createApp(cfg: ApiConfig) {
     description: z.string().max(1000).optional(),
   }).strict();
   app.post("/academies/:academyId/badge-definitions", guard, csrf, academyCtx, async (c) => {
+    const gate = await checkFeature(cfg.db, c.req.param("academyId")!, "BADGE_SYSTEM", now()); // #49 PRO
+    if (gate) return c.json(gate, 402);
     const p = BadgeDefBody.safeParse(await jsonBody(c));
     if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
     return studioResult(c, await createBadgeDefinition(cfg.db, { ...actor(c), ...p.data }, now()));
@@ -793,6 +805,8 @@ export function createApp(cfg: ApiConfig) {
   });
   /* PS7 준비 — 프로그램 복제(학원 내) */
   app.post("/academies/:academyId/programs/:programId/duplicate", guard, csrf, academyCtx, async (c) => {
+    const gate = await checkFeature(cfg.db, c.req.param("academyId")!, "PROGRAM_DUPLICATE", now()); // #49 PRO
+    if (gate) return c.json(gate, 402);
     return studioResult(c, await duplicateProgram(cfg.db, { ...actor(c), programId: c.req.param("programId")! }, now()));
   });
   app.get("/academies/:academyId/classes/:classId/skill-board", guard, academyCtx, async (c) => {
@@ -896,6 +910,8 @@ export function createApp(cfg: ApiConfig) {
     baseFee: z.number().int(),
   }).strict();
   app.post("/academies/:academyId/classes/:classId/bulk-invoice-drafts", guard, csrf, academyCtx, async (c) => {
+    const gate = await checkFeature(cfg.db, c.req.param("academyId")!, "BULK_BILLING", now()); // #49 BASIC+
+    if (gate) return c.json(gate, 402);
     const parsed = BulkDraftBody.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
     const auth = c.get("auth"); const m = c.get("membership");
@@ -909,6 +925,8 @@ export function createApp(cfg: ApiConfig) {
   });
   const BulkIssueBody = z.object({ billingPeriodId: z.string().min(1).max(64) }).strict();
   app.post("/academies/:academyId/classes/:classId/bulk-invoice-issue", guard, csrf, academyCtx, async (c) => {
+    const gate = await checkFeature(cfg.db, c.req.param("academyId")!, "BULK_BILLING", now()); // #49 BASIC+
+    if (gate) return c.json(gate, 402);
     const parsed = BulkIssueBody.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
     const auth = c.get("auth"); const m = c.get("membership");
@@ -972,11 +990,20 @@ export function createApp(cfg: ApiConfig) {
   });
 
   /* ── 기본선 3단계(#24): 공지 ── */
+  /* AudienceFilter 2단계 — 대상 산정 공용 축(축 내 OR·축 간 AND, audience/service.ts 정본) */
+  const AudienceFilterBody = z.object({
+    classIds: z.array(z.string().min(1).max(64)).max(50).optional(),
+    coachUserIds: z.array(z.string().min(1).max(64)).max(50).optional(),
+    weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+    statuses: z.array(z.enum(["TRIAL", "ENROLLED", "ON_BREAK", "WITHDRAWN"])).max(4).optional(),
+    unpaidOnly: z.boolean().optional(),
+  }).strict();
   const NoticePubBody = z.object({
     title: z.string().min(1).max(80),
     body: z.string().min(1).max(4000),
     audience: z.string().min(1).max(200),
     classId: z.string().min(1).max(64).optional(), // AudienceFilter 1단계 — 반 필터
+    audienceFilter: AudienceFilterBody.optional(), // 2단계 — 공용 리졸버로 수신자 산정
   }).strict();
   app.post("/academies/:academyId/notices", guard, csrf, academyCtx, async (c) => {
     const parsed = NoticePubBody.safeParse(await c.req.json().catch(() => null));
@@ -1003,6 +1030,26 @@ export function createApp(cfg: ApiConfig) {
     }, now());
     return c.json({ ok: true }, 200);
   });
+  /* #45: 공지 재알림 — 미열람 receipt 보유자에게만 */
+  app.post("/academies/:academyId/notices/:noticeId/remind", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await remindNotice(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, noticeId: c.req.param("noticeId")!,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ reminded: r.reminded }, 200);
+  });
+  /* #45: 미납 리마인드 — open 청구 원생의 VERIFIED·canPay 보호자 */
+  app.post("/academies/:academyId/billing/remind", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await remindUnpaid(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles, academyId: c.req.param("academyId")!,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    return c.json({ invoices: r.invoices, guardians: r.guardians }, 200);
+  });
 
   /* ── 기본선 2단계(#23): 학생 수명주기 · 반 배정 · 출결 ── */
   const CreateParticipantBody = z.object({
@@ -1021,6 +1068,12 @@ export function createApp(cfg: ApiConfig) {
       academyId: c.req.param("academyId")!, ...parsed.data,
     }, now());
     if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "UPGRADE") { // #49 FREE 원생 상한
+      return c.json({
+        error: "PLAN_UPGRADE_REQUIRED", reason: r.reason,
+        currentPlan: r.currentPlan, requiredPlan: r.requiredPlan,
+      }, 402);
+    }
     if (r.kind !== "OK") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
     return c.json({ participantId: r.participantId }, 201);
   });
@@ -1125,6 +1178,25 @@ export function createApp(cfg: ApiConfig) {
     }, now());
     if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
     return c.json({ noticeId: r.noticeId }, 201);
+  });
+  /* #45: 통보 목록(staff) + 원장 확인 — "확인했어요"만, 보강 자동 생성 아님 */
+  app.get("/academies/:academyId/attendance-notices", guard, academyCtx, async (c) => {
+    const m = c.get("membership");
+    const rows = await listAttendanceNotices(cfg.db, {
+      actorRoles: m.roles, academyId: c.req.param("academyId")!,
+    });
+    if (!rows) return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json({ notices: rows });
+  });
+  app.post("/academies/:academyId/attendance-notices/:noticeId/ack", guard, csrf, academyCtx, async (c) => {
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await acknowledgeAttendanceNotice(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, noticeId: c.req.param("noticeId")!,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind === "INVALID") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ noticeId: r.noticeId, alreadyAcknowledged: r.alreadyAcknowledged }, 200);
   });
 
   /* ── 결제 준비 (R5 Phase 5) — membership guard 첫 실전 적용 ── */
@@ -1410,6 +1482,47 @@ export function createApp(cfg: ApiConfig) {
     });
     if (!rows) return c.json({ error: "FORBIDDEN" }, 403);
     return c.json({ participants: rows });
+  });
+  /* 원생 상세(#52) — staff 전용. 없음·타학원 = 404(존재 은닉) */
+  app.get("/academies/:academyId/participants/:participantId", guard, academyCtx, async (c) => {
+    const m = c.get("membership");
+    if (!m.roles.includes("OWNER") && !m.roles.includes("DESK")) {
+      return c.json({ error: "FORBIDDEN" }, 403);
+    }
+    const detail = await getParticipantDetail(cfg.db, {
+      actorRoles: m.roles, academyId: c.req.param("academyId")!,
+      participantId: c.req.param("participantId")!,
+    });
+    if (!detail) return c.json({ error: "NOT_FOUND" }, 404);
+    return c.json(detail);
+  });
+
+  /* AudienceFilter 2단계 — 대상 미리보기(공지·청구·대회·CSV 공용, staff 전용) */
+  app.post("/academies/:academyId/audience/preview", guard, csrf, academyCtx, async (c) => {
+    const parsed = AudienceFilterBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const m = c.get("membership");
+    const r = await resolveAudience(cfg.db, {
+      actorRoles: m.roles, academyId: c.req.param("academyId")!, filter: parsed.data,
+    });
+    if (!r) return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json({
+      members: r.members, total: r.members.length,
+      guardianRecipients: r.guardianUserIds.length,
+    });
+  });
+
+  /* AudienceFilter 2단계 — 명단 CSV(감사 기록·PII 최소: 연락처·생년월일 미포함) */
+  app.post("/academies/:academyId/audience/export", guard, csrf, academyCtx, async (c) => {
+    const parsed = AudienceFilterBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await exportAudienceCsv(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, filter: parsed.data,
+    }, now());
+    if (!r) return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json({ filename: r.filename, rowCount: r.rowCount, csv: r.csv });
   });
 
   /* 코치 교체(#42) — 배정 행 교체(이력 보존)·권한 회수는 원장 결정·outbox 브리핑 */
@@ -1746,6 +1859,54 @@ export function createApp(cfg: ApiConfig) {
   });
   app.get("/admin/academies/:academyId/subscription/ledger", guard, adminOnly, async (c) =>
     c.json({ ledger: await listSubscriptionLedger(cfg.db, c.req.param("academyId")!) }));
+
+  /* #50: 기능 예외 grant — "이 학원에 이 기능만 기간 한정 열기"(영업·프로모션) */
+  app.get("/admin/academies/:academyId/feature-grants", guard, adminOnly, async (c) =>
+    c.json({ grants: await listFeatureGrants(cfg.db, c.req.param("academyId")!, now()) }));
+  const GrantBody = z.object({
+    feature: z.string().min(1).max(64),
+    reason: z.string().min(1).max(300),
+    days: z.number().int().min(1).max(365).optional(), // 생략 = 무기한(명시 철회로만 종료)
+  }).strict();
+  app.post("/admin/academies/:academyId/feature-grants", guard, adminOnly, csrf, async (c) => {
+    const parsed = GrantBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const r = await grantFeature(cfg.db, {
+      actorUserId: c.get("auth").userId,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "NOT_FOUND") return c.json({ error: "NOT_FOUND" }, 404);
+    if (r.kind === "INVALID") return c.json({ error: "INVALID_BODY", reason: r.reason }, 422);
+    return c.json({ grantId: r.grantId, expiresAt: r.expiresAt ?? null }, 201);
+  });
+  /* #50b: 전 기능 체험 — "다 열어주고 쓰게 한 뒤 만료로 잠근다"(기간 필수) */
+  const TrialAllBody = z.object({
+    reason: z.string().min(1).max(300),
+    days: z.number().int().min(1).max(365),
+  }).strict();
+  app.post("/admin/academies/:academyId/feature-grants/trial-all", guard, adminOnly, csrf, async (c) => {
+    const parsed = TrialAllBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const r = await grantAllFeatures(cfg.db, {
+      actorUserId: c.get("auth").userId,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "NOT_FOUND") return c.json({ error: "NOT_FOUND" }, 404);
+    if (r.kind === "INVALID") return c.json({ error: "INVALID_BODY", reason: r.reason }, 422);
+    return c.json({ granted: r.granted, expiresAt: r.expiresAt }, 201);
+  });
+  app.post("/admin/academies/:academyId/feature-grants/:grantId/revocation", guard, adminOnly, csrf, async (c) => {
+    const parsed = OptionalReasonBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const r = await revokeFeatureGrant(cfg.db, {
+      actorUserId: c.get("auth").userId,
+      academyId: c.req.param("academyId")!, grantId: c.req.param("grantId")!,
+      reason: parsed.data.reason,
+    }, now());
+    if (r.kind === "NOT_FOUND") return c.json({ error: "NOT_FOUND" }, 404);
+    if (r.kind !== "OK") return c.json({ error: "INVALID_BODY" }, 422);
+    return c.json({ grantId: r.grantId }, 200);
+  });
 
   /* #39-⑥(HQ-2): 네이버 검색·데이터랩 — 본부 전용, env 미설정 = 501 fail-closed */
   const naver = naverFromEnv();

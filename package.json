@@ -8,9 +8,9 @@
   "scripts": {
     "dev": "npm run dev -w web",
     "dev:api": "npm run dev -w @pacefolio/api",
-    "build": "npm run build -w web",
+    "build": "npm run build -w web && npm run build -w console-admin",
     "start": "npm run start -w web",
-    "lint": "npm run lint -w web",
+    "lint": "npm run lint -w web && npm run lint -w console-admin",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }

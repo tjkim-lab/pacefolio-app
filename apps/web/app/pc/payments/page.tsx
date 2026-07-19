@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PCShell } from "../_shell";
 import { Button } from "@/components/ui";
-import { Panel, RL, Note, DChip, Meter, Spinner, Pill, useOverlays } from "../_ui";
+import { Panel, RL, Note, DChip, Meter, Spinner, Pill, ActBtn, useOverlays } from "../_ui";
 import {
   CYCLE_NEXT, CALC, MJ_CLASSES, MJ_OPTS, MJ_DISCOUNTS, OFF_TYPES, OFF_SCOPES,
   BILL_GROUPS, REFUND_LIST, fmt,
@@ -236,6 +236,18 @@ function PCPaymentsBody() {
   };
 
   const rate = sentCount ? Math.round((live.paid / sentCount) * 100) : 0;
+
+  /* #44: READY = 미납 대상도 audience 공용 리졸버(원생·공지·대회와 같은 정본) — 명단·CSV(감사 기록) */
+  const [unpaidList, setUnpaidList] = useState<{ name: string; classNames: string[] }[]>([]);
+  const { state: liveState, audiencePreview } = ownerLive;
+  useEffect(() => {
+    if (liveState !== "READY") return;
+    let alive = true;
+    void audiencePreview({ unpaidOnly: true }).then((r) => {
+      if (alive && r.ok) setUnpaidList(r.members ?? []);
+    });
+    return () => { alive = false; };
+  }, [liveState, audiencePreview]);
 
   return (
     <PCShell title="수납" actions={<span className="text-[12px] text-ink3 font-medium">9월 시작 수납기간 (9/1~11/30)</span>}>
@@ -494,6 +506,22 @@ function PCPaymentsBody() {
           )}
 
           <Panel title="미납 리마인드 타임라인" hnote="시스템이 알아서" hnoteAccent>
+            {ownerLive.state === "READY" && (
+              <div className="mb-2 bg-fill rounded-xl px-3.5 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[12px] font-bold text-ink">
+                    미납 원생 {unpaidList.length}명
+                    <small className="text-ink3 font-medium ml-1">— 원생·공지와 같은 공용 필터(서버)</small>
+                  </span>
+                  <ActBtn soft onClick={() => { void ownerLive.audienceExportCsv({ unpaidOnly: true }).then((r) => toast(r.message)); }}>명단 CSV</ActBtn>
+                </div>
+                {unpaidList.length > 0 && (
+                  <div className="text-[11px] text-ink3 font-medium mt-1">
+                    {unpaidList.map((m) => `${m.name}${m.classNames.length ? `(${m.classNames[0]})` : ""}`).join(" · ")}
+                  </div>
+                )}
+              </div>
+            )}
             <RL label="D-3 · 마감 3일 전 알림톡" sub="미결제 원생의 보호자에게만 · 11/28 예약" amount="예약" />
             <RL label="당일 · 마감일 최종 안내" sub="12/1 (월)" amount="예약" />
             <RL label="D+3 · 문자로 전환" sub="알림톡 안 읽는 학부모 대응" amount="자동" />

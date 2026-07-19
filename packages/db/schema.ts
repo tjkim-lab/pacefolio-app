@@ -396,7 +396,8 @@ export const attendanceRecords = pgTable("attendance_records", {
   foreignKey({ name: "fk_attendance_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
 ]);
 
-/* 예정 통보(보호자 접수) — 실제 출결과 별개 트랙 */
+/* 예정 통보(보호자 접수) — 실제 출결과 별개 트랙.
+   원장 확인(#45): "확인했어요" 응답 트랙 — 보강 자동 생성 아님(헌법: 보강 단순화) */
 export const dbAttendanceNotices = pgTable("attendance_notices", {
   id: text("id").primaryKey(),                     // an_xxx
   academyId: text("academy_id").notNull().references(() => academies.id),
@@ -406,6 +407,8 @@ export const dbAttendanceNotices = pgTable("attendance_notices", {
   reason: text("reason").notNull(),
   createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
   createdAt: createdAt(),
+  acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true, mode: "string" }),
+  acknowledgedByUserId: text("acknowledged_by_user_id").references(() => users.id),
 }, (t) => [
   index("ix_notice_participant_date").on(t.participantId, t.date),
   foreignKey({ name: "fk_notice_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
@@ -707,6 +710,23 @@ export const academySubscriptions = pgTable("academy_subscriptions", {
 }, (t) => [
   uniqueIndex("uq_subscription_academy").on(t.academyId), // 학원당 구독 1개(플랜 변경 = 갱신)
   check("ck_subscription_price", sql`${t.priceKrwMonthly} > 0 AND ${t.priceKrwMonthly} <= 10000000`),
+]);
+
+/* 기능 예외 grant(#50) — 영업·프로모션용 "이 학원에 이 기능만 기간 한정 열기".
+   플랜 게이트(domain/plan.ts)를 학원×기능 단위로 우회. append-only(재부여 = 새 행) —
+   만료는 판정 시점 lazy(워커 불요), 철회는 revokedAt. 발급·철회 전부 감사. */
+export const academyFeatureGrants = pgTable("academy_feature_grants", {
+  id: text("id").primaryKey(),                     // fg_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  feature: text("feature").notNull(),              // domain GATED_FEATURES — 서비스 계층이 검증
+  reason: text("reason").notNull(),                // 영업 근거 필수(누가 왜 열어줬는지)
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }), // null = 무기한
+  grantedByUserId: text("granted_by_user_id").notNull().references(() => users.id),
+  revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+  revokedByUserId: text("revoked_by_user_id").references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => [
+  index("ix_feature_grant_academy").on(t.academyId, t.feature),
 ]);
 
 /* 구독 이력 ledger(#39-④) — append-only. 플랜·가격·상태의 모든 변화가 행으로 남는다

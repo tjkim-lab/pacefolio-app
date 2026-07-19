@@ -53,6 +53,7 @@ const ClassList = z.object({
   classes: z.array(z.object({
     classId: z.string(), name: z.string(), scheduleType: z.string(),
     capacity: z.number().int(), room: z.string().nullable(), status: z.string(),
+    enrolled: z.number().int(), // ACTIVE 등록 수 — 반별 정원 현황(#49) 서버 정본
     slots: z.array(z.object({
       weekday: z.number().int(), startTime: z.string(), endTime: z.string(),
       participantId: z.string().optional(),
@@ -94,10 +95,48 @@ const BillingSummary = z.object({
   billedKrw: z.number().int(), capturedKrw: z.number().int(),
 });
 
+/* 원장 홈 실연결(#45) — 재알림·미납 리마인드·긴급결석 확인 */
+const NoticeRemind = z.object({ reminded: z.number().int() });
+const BillingRemind = z.object({ invoices: z.number().int(), guardians: z.number().int() });
+const AttendanceNoticeList = z.object({
+  notices: z.array(z.object({
+    noticeId: z.string(), participantId: z.string(), participantName: z.string(),
+    date: z.string(), type: z.string(), reason: z.string(),
+    createdAt: z.string(), acknowledgedAt: z.string().optional(),
+  })),
+});
+const AttendanceNoticeAck = z.object({ noticeId: z.string(), alreadyAcknowledged: z.boolean() });
+
 /* PC draft 정본화 2(#40) */
 const ParticipantList = z.object({
   participants: z.array(z.object({
     participantId: z.string(), name: z.string(), ageLabel: z.string(), status: z.string(),
+    classNames: z.array(z.string()), // ACTIVE 배정 반 이름(#51 — owner 원생 목록)
+    unpaid: z.boolean(),             // open 청구 존재 여부(금액 미포함)
+  })),
+});
+/* 원생 상세(#52) — staff 전용. 보호자는 관계·검증·결제권한만(이름·연락처 미포함) */
+const ParticipantDetail = z.object({
+  participant: z.object({
+    participantId: z.string(), name: z.string(), birth: z.string(),
+    ageLabel: z.string(), status: z.string(),
+  }),
+  enrollments: z.array(z.object({
+    classId: z.string(), className: z.string(), coachNames: z.array(z.string()),
+  })),
+  guardians: z.array(z.object({
+    relationshipType: z.string(), isPrimaryGuardian: z.boolean(),
+    verificationStatus: z.string(), canPay: z.boolean(),
+  })),
+  /* #53: 실제 출결 기록 집계 — 예정 통보와 별개. ratePct = 출석+지각+조퇴 / 전체 */
+  attendance: z.object({
+    total: z.number().int(), present: z.number().int(), absent: z.number().int(),
+    late: z.number().int(), earlyLeave: z.number().int(), excused: z.number().int(),
+    ratePct: z.number().int().nullable(),
+  }),
+  invoices: z.array(z.object({
+    invoiceId: z.string(), status: z.string(), total: z.number().int(), dueDate: z.string(),
+    lines: z.array(z.object({ type: z.string(), label: z.string(), amount: z.number().int() })),
   })),
 });
 const BillingPeriodCreate = z.object({ billingPeriodId: z.string() });
@@ -105,6 +144,23 @@ const InvoiceCreate = z.object({ invoiceId: z.string(), total: z.number().int() 
 const BulkDrafts = z.object({ created: z.number().int(), skipped: z.number().int(), invoiceIds: z.array(z.string()) });
 const BulkIssue = z.object({ issued: z.number().int() });
 const CoachSwap = z.object({ swapped: z.number().int(), affectedParticipants: z.number().int(), revoked: z.boolean() });
+
+/* AudienceFilter 2단계(#44) — 공지·청구·대회·CSV 공용 대상 산정 */
+export interface AudienceFilter {
+  classIds?: string[]; coachUserIds?: string[]; weekdays?: number[];
+  statuses?: string[]; unpaidOnly?: boolean;
+}
+const AudiencePreview = z.object({
+  members: z.array(z.object({
+    participantId: z.string(), name: z.string(), ageLabel: z.string(), status: z.string(),
+    classNames: z.array(z.string()), unpaid: z.boolean(),
+  })),
+  total: z.number().int(),
+  guardianRecipients: z.number().int(),
+});
+const AudienceExport = z.object({
+  filename: z.string(), rowCount: z.number().int(), csv: z.string(),
+});
 
 /* 휴무·일할(#38 — PC draft 정본화 1) */
 const ClosureCreate = z.object({ closureId: z.string(), canceledSessions: z.number().int() });
@@ -180,6 +236,15 @@ const AdminAcademyList = z.object({
 });
 const AdminSubscriptionSet = z.object({ subscriptionId: z.string(), priceKrwMonthly: z.number().int() });
 const AdminSuspendResult = z.object({ revokedUserSessions: z.number().int() });
+/* #50 기능 예외 grant */
+const AdminFeatureGrant = z.object({ grantId: z.string(), expiresAt: z.string().nullable() });
+const AdminFeatureGrantList = z.object({
+  grants: z.array(z.object({
+    grantId: z.string(), feature: z.string(), reason: z.string(),
+    expiresAt: z.string().optional(), active: z.boolean(),
+    revokedAt: z.string().optional(), createdAt: z.string(),
+  })),
+});
 const AdminCancelResult = z.object({ subscriptionId: z.string() });
 const AdminSupportViewIssue = z.object({ supportViewId: z.string(), expiresAt: z.string() });
 const AdminSupportViewRevoke = z.object({ supportViewId: z.string() });
@@ -202,6 +267,20 @@ export class ApiError extends Error {
     super(message ?? `${status} ${code}`);
     this.name = "ApiError";
   }
+}
+
+/* #50c: 402 = 판매 순간 — 게이트 응답을 사람 말 안내로. UI 는 이 헬퍼 하나만 쓴다. */
+const PLAN_KO: Record<string, string> = { FREE: "무료", BASIC: "BASIC", PRO: "PRO" };
+export interface PlanUpgradeInfo { feature?: string; currentPlan: string; requiredPlan: string; message: string }
+export function planUpgradeInfo(e: unknown): PlanUpgradeInfo | null {
+  if (!(e instanceof ApiError) || e.status !== 402) return null;
+  const b = (e.body ?? {}) as { feature?: string; currentPlan?: string; requiredPlan?: string; reason?: string };
+  const cur = b.currentPlan ?? "FREE";
+  const req = b.requiredPlan ?? "BASIC";
+  return {
+    feature: b.feature, currentPlan: cur, requiredPlan: req,
+    message: `이 기능은 ${PLAN_KO[req] ?? req} 플랜부터 열려요 (현재 ${PLAN_KO[cur] ?? cur}) — 업그레이드하면 바로 쓸 수 있어요`,
+  };
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -471,6 +550,8 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
     /* PC draft 정본화 2(#40) — 원생 목록·수납 기간(멱등)·청구 초안 */
     listParticipants: (academyId: string, status?: string) =>
       call(ParticipantList, `/academies/${academyId}/participants${status ? `?status=${status}` : ""}`),
+    participantDetail: (academyId: string, participantId: string) =>
+      call(ParticipantDetail, `/academies/${academyId}/participants/${participantId}`),
     createBillingPeriod: (academyId: string, body: { periodStart: string; periodEnd: string; cycleMonths: number }) =>
       call(BillingPeriodCreate, `/academies/${academyId}/billing-periods`, {
         method: "POST", csrf: true, body: JSON.stringify(body),
@@ -516,15 +597,42 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       call(ProrationQuote, `/academies/${academyId}/classes/${classId}/proration-quote`, {
         method: "POST", csrf: true, body: JSON.stringify(body),
       }),
-    /* 원장 공지·수납 관제(#25) */
-    publishNotice: (academyId: string, body: { title: string; body: string; audience: string; classId?: string }) =>
+    /* 원장 공지·수납 관제(#25) — audienceFilter = 2단계 공용 대상 산정(#44) */
+    publishNotice: (academyId: string, body: {
+      title: string; body: string; audience: string; classId?: string;
+      audienceFilter?: AudienceFilter;
+    }) =>
       call(NoticePublish, `/academies/${academyId}/notices`, {
         method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    /* AudienceFilter 2단계(#44) — 대상 미리보기·명단 CSV(감사 기록) */
+    audiencePreview: (academyId: string, filter: AudienceFilter) =>
+      call(AudiencePreview, `/academies/${academyId}/audience/preview`, {
+        method: "POST", csrf: true, body: JSON.stringify(filter),
+      }),
+    audienceExport: (academyId: string, filter: AudienceFilter) =>
+      call(AudienceExport, `/academies/${academyId}/audience/export`, {
+        method: "POST", csrf: true, body: JSON.stringify(filter),
       }),
     listNotices: (academyId: string) =>
       call(NoticeList, `/academies/${academyId}/notices`),
     billingSummary: (academyId: string) =>
       call(BillingSummary, `/academies/${academyId}/billing/summary`),
+    /* 원장 홈 실연결(#45) — "오늘 처리할 일" 서버 정본 액션 */
+    remindNotice: (academyId: string, noticeId: string) =>
+      call(NoticeRemind, `/academies/${academyId}/notices/${noticeId}/remind`, {
+        method: "POST", csrf: true,
+      }),
+    remindUnpaid: (academyId: string) =>
+      call(BillingRemind, `/academies/${academyId}/billing/remind`, {
+        method: "POST", csrf: true,
+      }),
+    listAttendanceNotices: (academyId: string) =>
+      call(AttendanceNoticeList, `/academies/${academyId}/attendance-notices`),
+    ackAttendanceNotice: (academyId: string, noticeId: string) =>
+      call(AttendanceNoticeAck, `/academies/${academyId}/attendance-notices/${noticeId}/ack`, {
+        method: "POST", csrf: true,
+      }),
     /* Admin 관제(#27) — 수익(MRR)·학원별 지표·구독 지정 */
     adminOverview: () => call(AdminOverview, "/admin/overview"),
     adminAcademies: () => call(AdminAcademyList, "/admin/academies"),
@@ -545,6 +653,23 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       call(z.void(), `/admin/academies/${academyId}/suspension`, {
         method: "DELETE", csrf: true,
       }),
+    /* #50: 기능 예외 grant — 영업 "한두 달 열어주기"(발급·철회·목록, 전부 감사) */
+    adminListFeatureGrants: (academyId: string) =>
+      call(AdminFeatureGrantList, `/admin/academies/${academyId}/feature-grants`),
+    adminGrantFeature: (academyId: string, body: { feature: string; reason: string; days?: number }) =>
+      call(AdminFeatureGrant, `/admin/academies/${academyId}/feature-grants`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    adminRevokeFeatureGrant: (academyId: string, grantId: string) =>
+      call(z.object({ grantId: z.string() }), `/admin/academies/${academyId}/feature-grants/${grantId}/revocation`, {
+        method: "POST", csrf: true, body: JSON.stringify({}),
+      }),
+    /* #50b: 전 기능 체험 — 일괄 grant(기간 필수), 만료 lazy 자동 잠금 */
+    adminTrialAllFeatures: (academyId: string, body: { reason: string; days: number }) =>
+      call(z.object({ granted: z.number().int(), expiresAt: z.string() }),
+        `/admin/academies/${academyId}/feature-grants/trial-all`, {
+          method: "POST", csrf: true, body: JSON.stringify(body),
+        }),
     /* 소통 실연결(#31) */
     listMembers: (academyId: string, role?: string) =>
       call(MemberList, `/academies/${academyId}/members${role ? `?role=${role}` : ""}`),
@@ -566,6 +691,16 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       call(ChatMessageList, `/academies/${academyId}/chat/rooms/${roomId}/messages`),
     ackChatMessage: (academyId: string, messageId: string) =>
       call(ChatAck, `/academies/${academyId}/chat/messages/${messageId}/ack`, {
+        method: "POST", csrf: true,
+      }),
+    /* 양방향 채팅(#46) — 보호자 학원 1:1 개설(원생 컨텍스트) + 읽음(READ ≠ ACK) */
+    openGuardianDm: (academyId: string, participantId: string) =>
+      call(DmOpen, `/academies/${academyId}/chat/dms`, {
+        method: "POST", csrf: true,
+        body: JSON.stringify({ type: "GUARDIAN_DM", participantId }),
+      }),
+    readChatMessage: (academyId: string, messageId: string) =>
+      call(ChatAck, `/academies/${academyId}/chat/messages/${messageId}/read`, {
         method: "POST", csrf: true,
       }),
     /* 안전사고(#32) */

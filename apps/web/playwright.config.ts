@@ -31,5 +31,13 @@ export default defineConfig({
          명시 게이트(parent/_live.tsx). 실 PG(Gate 3) 전환 시 이 env 와 함께 제거. */
       env: { NEXT_PUBLIC_PACEFOLIO_PG_SIMULATION: "1" },
     },
+    /* B5(#54): admin 분리 배포 — admin e2e 는 :3002 절대 URL 로 진입 */
+    {
+      command: "npm run dev -w console-admin",
+      cwd: "../..",
+      url: "http://localhost:3002",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
   ],
 });

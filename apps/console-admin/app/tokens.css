@@ -1,0 +1,156 @@
+/* ============================================================
+   PACEFOLIO Design Tokens v1.1  (Single Source of Truth)
+   ------------------------------------------------------------
+   출처: 디자인 터미널 tokens.css v1.0 흡수 + 아래 보정
+   보정 원칙:
+   - 대비: 밝은 배경 위 작은 텍스트는 WCAG 2.2 AA(4.5:1) 통과 색만
+   - 병합: 같은 의미 토큰은 "더 안전한(진한)" 값 채택
+   - 누락: focus/disabled/overlay/icon/motion/breakpoint/placeholder/role 추가
+   - 이 파일엔 "변수만" 둔다. reset/body 는 base.css.
+   변수 이름은 tokens.css(하이픈)와 동일하게 유지한다.
+   ============================================================ */
+:root {
+  /* 1. 브랜드 -------------------------------------------------- */
+  --accent: #12b5a5;         /* 아이덴티티 틸: 포인트·활성·그래프·아이콘 */
+  --accent-strong: #087f73;  /* 주 CTA / 흰글씨 위 (흰글씨 4.9:1 ✅) */
+  --accent-ink: #0e9384;     /* 틸 텍스트(장식·큰 글씨). 작은 본문 금지 */
+  --accent-weak: #e7f8f6;    /* 틸 연배경(선택·하이라이트) */
+
+  /* 2. 뉴트럴 (tokens.css 대비 더 진한 값 유지 → 대비 안전) ---- */
+  --ink: #191f28;   /* 본문 */
+  --ink-2: #4e5968; /* 보조 (약 7:1 ✅, 원안 #6B7684보다 안전) */
+  --ink-3: #8b95a1; /* 비활성·장식 (원안 #AEB6C2 2.0:1 폐기) */
+  --line: #eaedf0;
+  --line-2: #f2f4f6;
+  --fill: #f7f8fa;
+  --bg: #f2f4f6;    /* 페이지 배경 */
+  --surface: #ffffff;
+
+  /* 다크 사이드바 (원장 PC · 관리자 콘솔) */
+  --side: #1b2430;
+  --side-ink: #9aa4b2;        /* 사이드바 기본 글씨 */
+  --side-ink-strong: #eef1f5; /* 사이드바 활성/hover 글씨 */
+  --side-active: rgba(255, 255, 255, 0.08);
+
+  /* 3. 시맨틱 (전경/배경 쌍) ---------------------------------- */
+  --danger: #f04452;
+  --danger-ink: #d33641;
+  --danger-weak: #fdebed;
+
+  --warn: #ea9a17;
+  --warn-ink: #8a5a00;
+  --warn-weak: #fcf0d9;
+
+  --success: var(--accent);
+  --success-ink: var(--accent-strong); /* 성공 텍스트는 대비 안전색 */
+  --success-weak: var(--accent-weak);
+
+  --info: #2563eb;
+  --info-ink: #1d4fd7;
+  --info-weak: #ebf1fe;
+
+  --gold: #a87b1e; /* 주의·프리미엄 악센트 텍스트 (4.7:1 ✅) */
+  --gold-weak: #faf3e0;
+
+  /* 텍스트 역할 (대비 안전 보장) ------------------------------ */
+  --text-brand: #087f73;       /* 흰 배경 위 틸 텍스트(작은 글씨 OK) */
+  --text-on-accent: #ffffff;
+  --text-placeholder: #6b7684; /* placeholder (4.6:1 ✅) */
+  --text-muted: #6b7684;
+
+  /* 4. 타이포 (10단계 · 0.5px 금지 · 11px 미만 금지) ---------- */
+  --font: "Pretendard Variable", "Pretendard", -apple-system,
+    BlinkMacSystemFont, "Apple SD Gothic Neo", system-ui, sans-serif;
+
+  --text-caption: 11px;
+  --text-label: 12px;
+  --text-body-sm: 13px;
+  --text-body: 14px;
+  --text-body-lg: 16px;
+  --text-title-sm: 18px;
+  --text-title: 20px;
+  --text-heading: 24px;
+  --text-display: 30px;
+  --text-hero: 34px;
+
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-heavy: 800;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.45;
+  --leading-loose: 1.6;
+
+  /* 5. 간격 (4px 그리드 7단계) -------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --screen-pad-x: var(--space-4);
+
+  /* 6. 라운드 (4단계) ---------------------------------------- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* 7. 컴포넌트 규격 ----------------------------------------- */
+  --btn-h: 44px;      /* 주 CTA (터치 최소) */
+  --btn-h-sm: 36px;   /* 보조 (PC 밀도) */
+  --btn-h-chip: 28px; /* 칩 시각 높이 (히트영역은 touch-min으로 확장) */
+  --input-h: 44px;
+  --nav-h: 64px;      /* 하단 내비 */
+  --touch-min: 44px;  /* 모바일 모든 탭 요소 최소 히트영역 */
+
+  /* 8. 그림자 · 레이어 --------------------------------------- */
+  --shadow-card: 0 1px 3px rgba(25, 31, 40, 0.06);
+  --shadow-float: 0 4px 16px rgba(25, 31, 40, 0.1);
+  --shadow-modal: 0 12px 32px rgba(25, 31, 40, 0.16);
+
+  --z-nav: 100;
+  --z-sheet: 200;
+  --z-modal: 300;
+  --z-toast: 400;
+
+  /* 9. 포커스 (누락 보완) ------------------------------------ */
+  --focus-color: var(--accent-strong);
+  --focus-width: 2px;
+  --focus-offset: 2px;
+
+  /* 10. 비활성 ----------------------------------------------- */
+  --disabled-bg: var(--fill);
+  --disabled-text: var(--ink-3);
+  --disabled-opacity: 0.5;
+
+  /* 11. 오버레이 (모달·바텀시트 배경) ------------------------ */
+  --overlay: rgba(25, 31, 40, 0.45);
+
+  /* 12. 아이콘 크기 ------------------------------------------ */
+  --icon-sm: 18px;
+  --icon-md: 22px;
+  --icon-lg: 28px;
+
+  /* 13. 모션 (+ reduced-motion 정책은 base.css) -------------- */
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* 14. 반응형 · 레이아웃 규격 ------------------------------- */
+  --breakpoint-tablet: 768px;
+  --breakpoint-desktop: 1024px;
+  --container-pc: 1152px;
+  --sidebar-width: 240px;
+}
+
+/* ============================================================
+   역할별 테마 (의미 불변 — --accent 는 항상 밝은 틸)
+   코치 앱: 딥그린 "작업 도구" 톤. 헤더·강조 블록에만.
+   ============================================================ */
+.theme-coach {
+  --role-header-bg: var(--accent-strong);
+  --role-header-ink: #ffffff;
+}

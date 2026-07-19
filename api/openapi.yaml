@@ -173,11 +173,12 @@ paths:
       tags: [notices]
       summary: >
         공지 발행(#24) — staff. 수신자 산정은 서버: 전체 = ACTIVE 보호자 멤버십 /
-        classId 지정 = 그 반 ACTIVE 등록 원생의 VERIFIED 연결 보호자(AudienceFilter 1단계)
+        classId 지정 = 그 반 ACTIVE 등록 원생의 VERIFIED 연결 보호자(AudienceFilter 1단계) /
+        audienceFilter 지정 = 공용 리졸버 매칭 원생의 VERIFIED 보호자(2단계, 구현됨)
       parameters: [{ $ref: '#/components/parameters/AcademyId' }]
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [title, body, audience], properties: { title: { type: string, maxLength: 80 }, body: { type: string, maxLength: 4000 }, audience: { type: string, maxLength: 200 }, classId: { type: string } } } } }
+        content: { application/json: { schema: { type: object, required: [title, body, audience], properties: { title: { type: string, maxLength: 80 }, body: { type: string, maxLength: 4000 }, audience: { type: string, maxLength: 200 }, classId: { type: string }, audienceFilter: { $ref: '#/components/schemas/AudienceFilter' } } } } }
       responses:
         '201': { description: 'noticeId·recipients(서버 산정)' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -196,6 +197,50 @@ paths:
         - { name: noticeId, in: path, required: true, schema: { type: string } }
       responses:
         '200': { description: 기록됨 }
+  /academies/{academyId}/notices/{noticeId}/remind:
+    post:
+      tags: [notices]
+      summary: >
+        공지 재알림(#45) — staff. 미열람 receipt 보유자에게만(전체 재발송 금지) ·
+        Outbox(NOTICE_REMINDER) → 인앱 알림 · 감사 notice.reminded. (구현됨)
+      parameters:
+        - { $ref: '#/components/parameters/AcademyId' }
+        - { name: noticeId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{ reminded } — 전원 열람이면 0(발송 없음)' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: 공지 없음(학원 불일치 포함) }
+
+  # ── AudienceFilter 2단계 — 대상 산정 공용 (docs/13 §C) ─────────
+  /academies/{academyId}/audience/preview:
+    post:
+      tags: [notices]
+      summary: >
+        대상 미리보기 — 공지·청구·대회·CSV 가 재사용하는 공용 리졸버(반·코치·요일·상태·미납,
+        축 내 OR·축 간 AND). staff 전용 · PII 미포함. (구현됨 #44)
+      parameters: [{ $ref: '#/components/parameters/AcademyId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AudienceFilter' } } }
+      responses:
+        '200': { description: '{ members: [{ participantId, name, ageLabel, status, classNames[], unpaid }], total, guardianRecipients(VERIFIED 보호자 수) }' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: INVALID_BODY }
+  /academies/{academyId}/audience/export:
+    post:
+      tags: [notices]
+      summary: >
+        명단 CSV — 같은 리졸버 결과를 CSV(BOM 포함)로 반환. 명단 반출은 감사
+        기록(audience.exported — 행 수·필터만, 명단 원문 미포함). 연락처·생년월일 미포함.
+        staff 전용. (구현됨 #44)
+      parameters: [{ $ref: '#/components/parameters/AcademyId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AudienceFilter' } } }
+      responses:
+        '200': { description: '{ filename, rowCount, csv }' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: INVALID_BODY }
 
   /academies/{academyId}/attendance-notices:
     post:
@@ -210,6 +255,30 @@ paths:
       responses:
         '201': { description: 생성(전체 엔티티 — id·작성자·시각 포함), content: { application/json: { schema: { $ref: '#/components/schemas/AttendanceNotice' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+    get:
+      tags: [attendance]
+      summary: >
+        통보 목록(#45) — staff 전용(보호자 접수 원문 포함). 원장 홈 "긴급결석" 카드의
+        서버 정본 · 최신 50건 · acknowledgedAt 포함. (구현됨)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+      responses:
+        '200': { description: '{ notices: [{ noticeId, participantId, participantName, date, type, reason, createdAt, acknowledgedAt? }] }' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /academies/{academyId}/attendance-notices/{noticeId}/ack:
+    post:
+      tags: [attendance]
+      summary: >
+        원장 확인(#45) — staff. "확인했어요"만 전달, 보강 자동 생성 아님(보강 단순화).
+        멱등(최초 확인 시각·확인자 보존) · Outbox(ATTENDANCE_NOTICE_ACKED) → 접수 보호자
+        인앱 알림 · 감사 attendance_notice.acknowledged. (구현됨)
+      parameters:
+        - $ref: '#/components/parameters/AcademyId'
+        - { name: noticeId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{ noticeId, alreadyAcknowledged }' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: 통보 없음(학원 불일치 포함) }
   /academies/{academyId}/attendance-records:
     post:
       tags: [attendance]
@@ -391,9 +460,11 @@ paths:
         '422': { $ref: '#/components/responses/Unprocessable' }
     get:
       tags: [classes]
-      summary: 반 목록 — 슬롯·담당 코치 포함(학원 멤버). (구현됨)
+      summary: >
+        반 목록 — 슬롯·담당 코치·재원 수 포함(학원 멤버). enrolled = ACTIVE 등록
+        집계(#49 — 원장 홈 반별 정원 현황의 서버 정본). (구현됨)
       parameters: [ { $ref: '#/components/parameters/AcademyId' } ]
-      responses: { '200': { description: '{ classes: [...] }' } }
+      responses: { '200': { description: '{ classes: [{ ..., capacity, enrolled }] }' } }
   /academies/{academyId}/classes/{classId}/sessions/generate:
     post:
       tags: [classes]
@@ -438,9 +509,26 @@ paths:
       responses: { '201': { description: '{ participantId }' }, '403': { $ref: '#/components/responses/Forbidden' } }
     get:
       tags: [attendance]
-      summary: 원생 목록(staff 전용) — PII 미포함(participantId·name·ageLabel·status만). 청구 초안 원생 선택용. (구현됨 #40)
+      summary: >
+        원생 목록(staff 전용) — PII 미포함. #51: classNames(ACTIVE 배정 반)·unpaid(open
+        청구 존재 여부, 금액 미포함) 동봉 — owner 원생 목록·청구 초안 원생 선택용. (구현됨 #40·#51)
       parameters: [ { $ref: '#/components/parameters/AcademyId' } ]
-      responses: { '200': { description: '{ participants: [{ participantId, name, ageLabel, status }] }' }, '403': { $ref: '#/components/responses/Forbidden' } }
+      responses: { '200': { description: '{ participants: [{ participantId, name, ageLabel, status, classNames[], unpaid }] }' }, '403': { $ref: '#/components/responses/Forbidden' } }
+  /academies/{academyId}/participants/{participantId}:
+    get:
+      tags: [attendance]
+      summary: >
+        원생 상세(#52·#53) — staff 전용. 반·담당 코치 이름 / 보호자 연결(관계·검증·결제권한 —
+        이름·연락처 미포함) / 출석 집계(실제 기록 기준 — 예정 통보 미합산, ratePct =
+        출석+지각+조퇴/전체·기록 0 = null) / 청구서(금액 포함 — 원장 수납 화면, DRAFT 포함).
+        없음·타학원 = 404(존재 은닉). (구현됨)
+      parameters:
+        - { $ref: '#/components/parameters/AcademyId' }
+        - { name: participantId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{ participant, enrollments[], guardians[], attendance, invoices[] }' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 원생 없음(타학원 포함 — 존재 은닉) }
   /academies/{academyId}/participants/{participantId}/status:
     post:
       tags: [attendance]
@@ -870,6 +958,18 @@ paths:
                   billedKrw: { type: integer }
                   capturedKrw: { type: integer }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /academies/{academyId}/billing/remind:
+    post:
+      tags: [billing]
+      summary: >
+        미납 리마인드(#45) — staff. 대상 = open 청구(ISSUED·PARTIALLY_PAID·OVERDUE) 원생의
+        VERIFIED·canPay 보호자(중복 제거). 알림 본문에 금액 미표시(금액은 개인정보) ·
+        Outbox(BILLING_REMINDER) → 인앱 알림 · 감사 billing.reminded. (구현됨)
+      parameters:
+        - { name: academyId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{ invoices, guardians } — open 청구 0건이면 둘 다 0(발송 없음)' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ── Admin 백엔드 1차(#27) — PLATFORM_ADMIN 전용 경계 ───────────
   # 일반 역할 접근 = 404(표면 은닉) · PLATFORM_ADMIN 의 일반 학원 API = 403 (대칭 격리)
@@ -951,6 +1051,51 @@ paths:
       parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
       responses:
         '200': { description: ledger 배열 }
+  /admin/academies/{academyId}/feature-grants:
+    get:
+      tags: [admin]
+      summary: 기능 예외 grant 목록(#50) — active(미철회·미만료) 플래그 포함, append-only 이력. (구현됨)
+      parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: '{ grants: [{ grantId, feature, reason, expiresAt?, active, revokedAt?, createdAt }] }' }
+    post:
+      tags: [admin]
+      summary: >
+        기능 예외 발급(#50) — "이 학원에 이 기능만 기간 한정 열기"(영업·프로모션 정본).
+        사유 필수·days 생략 = 무기한. 만료는 판정 시점 lazy 자동 잠금(워커 불요). 감사 기록. (구현됨)
+      parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [feature, reason], properties: { feature: { type: string, description: domain GATED_FEATURES }, reason: { type: string, maxLength: 300 }, days: { type: integer, minimum: 1, maximum: 365 } } } } }
+      responses:
+        '201': { description: '{ grantId, expiresAt|null }' }
+        '404': { description: 학원 없음 }
+        '422': { description: 게이트 대상 아님·사유 누락 }
+  /admin/academies/{academyId}/feature-grants/trial-all:
+    post:
+      tags: [admin]
+      summary: >
+        전 기능 체험(#50b) — 게이트 전 기능을 같은 만료일로 일괄 grant("다 열어주고
+        쓰게 한 뒤 만료로 잠근다"). 기간(1~365일)·사유 필수 — 무기한 전체 개방은 플랜
+        지정으로. 만료 lazy 자동 잠금·기능별 개별 철회 가능·감사 1건. (구현됨)
+      parameters: [{ name: academyId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason, days], properties: { reason: { type: string, maxLength: 300 }, days: { type: integer, minimum: 1, maximum: 365 } } } } }
+      responses:
+        '201': { description: '{ granted, expiresAt }' }
+        '404': { description: 학원 없음 }
+        '422': { description: 기간·사유 누락 }
+  /admin/academies/{academyId}/feature-grants/{grantId}/revocation:
+    post:
+      tags: [admin]
+      summary: 기능 예외 철회(#50) — 즉시 플랜 기준 복귀·멱등·감사 기록. (구현됨)
+      parameters:
+        - { name: academyId, in: path, required: true, schema: { type: string } }
+        - { name: grantId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{ grantId }' }
+        '404': { description: grant 없음(학원 불일치 포함) }
   /admin/naver/search:
     get:
       tags: [admin]
@@ -1385,6 +1530,18 @@ components:
     RateLimited: { description: 요청 한도 초과(OTP 등), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   schemas:
+    AudienceFilter:
+      type: object
+      description: >
+        AudienceFilter 2단계 공용 축 — 축 내 복수 선택 = OR, 축 간 = AND
+        (웹 _audience.tsx 와 같은 의미론). 미납 = open 청구(ISSUED·PARTIALLY_PAID·OVERDUE)
+        보유 — billing summary 정의와 동일.
+      properties:
+        classIds: { type: array, maxItems: 50, items: { type: string } }
+        coachUserIds: { type: array, maxItems: 50, items: { type: string } }
+        weekdays: { type: array, maxItems: 7, items: { type: integer, minimum: 0, maximum: 6 }, description: 0=일 … 6=토 }
+        statuses: { type: array, maxItems: 4, items: { type: string, enum: [TRIAL, ENROLLED, ON_BREAK, WITHDRAWN] } }
+        unpaidOnly: { type: boolean }
     Error:
       type: object
       description: >

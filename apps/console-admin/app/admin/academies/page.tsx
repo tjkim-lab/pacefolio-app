@@ -3,14 +3,15 @@
 /* 학원 관리 — 실연결(#29): READY = 서버 학원 목록(구독·재원·미납·정지) +
    통제 액션(정지 = 사유 필수·전 멤버 세션 폐기 / 해제). LOADING/ERROR 구분 표시,
    FIXTURE = 기존 데모 테이블 유지(디자인 검수 안전). */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AdminShell } from "../_shell";
 import { Tag } from "@/components/ui";
 import { IconChevron } from "@/components/ui/icons";
 import { FilterChips, SearchBox, Empty, Panel, Note } from "../_ui";
+import { GATED_FEATURES, FEATURE_LABEL_KO } from "@pacefolio/domain";
 import { ACADEMIES, STATUS_META, hsClass, type AcademyStatus } from "../_data";
-import { AdminLiveProvider, useAdminLive, type AdminAcademyRow } from "../_live";
+import { AdminLiveProvider, useAdminLive, type AdminAcademyRow, type AdminFeatureGrantRow } from "../_live";
 
 type F = AcademyStatus | "all";
 
@@ -20,6 +21,7 @@ const won = (n: number) => `${n.toLocaleString()}원`;
 function LiveRow({ a }: { a: AdminAcademyRow }) {
   const live = useAdminLive();
   const [openReason, setOpenReason] = useState(false);
+  const [openGrants, setOpenGrants] = useState(false); // #50 기능 예외 패널
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string>();
@@ -67,7 +69,13 @@ function LiveRow({ a }: { a: AdminAcademyRow }) {
           {a.subscription?.status === "ACTIVE" ? won(a.subscription.priceKrwMonthly) : "–"}
         </td>
         <td className="py-3 text-ink2">{a.unpaidKrw > 0 ? won(a.unpaidKrw) : "–"}</td>
-        <td className="py-3 text-right">
+        <td className="py-3 text-right whitespace-nowrap">
+          <button
+            onClick={() => { setOpenGrants((v) => !v); setMsg(undefined); }}
+            className="px-2.5 py-1.5 mr-1.5 rounded-lg text-[11.5px] font-bold border border-line bg-surface text-brand hover:bg-fill"
+          >
+            기능 예외…
+          </button>
           {a.suspended ? (
             <button
               onClick={doUnsuspend}
@@ -86,6 +94,13 @@ function LiveRow({ a }: { a: AdminAcademyRow }) {
           )}
         </td>
       </tr>
+      {openGrants && (
+        <tr className="border-b border-line2 last:border-0 bg-fill/40">
+          <td colSpan={7} className="py-2.5">
+            <GrantPanel academyId={a.academyId} onMsg={setMsg} />
+          </td>
+        </tr>
+      )}
       {(openReason || msg) && (
         <tr className="border-b border-line2 last:border-0">
           <td colSpan={7} className="py-2.5">
@@ -117,6 +132,110 @@ function LiveRow({ a }: { a: AdminAcademyRow }) {
         </tr>
       )}
     </>
+  );
+}
+
+/* #50: 기능 예외 패널 — 영업 "한두 달 열어주기". 발급(기간·사유 필수)·철회·이력.
+   만료는 서버가 판정 시점에 자동 잠금 — 여기선 상태 표시만. */
+const GRANT_DAYS = [
+  { label: "30일", days: 30 }, { label: "60일", days: 60 },
+  { label: "90일", days: 90 }, { label: "무기한", days: undefined },
+] as const;
+
+function GrantPanel({ academyId, onMsg }: { academyId: string; onMsg: (m: string) => void }) {
+  const live = useAdminLive();
+  const [grants, setGrants] = useState<AdminFeatureGrantRow[] | null>(null);
+  const [feature, setFeature] = useState<string>(GATED_FEATURES[0]);
+  const [daysIdx, setDaysIdx] = useState(0);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const { listGrants } = live;
+  const reload = async () => setGrants(await listGrants(academyId));
+  useEffect(() => {
+    void listGrants(academyId).then(setGrants);
+  }, [academyId, listGrants]);
+
+  const doGrant = async () => {
+    if (busy || !reason.trim()) return;
+    setBusy(true);
+    const r = await live.grant(academyId, {
+      feature, reason: reason.trim(), days: GRANT_DAYS[daysIdx].days,
+    });
+    setBusy(false);
+    onMsg(r.message);
+    if (r.ok) { setReason(""); await reload(); }
+  };
+  /* #50b: 전 기능 체험 — 기간 필수(무기한 전체 개방은 플랜 지정으로) */
+  const doTrialAll = async () => {
+    if (busy || !reason.trim()) return;
+    const days = GRANT_DAYS[daysIdx].days;
+    if (days == null) { onMsg("전 기능 열기는 기간이 필요해요 — 무기한 전체 개방은 플랜을 PRO 로 지정하세요"); return; }
+    setBusy(true);
+    const r = await live.trialAll(academyId, { reason: reason.trim(), days });
+    setBusy(false);
+    onMsg(r.message);
+    if (r.ok) { setReason(""); await reload(); }
+  };
+  const doRevoke = async (grantId: string) => {
+    if (busy) return;
+    setBusy(true);
+    const r = await live.revokeGrant(academyId, grantId);
+    setBusy(false);
+    onMsg(r.message);
+    if (r.ok) await reload();
+  };
+  const label = (f: string) => FEATURE_LABEL_KO[f as keyof typeof FEATURE_LABEL_KO] ?? f;
+
+  return (
+    <div className="space-y-2">
+      <div className="text-[11.5px] font-bold text-ink2">
+        기능 예외 — 플랜과 무관하게 이 학원에만 열어줘요. 만료되면 자동으로 잠기고, 발급·철회는 감사에 남아요.
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <select value={feature} onChange={(e) => setFeature(e.target.value)}
+          className="rounded-lg border border-line bg-surface px-2.5 py-2 text-[12px] font-semibold">
+          {GATED_FEATURES.map((f) => <option key={f} value={f}>{label(f)}</option>)}
+        </select>
+        {GRANT_DAYS.map((d, i) => (
+          <button key={d.label} onClick={() => setDaysIdx(i)}
+            className={`px-2.5 py-1.5 rounded-lg text-[11.5px] font-bold border ${daysIdx === i ? "border-accent bg-accent-weak text-brand" : "border-line bg-surface text-ink2"}`}>
+            {d.label}
+          </button>
+        ))}
+        <input value={reason} onChange={(e) => setReason(e.target.value)}
+          placeholder="사유(필수) — 예: 영업 프로모션 2개월"
+          className="flex-1 min-w-[200px] rounded-lg border border-line bg-surface px-3 py-2 text-[12px] font-medium outline-none focus:border-accent" />
+        <button onClick={doGrant} disabled={busy || !reason.trim()}
+          className={`px-3 py-2 rounded-lg text-[12px] font-bold bg-accent-strong text-white ${busy || !reason.trim() ? "opacity-50" : ""}`}>
+          열어주기
+        </button>
+        <button onClick={doTrialAll} disabled={busy || !reason.trim()}
+          title="게이트 전 기능을 같은 만료일로 한 번에 — 만료되면 자동으로 잠겨요(전환 유도)"
+          className={`px-3 py-2 rounded-lg text-[12px] font-bold border-[1.5px] border-accent bg-accent-weak text-brand ${busy || !reason.trim() ? "opacity-50" : ""}`}>
+          ⚡ 전 기능 한 번에
+        </button>
+      </div>
+      <div className="space-y-1">
+        {grants === null && <div className="text-[11.5px] text-ink3 font-medium">불러오는 중...</div>}
+        {grants?.length === 0 && <div className="text-[11.5px] text-ink3 font-medium">예외 이력 없음 — 플랜 기준으로만 동작 중</div>}
+        {grants?.map((g) => (
+          <div key={g.grantId} className="flex items-center gap-2 text-[12px]">
+            <Tag tone={g.active ? "accent" : "muted"}>{g.active ? "열림" : g.revokedAt ? "철회됨" : "만료됨"}</Tag>
+            <span className="font-bold text-ink">{label(g.feature)}</span>
+            <span className="text-ink3 font-medium">
+              {g.expiresAt ? `~${g.expiresAt.slice(0, 10)}` : "무기한"} · {g.reason}
+            </span>
+            {g.active && (
+              <button onClick={() => doRevoke(g.grantId)} disabled={busy}
+                className="ml-auto px-2 py-1 rounded-lg text-[11px] font-bold border border-line bg-surface text-danger-ink hover:bg-fill">
+                철회
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

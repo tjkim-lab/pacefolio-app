@@ -1,0 +1,3 @@
+ALTER TABLE "attendance_notices" ADD COLUMN "acknowledged_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "attendance_notices" ADD COLUMN "acknowledged_by_user_id" text;--> statement-breakpoint
+ALTER TABLE "attendance_notices" ADD CONSTRAINT "attendance_notices_acknowledged_by_user_id_users_id_fk" FOREIGN KEY ("acknowledged_by_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;

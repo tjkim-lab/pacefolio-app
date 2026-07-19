@@ -26,7 +26,16 @@ interface AdminLiveCtx {
   suspend: (academyId: string, reason: string) => Promise<{ ok: boolean; message: string }>;
   unsuspend: (academyId: string) => Promise<{ ok: boolean; message: string }>;
   refresh: () => Promise<void>;
+  /* #50: 기능 예외 grant — "이 학원에 이 기능만 기간 한정 열기" */
+  listGrants: (academyId: string) => Promise<AdminFeatureGrantRow[]>;
+  grant: (academyId: string, body: { feature: string; reason: string; days?: number }) =>
+    Promise<{ ok: boolean; message: string }>;
+  revokeGrant: (academyId: string, grantId: string) => Promise<{ ok: boolean; message: string }>;
+  trialAll: (academyId: string, body: { reason: string; days: number }) =>
+    Promise<{ ok: boolean; message: string }>;
 }
+export type AdminFeatureGrantRow =
+  Awaited<ReturnType<typeof api.adminListFeatureGrants>>["grants"][number];
 
 const Ctx = createContext<AdminLiveCtx | null>(null);
 export const useAdminLive = () => {
@@ -129,8 +138,45 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
     return refreshAfter("정지 해제 — 다음 로그인부터 정상 이용");
   }, [refreshAfter]);
 
+  const listGrants = useCallback(async (academyId: string) => {
+    try { return (await api.adminListFeatureGrants(academyId)).grants; }
+    catch { return []; }
+  }, []);
+
+  const grant = useCallback(async (academyId: string, body: { feature: string; reason: string; days?: number }) => {
+    try {
+      const r = await api.adminGrantFeature(academyId, body);
+      return {
+        ok: true,
+        message: r.expiresAt
+          ? `기능 열림 — ${r.expiresAt.slice(0, 10)} 까지 (만료되면 자동으로 잠겨요)`
+          : "기능 열림 — 무기한(철회로만 종료)",
+      };
+    } catch (e) { return fail(e, "발급 실패 — 네트워크 확인"); }
+  }, [fail]);
+
+  const revokeGrant = useCallback(async (academyId: string, grantId: string) => {
+    try { await api.adminRevokeFeatureGrant(academyId, grantId); }
+    catch (e) { return fail(e, "철회 실패 — 네트워크 확인"); }
+    return { ok: true, message: "예외 철회 — 즉시 플랜 기준으로 돌아가요" };
+  }, [fail]);
+
+  /* #50b: 전 기능 체험 — "다 열어주고 쓰게 한 뒤 만료로 잠근다" */
+  const trialAll = useCallback(async (academyId: string, body: { reason: string; days: number }) => {
+    try {
+      const r = await api.adminTrialAllFeatures(academyId, body);
+      return {
+        ok: true,
+        message: `전 기능 ${r.granted}개 열림 — ${r.expiresAt.slice(0, 10)} 까지, 만료되면 자동으로 잠겨요`,
+      };
+    } catch (e) { return fail(e, "체험 개방 실패 — 네트워크 확인"); }
+  }, [fail]);
+
   return (
-    <Ctx.Provider value={{ state, errorMsg, overview, academies, setPlan, suspend, unsuspend, refresh: load }}>
+    <Ctx.Provider value={{
+      state, errorMsg, overview, academies, setPlan, suspend, unsuspend, refresh: load,
+      listGrants, grant, revokeGrant, trialAll,
+    }}>
       {children}
       <DemoBadge show={state === "FIXTURE"} />
     </Ctx.Provider>

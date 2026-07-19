@@ -9,7 +9,8 @@ import { NextResponse, type NextRequest } from "next/server";
    - 모든 환경에서 개인정보 라우트 응답에 no-store + noindex 헤더 —
      robots.txt 는 접근통제가 아니므로 응답 헤더로 강제(색인·캐시·BFCache). */
 
-const PRIVATE_PREFIXES = ["/parent", "/coach", "/owner", "/pc", "/admin", "/select"];
+/* B5(#54): /admin 은 apps/console-admin(:3002) 분리 배포로 이관 — 이 앱엔 admin 표면 없음 */
+const PRIVATE_PREFIXES = ["/parent", "/coach", "/owner", "/pc", "/select"];
 
 /* E 리뷰 P0-4: 쿠키 존재가 아니라 세션 정본(역할·멤버십)으로 라우트 보호.
    /select 는 세션만 있으면 통과(역할 선택 전 단계). */
@@ -18,7 +19,6 @@ const ROUTE_ROLES: Record<string, readonly string[]> = {
   "/coach": ["COACH"],
   "/owner": ["OWNER", "MANAGER"],
   "/pc": ["OWNER", "MANAGER", "DESK"],
-  "/admin": ["PLATFORM_ADMIN"],
 };
 
 export async function proxy(req: NextRequest) {
@@ -79,5 +79,5 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/parent/:path*", "/coach/:path*", "/owner/:path*", "/pc/:path*", "/admin/:path*", "/select"],
+  matcher: ["/parent/:path*", "/coach/:path*", "/owner/:path*", "/pc/:path*", "/select"],
 };

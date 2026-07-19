@@ -41,7 +41,9 @@ if (process.env.NODE_ENV === "production") {
 const app = createApp({
   db,
   providers: {}, // 실제 provider 는 클라이언트 키 발급 후 등록(카카오 앵커부터)
-  allowedOrigins: (process.env.PACEFOLIO_ALLOWED_ORIGINS ?? "http://localhost:3000").split(","),
+  /* B5(#54): :3002 = 분리 배포된 admin 콘솔(apps/console-admin) — CSRF Origin 허용.
+     프로덕션은 env 로 실 도메인 2개(app·console)를 명시. */
+  allowedOrigins: (process.env.PACEFOLIO_ALLOWED_ORIGINS ?? "http://localhost:3000,http://localhost:3002").split(","),
   redirectUri: process.env.PACEFOLIO_OAUTH_REDIRECT_URI ?? "http://localhost:3001/auth/callback",
   secureCookies: process.env.NODE_ENV === "production",
   enableDevLogin: process.env.NODE_ENV !== "production",

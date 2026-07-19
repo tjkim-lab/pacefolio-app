@@ -4,12 +4,97 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { PCShell } from "../_shell";
 import { Button } from "@/components/ui";
-import { useOverlays, Panel, RL, Pill, Meter } from "../_ui";
+import { useOverlays, Panel, RL, Pill, Meter, FilterChip } from "../_ui";
 import { COMP_TEAMS_INIT, COMP_INVITES } from "../_data";
+import { OwnerLiveProvider, useOwnerLive } from "../_live";
 
 interface Pending { init: string; nm: string; status: "wait" | "ok"; }
 
 export default function PCCompetitions() {
+  return (
+    <OwnerLiveProvider>
+      <PCCompetitionsBody />
+    </OwnerLiveProvider>
+  );
+}
+
+/* #44: 참가 대상 선정 — AudienceFilter 공용 리졸버 재사용(원생·공지·청구와 같은 정본).
+   동의 안내 발송 = 공지 엔진(audienceFilter) 재사용 — 수신자 산정·receipt 전부 서버. */
+function InviteAudience() {
+  const ownerLive = useOwnerLive();
+  const { confirm, toast, overlays } = useOverlays();
+  const [classIds, setClassIds] = useState<string[]>([]);
+  const [total, setTotal] = useState(0);
+  const [guardians, setGuardians] = useState(0);
+  const [names, setNames] = useState<string[]>([]);
+  const [sent, setSent] = useState(false);
+  const toggle = (id: string) =>
+    setClassIds((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
+
+  const { audiencePreview } = ownerLive;
+  useEffect(() => {
+    let alive = true;
+    const filter = {
+      classIds: classIds.length ? classIds : undefined,
+      statuses: ["ENROLLED"], // 대회 초대 = 재원 원생만
+    };
+    void audiencePreview(filter).then((r) => {
+      if (!alive || !r.ok) return;
+      setTotal(r.total ?? 0);
+      setGuardians(r.guardianRecipients ?? 0);
+      setNames((r.members ?? []).map((m) => m.name));
+    });
+    return () => { alive = false; };
+  }, [classIds, audiencePreview]);
+
+  const send = () => {
+    confirm({
+      title: `참가 동의 안내를 보낼까요?`,
+      rows: [
+        ["대상 원생", `${total}명 (재원${classIds.length ? " · 선택 반" : " · 전체"})`],
+        ["수신 보호자", `${guardians}명 (VERIFIED 연결만)`],
+        ["방식", "공지 발행 — 읽음 추적·receipt 서버 기록"],
+      ],
+      label: "동의 안내 발송",
+      onConfirm: () => {
+        void ownerLive.publish({
+          title: "강동 유소년 챔피언십 참가 동의 안내",
+          body: "11/22(토) 강동 유소년 챔피언십 참가 동의를 부탁드려요. 참가비는 팀당 120,000원이며, 동의하신 원생만 명단에 포함됩니다.",
+          audience: "대회 대상",
+          audienceFilter: {
+            classIds: classIds.length ? classIds : undefined,
+            statuses: ["ENROLLED"],
+          },
+        }).then((r) => {
+          toast(r.message);
+          if (r.ok) setSent(true);
+        });
+      },
+    });
+  };
+
+  return (
+    <Panel title="참가 대상 선정" hnote="원생·공지·청구와 같은 공용 필터(서버 정본)">
+      <div className="text-[11px] font-bold text-ink3 mb-1">반 (미선택 = 전체 · 재원만)</div>
+      <div className="flex gap-2 flex-wrap">
+        {ownerLive.classes.map((c) => (
+          <FilterChip key={c.classId} active={classIds.includes(c.classId)} onClick={() => toggle(c.classId)}>{c.name}</FilterChip>
+        ))}
+      </div>
+      <div className="mt-2.5 bg-fill rounded-xl px-3.5 py-2.5 text-[12px] font-semibold text-ink2 leading-relaxed">
+        대상 <b className="text-brand">{total}명</b> · 수신 보호자 <b className="text-brand">{guardians}명</b>
+        {names.length > 0 && <span className="block text-[11px] text-ink3 font-medium mt-0.5">{names.join(" · ")}</span>}
+      </div>
+      <Button variant="primary" full className="mt-2.5 h-11" onClick={send} disabled={sent || total === 0}>
+        {sent ? "발송 완료 — 읽음은 공지 목록에서" : "참가 동의 안내 발송"}
+      </Button>
+      {overlays}
+    </Panel>
+  );
+}
+
+function PCCompetitionsBody() {
+  const ownerLive = useOwnerLive();
   const { confirm, toast, overlays } = useOverlays();
   const [teams, setTeams] = useState(4);
   const [busy, setBusy] = useState(false);
@@ -41,6 +126,7 @@ export default function PCCompetitions() {
 
   return (
     <PCShell title="대회" actions={<span className="text-[12.5px] text-ink3 font-medium">참가 원생 18명 · 참가 팀 {teams}팀</span>}>
+      {ownerLive.state === "READY" && <InviteAudience />}
       <div className="grid grid-cols-2 gap-3 items-start">
         <Panel title="강동 유소년 챔피언십" hnote="개최 중">
           <RL label="일시 · 종목" amount="11/22 (토) · 축구" />

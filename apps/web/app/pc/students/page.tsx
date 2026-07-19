@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PCShell } from "../_shell";
 import { Panel, Pill, Note, FilterChip, ActBtn, useOverlays } from "../_ui";
 import { IconChevron, IconSearch, IconUsers } from "@/components/ui/icons";
 import { KIDS, type Kid } from "../_data";
 import { useAudienceFilter, AudienceChips, emptyAudience, type AudienceState } from "../_audience";
+import { OwnerLiveProvider, useOwnerLive } from "../_live";
 
 const STATUS_FILTERS = ["all", "재원", "체험", "휴원", "퇴원 예정"];
 type AF = AudienceState;
@@ -26,6 +27,167 @@ function payPill(k: Kid): ["ok" | "due" | "wait", string] {
 }
 
 export default function PCStudents() {
+  return (
+    <OwnerLiveProvider>
+      <PCStudentsSwitch />
+    </OwnerLiveProvider>
+  );
+}
+
+/* READY = 서버 audience 공용 리졸버(#44)가 명단·필터·CSV 의 정본.
+   FIXTURE/LOADING/ERROR = 기존 데모 화면 유지(데모 배지는 Provider 가 표시). */
+function PCStudentsSwitch() {
+  const live = useOwnerLive();
+  return live.state === "READY" ? <StudentsLive /> : <StudentsFixture />;
+}
+
+const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
+const STATUS_KO: [string, string][] = [
+  ["ENROLLED", "재원"], ["TRIAL", "체험"], ["ON_BREAK", "휴원"], ["WITHDRAWN", "퇴원"],
+];
+
+function StudentsLive() {
+  const router = useRouter();
+  const ownerLive = useOwnerLive();
+  const { toast, overlays } = useOverlays();
+  const [classIds, setClassIds] = useState<string[]>([]);
+  const [coachIds, setCoachIds] = useState<string[]>([]);
+  const [weekdays, setWeekdays] = useState<number[]>([]);
+  const [statuses, setStatuses] = useState<string[]>([]);
+  const [unpaidOnly, setUnpaidOnly] = useState(false);
+  const [members, setMembers] = useState<{
+    participantId: string; name: string; ageLabel: string; status: string;
+    classNames: string[]; unpaid: boolean;
+  }[]>([]);
+  const [guardianRecipients, setGuardianRecipients] = useState(0);
+  const [busy, setBusy] = useState(true); // 초기 로드 = 계산 중, 이후엔 핸들러가 켠다
+  const toggleIn = <T,>(list: T[], v: T): T[] =>
+    list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
+  const touch = () => setBusy(true); // 필터 변경 이벤트에서만 — effect 내 동기 setState 금지
+
+  const filter = useMemo(() => ({
+    classIds: classIds.length ? classIds : undefined,
+    coachUserIds: coachIds.length ? coachIds : undefined,
+    weekdays: weekdays.length ? weekdays : undefined,
+    statuses: statuses.length ? statuses : undefined,
+    unpaidOnly: unpaidOnly || undefined,
+  }), [classIds, coachIds, weekdays, statuses, unpaidOnly]);
+
+  const { audiencePreview } = ownerLive;
+  useEffect(() => {
+    let alive = true;
+    void audiencePreview(filter).then((r) => {
+      if (!alive) return;
+      setBusy(false);
+      if (r.ok) {
+        setMembers(r.members ?? []);
+        setGuardianRecipients(r.guardianRecipients ?? 0);
+      } else toast(r.message);
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, audiencePreview]);
+
+  const exportCsv = () => {
+    void ownerLive.audienceExportCsv(filter).then((r) => toast(r.message));
+  };
+  const statusPill = (st: string): ["ok" | "gray", string] => {
+    const ko = STATUS_KO.find(([k]) => k === st)?.[1] ?? st;
+    return [st === "ENROLLED" ? "ok" : "gray", ko];
+  };
+
+  return (
+    <PCShell
+      title="원생"
+      actions={<span className="inline-flex items-center gap-1 text-[12px] font-extrabold text-brand"><span className="w-[7px] h-[7px] rounded-full bg-accent" />실 데이터 · AudienceFilter 서버 정본</span>}
+    >
+      {/* 서버 해석 축 — 반·코치·요일·상태·미납 (공지·청구·대회·CSV 와 같은 리졸버) */}
+      <div className="space-y-0.5">
+        <div className="text-[11px] font-bold text-ink3 mt-1 mb-1">반</div>
+        <div className="flex gap-2 flex-wrap">
+          {ownerLive.classes.map((c) => (
+            <FilterChip key={c.classId} active={classIds.includes(c.classId)} onClick={() => { touch(); setClassIds((l) => toggleIn(l, c.classId)); }}>{c.name}</FilterChip>
+          ))}
+        </div>
+        <div className="text-[11px] font-bold text-ink3 mt-2 mb-1">담당 코치</div>
+        <div className="flex gap-2 flex-wrap">
+          {ownerLive.coaches.map((c) => (
+            <FilterChip key={c.userId} active={coachIds.includes(c.userId)} onClick={() => { touch(); setCoachIds((l) => toggleIn(l, c.userId)); }}>{c.name}</FilterChip>
+          ))}
+        </div>
+        <div className="text-[11px] font-bold text-ink3 mt-2 mb-1">요일 (복수 = OR)</div>
+        <div className="flex gap-2 flex-wrap">
+          {WEEKDAY_KO.map((d, i) => (
+            <FilterChip key={d} active={weekdays.includes(i)} onClick={() => { touch(); setWeekdays((l) => toggleIn(l, i)); }}>{d}</FilterChip>
+          ))}
+        </div>
+        <div className="text-[11px] font-bold text-ink3 mt-2 mb-1">재원 상태 · 수납</div>
+        <div className="flex gap-2 flex-wrap">
+          {STATUS_KO.map(([k, ko]) => (
+            <FilterChip key={k} active={statuses.includes(k)} onClick={() => { touch(); setStatuses((l) => toggleIn(l, k)); }}>{ko}</FilterChip>
+          ))}
+          <FilterChip active={unpaidOnly} onClick={() => { touch(); setUnpaidOnly((v) => !v); }}>미납만</FilterChip>
+        </div>
+      </div>
+
+      <div className="flex gap-2 items-center flex-wrap">
+        <span className="text-[12px] font-bold text-brand">
+          {busy ? "대상 계산 중..." : `필터 결과 ${members.length}명 · 보호자 수신 ${guardianRecipients}명`}
+        </span>
+        <FilterChip className="ml-auto" onClick={() => { touch(); setClassIds([]); setCoachIds([]); setWeekdays([]); setStatuses([]); setUnpaidOnly(false); }}>전체 초기화</FilterChip>
+        <ActBtn soft onClick={exportCsv}>CSV 내보내기</ActBtn>
+      </div>
+
+      <Panel title={null}>
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="text-ink3 text-[11px] border-b border-line text-left">
+              <th className="font-bold px-2.5 py-2">원생</th>
+              <th className="font-bold py-2">반</th>
+              <th className="font-bold py-2">상태</th>
+              <th className="font-bold py-2">수납</th>
+              <th className="font-bold py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((m) => {
+              const [pk, pl] = statusPill(m.status);
+              return (
+                <tr
+                  key={m.participantId}
+                  tabIndex={0}
+                  role="button"
+                  onClick={() => router.push(`/pc/students/${m.participantId}`)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); router.push(`/pc/students/${m.participantId}`); } }}
+                  className="border-b border-line2 last:border-0 cursor-pointer hover:bg-fill"
+                >
+                  <td className="px-2.5 py-2.5 font-bold text-ink">{m.name} <small className="text-ink3 font-medium">({m.ageLabel})</small></td>
+                  <td className="py-2.5 text-ink2">{m.classNames.length ? m.classNames.join(" · ") : "—"}</td>
+                  <td className="py-2.5"><Pill kind={pk}>{pl}</Pill></td>
+                  <td className="py-2.5">{m.unpaid ? <Pill kind="due">미납</Pill> : <span className="text-ink3">—</span>}</td>
+                  <td className="py-2.5 text-right pr-2.5"><IconChevron size={15} className="text-ink3 inline" /></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {members.length === 0 && !busy && (
+          <div className="text-center py-6">
+            <div className="text-[30px]">🔍</div>
+            <div className="text-[11.5px] text-ink3 font-medium mt-1">해당 조건의 원생이 없어요</div>
+          </div>
+        )}
+      </Panel>
+
+      <Note icon={<IconUsers size={16} />}>
+        이 필터는 <b className="text-ink font-bold">공지 대상·청구 대상·대회 초대·CSV</b> 가 재사용하는 서버 공용 정본이에요. CSV 반출은 감사에 기록되고, 연락처·생년월일은 포함되지 않아요.
+      </Note>
+      {overlays}
+    </PCShell>
+  );
+}
+
+function StudentsFixture() {
   const router = useRouter();
   const { confirm, toast, overlays } = useOverlays();
   const [status, setStatus] = useState("all");

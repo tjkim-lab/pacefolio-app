@@ -24,6 +24,7 @@ interface OwnerChatLiveCtx {
   refreshRooms: () => Promise<void>;
   loadMessages: (roomId: string) => Promise<LiveChatMessage[]>;
   send: (roomId: string, body: string) => Promise<{ ok: boolean; message: string }>;
+  markRead: (messageId: string) => Promise<void>; // #46 양방향 — 열람=READ(≠ACK) 기록
 }
 
 const Ctx = createContext<OwnerChatLiveCtx | null>(null);
@@ -107,8 +108,14 @@ export function OwnerChatLiveProvider({ children }: { children: ReactNode }) {
     }
   }, [academyId]);
 
+  /* #46 양방향: 열람 = read(READ ≠ ACK) — 실패는 조용히(다음 열람에 재시도) */
+  const markRead = useCallback(async (messageId: string) => {
+    if (!academyId) return;
+    await api.readChatMessage(academyId, messageId).catch(() => undefined);
+  }, [academyId]);
+
   return (
-    <Ctx.Provider value={{ state, errorMsg, academyId, myUserId, rooms, refreshRooms, loadMessages, send }}>
+    <Ctx.Provider value={{ state, errorMsg, academyId, myUserId, rooms, refreshRooms, loadMessages, send, markRead }}>
       {children}
       <DemoBadge show={state === "FIXTURE"} />
     </Ctx.Provider>

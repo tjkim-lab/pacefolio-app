@@ -8,7 +8,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import {
   SUBSCRIPTION_PRICE_KRW, SUBSCRIPTION_PLAN, SUPPORT_VIEW_RESOURCES,
-  canTransitionSubscriptionStatus,
+  canTransitionSubscriptionStatus, GATED_FEATURES,
   type SubscriptionPlan, type SubscriptionStatus, type SupportViewResource,
 } from "@pacefolio/domain";
 import { newId } from "../crypto";
@@ -427,5 +427,101 @@ export async function adminRevokeUserSessions(db: Db, input: {
       reason: input.reason.trim(), success: true,
     }, nowISO);
     return { kind: "OK" as const };
+  });
+}
+
+/* ── ⑤ 기능 예외 grant(#50) — "이 학원에 이 기능만 기간 한정 열기"(영업·프로모션) ──
+   append-only(재부여 = 새 행·이력 보존) · 만료 lazy 판정 · 발급·철회 전부 감사. */
+export async function listFeatureGrants(db: Db, academyId: string, nowISO: string) {
+  const rows = await db.select().from(s.academyFeatureGrants)
+    .where(eq(s.academyFeatureGrants.academyId, academyId))
+    .orderBy(desc(s.academyFeatureGrants.createdAt));
+  return rows.map((g) => ({
+    grantId: g.id, feature: g.feature, reason: g.reason,
+    expiresAt: g.expiresAt ?? undefined,
+    active: g.revokedAt == null && (g.expiresAt == null || g.expiresAt > nowISO),
+    revokedAt: g.revokedAt ?? undefined, createdAt: g.createdAt,
+  }));
+}
+
+export async function grantFeature(db: Db, input: {
+  actorUserId: string; academyId: string; feature: string; reason: string; days?: number;
+}, nowISO: string): Promise<AdminResult<{ grantId: string; expiresAt?: string }>> {
+  if (!(GATED_FEATURES as readonly string[]).includes(input.feature)) {
+    return { kind: "INVALID", reason: "게이트 대상 기능이 아님" };
+  }
+  if (!input.reason.trim()) return { kind: "INVALID", reason: "사유 필수 — 누가 왜 열어줬는지" };
+  return db.transaction(async (tx) => {
+    const academy = (await tx.select({ id: s.academies.id }).from(s.academies)
+      .where(eq(s.academies.id, input.academyId)))[0];
+    if (!academy) return { kind: "NOT_FOUND" as const };
+    const expiresAt = input.days != null
+      ? new Date(new Date(nowISO).getTime() + input.days * 86_400_000).toISOString()
+      : undefined; // 무기한 — 명시적 철회로만 닫힘
+    const grantId = newId("fg");
+    await tx.insert(s.academyFeatureGrants).values({
+      id: grantId, academyId: academy.id, feature: input.feature,
+      reason: input.reason.trim(), expiresAt: expiresAt ?? null,
+      grantedByUserId: input.actorUserId, createdAt: nowISO,
+    });
+    await recordAudit(tx, {
+      academyId: academy.id, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
+      action: "feature_grant.created", targetType: "FeatureGrant", targetId: grantId,
+      reason: input.reason.trim(),
+      detail: { feature: input.feature, expiresAt: expiresAt ?? null }, success: true,
+    }, nowISO);
+    return { kind: "OK" as const, grantId, expiresAt };
+  });
+}
+
+export async function revokeFeatureGrant(db: Db, input: {
+  actorUserId: string; academyId: string; grantId: string; reason?: string;
+}, nowISO: string): Promise<AdminResult<{ grantId: string }>> {
+  return db.transaction(async (tx) => {
+    const g = (await tx.select().from(s.academyFeatureGrants).where(and(
+      eq(s.academyFeatureGrants.id, input.grantId),
+      eq(s.academyFeatureGrants.academyId, input.academyId),
+    )).for("update"))[0];
+    if (!g) return { kind: "NOT_FOUND" as const };
+    if (g.revokedAt) return { kind: "OK" as const, grantId: g.id }; // 멱등 — 최초 철회 기록 보존
+    await tx.update(s.academyFeatureGrants).set({
+      revokedAt: nowISO, revokedByUserId: input.actorUserId,
+    }).where(eq(s.academyFeatureGrants.id, g.id));
+    await recordAudit(tx, {
+      academyId: g.academyId, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
+      action: "feature_grant.revoked", targetType: "FeatureGrant", targetId: g.id,
+      reason: input.reason, detail: { feature: g.feature }, success: true,
+    }, nowISO);
+    return { kind: "OK" as const, grantId: g.id };
+  });
+}
+
+/** 전 기능 체험(#50b) — "다 열어주고 쓰게 한 뒤 만료로 잠근다"(TJ 영업 전략).
+   게이트 전 기능을 같은 만료일로 일괄 grant. days 필수 — 무기한 전체 개방은
+   grant 가 아니라 플랜 지정(PRO)으로. 한 tx·기능별 행(개별 철회 가능)·감사 1건. */
+export async function grantAllFeatures(db: Db, input: {
+  actorUserId: string; academyId: string; reason: string; days: number;
+}, nowISO: string): Promise<AdminResult<{ granted: number; expiresAt: string }>> {
+  if (!input.reason.trim()) return { kind: "INVALID", reason: "사유 필수" };
+  if (!Number.isInteger(input.days) || input.days < 1 || input.days > 365) {
+    return { kind: "INVALID", reason: "기간(1~365일) 필수 — 무기한 전체 개방은 플랜 지정으로" };
+  }
+  return db.transaction(async (tx) => {
+    const academy = (await tx.select({ id: s.academies.id }).from(s.academies)
+      .where(eq(s.academies.id, input.academyId)))[0];
+    if (!academy) return { kind: "NOT_FOUND" as const };
+    const expiresAt = new Date(new Date(nowISO).getTime() + input.days * 86_400_000).toISOString();
+    await tx.insert(s.academyFeatureGrants).values(GATED_FEATURES.map((feature) => ({
+      id: newId("fg"), academyId: academy.id, feature,
+      reason: input.reason.trim(), expiresAt,
+      grantedByUserId: input.actorUserId, createdAt: nowISO,
+    })));
+    await recordAudit(tx, {
+      academyId: academy.id, actorUserId: input.actorUserId, actorRole: "PLATFORM_ADMIN",
+      action: "feature_grant.trial_all", targetType: "Academy", targetId: academy.id,
+      reason: input.reason.trim(),
+      detail: { features: [...GATED_FEATURES], days: input.days, expiresAt }, success: true,
+    }, nowISO);
+    return { kind: "OK" as const, granted: GATED_FEATURES.length, expiresAt };
   });
 }

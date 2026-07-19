@@ -112,6 +112,7 @@ interface CoachCtx {
   photoChecked: boolean;
   photoScope: string;
   checkPhoto: () => void;
+  markPhotoChecked: () => void; // READY — 서버 동의 게이트 판정 후 발송 가드 해제
   setPhotoScope: (s: string) => void;
 
   incOpen: boolean;
@@ -410,6 +411,9 @@ export function CoachProvider({ children }: { children: ReactNode }) {
     setPhotoChecked(true);
     showToast("사진 확인 완료 — 공개 범위대로만 전달돼요");
   }, [showToast]);
+  /* READY 경로용 — 서버 동의 게이트 판정(통과·차단 명단 모두 "확인 수행됨")을
+     발송 가드에 반영. 토스트 없음(서버 메시지가 카드에 표시됨). */
+  const markPhotoChecked = useCallback(() => setPhotoChecked(true), []);
 
   /* 특이사항·안전사고 */
   const [incOpen, setIncOpen] = useState(false);
@@ -556,7 +560,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
     actsDone, actWhy, toggleAct, setWhy, showWhy, requestStep3,
     recordValue, newRecord, saveRecord,
     coachSay, setCoachSay, templates, saveTemplate, removeTemplate,
-    photoChecked, photoScope, checkPhoto, setPhotoScope,
+    photoChecked, photoScope, checkPhoto, markPhotoChecked, setPhotoScope,
     incOpen, openInc, closeInc, saveInc,
     reviewOpen, requestSend, closeReview, confirmSend, reportSent, sending, elapsedText,
     messages, unread, preview, sendMessage, enterRoom, totalChatUnread,

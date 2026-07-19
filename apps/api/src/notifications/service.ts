@@ -50,6 +50,48 @@ export async function dispatchPendingOutbox(db: Db, nowISO: string, limit = 50):
           });
         }
       }
+      if (evt.eventType === "NOTICE_REMINDER" && evt.academyId) {
+        /* #45: 공지 재알림 — 미열람 보호자에게만(발송 시점 명단은 payload 정본) */
+        const payload = JSON.parse(evt.payload) as { noticeId?: string; title?: string; userIds?: string[] };
+        if (payload.userIds?.length) {
+          await tx.insert(s.inAppNotifications).values(payload.userIds.map((uid) => ({
+            id: newId("ntf"), academyId: evt.academyId!, userId: uid,
+            category: "ACADEMY_NOTICE",
+            title: "공지 다시 확인해주세요",
+            body: `"${payload.title ?? "공지"}" — 아직 읽지 않으셨어요`,
+            refType: "Notice", refId: payload.noticeId,
+            createdAt: nowISO,
+          })));
+        }
+      }
+      if (evt.eventType === "BILLING_REMINDER" && evt.academyId) {
+        /* #45: 미납 리마인드 — 금액 미표시(헌법: 금액은 개인정보), 앱에서 확인 유도 */
+        const payload = JSON.parse(evt.payload) as { userIds?: string[] };
+        if (payload.userIds?.length) {
+          await tx.insert(s.inAppNotifications).values(payload.userIds.map((uid) => ({
+            id: newId("ntf"), academyId: evt.academyId!, userId: uid,
+            category: "BILLING_DUE",
+            title: "수강료 결제 안내",
+            body: "결제 대기 중인 청구서가 있어요 — 앱에서 확인해주세요",
+            refType: "Invoice",
+            createdAt: nowISO,
+          })));
+        }
+      }
+      if (evt.eventType === "ATTENDANCE_NOTICE_ACKED" && evt.academyId) {
+        /* #45: 원장 확인 → 접수 보호자에게 "확인했어요" — 보강 자동 생성 아님 */
+        const payload = JSON.parse(evt.payload) as { noticeId?: string; guardianUserId?: string };
+        if (payload.guardianUserId) {
+          await tx.insert(s.inAppNotifications).values({
+            id: newId("ntf"), academyId: evt.academyId, userId: payload.guardianUserId,
+            category: "ATTENDANCE",
+            title: "결석 통보 확인",
+            body: "원장님이 확인했어요 — 보강은 학원 운영 기준에 따라 따로 안내돼요",
+            refType: "AttendanceNotice", refId: payload.noticeId,
+            createdAt: nowISO,
+          });
+        }
+      }
       await tx.update(s.outboxEvents).set({
         publishedAt: nowISO, attempts: evt.attempts + 1,
       }).where(eq(s.outboxEvents.id, evt.id));

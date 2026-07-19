@@ -3,6 +3,7 @@
 /* 수업 모드 (풀스크린) — ① 출석 → ② 활동·기록 → ③ 코치 한마디 → 발송 완료 */
 
 import Link from "next/link";
+import { useState } from "react";
 import { useCoach, attCounts, uniqGuardians } from "../_state";
 import { useCoachLive, CoachLiveBadge } from "../_live";
 import {
@@ -202,14 +203,29 @@ function StepAttendance() {
 
 function SaveAttButton({ counts }: { counts: { p: number; l: number; a: number; e: number; none: number } }) {
   const c = useCoach();
+  const live = useCoachLive();
+  const [busy, setBusy] = useState(false);
+  /* #25: READY = 서버 recordAttendance 성공 후에만 저장 상태로 전진 —
+     실패면 그대로 멈추고 서버 사유를 보여준다(저장된 척 금지) */
+  const onSave = () => {
+    if (live.state !== "READY") { c.saveAtt(); return; }
+    if (busy) return;
+    setBusy(true);
+    void live.saveAttendance(c.att).then((r) => {
+      setBusy(false);
+      if (!r.ok) { c.showToast(r.message); return; }
+      c.saveAtt();
+      c.showToast(r.message);
+    });
+  };
   if (c.reportSent)
     return <Button full disabled variant="primary" className="bg-accent-ink">최종 확정됨 · 리포트에 반영</Button>;
   if (c.attSaved)
     return <Button full disabled variant="primary" className="bg-accent-ink">임시 저장됨 ✓ · 수업 종료 전까지 수정할 수 있어요</Button>;
   if (counts.none === 0)
     return (
-      <Button full variant="primary" onClick={c.saveAtt}>
-        출석 임시 저장 ({counts.p}·{counts.l}·{counts.a}·{counts.e})
+      <Button full variant="primary" disabled={busy} onClick={onSave}>
+        {busy ? "서버 저장 중..." : `출석 임시 저장 (${counts.p}·${counts.l}·${counts.a}·${counts.e})`}
       </Button>
     );
   /* C2 완료 검증: 미지정 원생이 있으면 저장 불가 경고 */
@@ -476,6 +492,7 @@ function PhotoConsentCard({ c }: { c: ReturnType<typeof useCoach> }) {
     void live.verifyPhotoConsent(c.photoScope === "class" ? "class" : "individual").then((r) => {
       setChecking(false);
       setResult(r);
+      c.markPhotoChecked(); // 서버 판정 완료(통과·차단 모두 확인 수행) — 발송 가드 해제
     });
   };
 

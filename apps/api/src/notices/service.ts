@@ -5,6 +5,7 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
 import { newId } from "../crypto";
 import { recordAudit, recordOutbox } from "../audit";
+import { resolveAudience, type AudienceFilterInput } from "../audience/service";
 import type { Db } from "../sessions/service";
 
 const isStaff = (roles: readonly string[]) => roles.includes("OWNER") || roles.includes("DESK");
@@ -17,14 +18,22 @@ export async function publishNotice(db: Db, input: {
   actorUserId: string; actorRoles: readonly string[]; academyId: string;
   title: string; body: string; audience: string;
   classId?: string; // AudienceFilter 1단계(E P1): 반 필터 — 해당 반 원생의 VERIFIED 보호자만
+  audienceFilter?: AudienceFilterInput; // 2단계 — 공용 리졸버(반·코치·요일·상태·미납)로 산정
 }, nowISO: string): Promise<NoticePublishResult> {
   if (!isStaff(input.actorRoles)) return { kind: "FORBIDDEN", reason: "공지 발행은 원장·데스크만" };
   return db.transaction(async (tx) => {
     /* 수신자 산정 — 서버 정본:
        전체 = 학원 ACTIVE GUARDIAN 멤버십 전원
-       반 필터 = 그 반 ACTIVE 등록 원생의 VERIFIED 보호자(연결 기반) */
+       반 필터(1단계) = 그 반 ACTIVE 등록 원생의 VERIFIED 보호자(연결 기반)
+       audienceFilter(2단계) = 공용 리졸버 매칭 원생의 VERIFIED 보호자 */
     let recipientUserIds: string[];
-    if (input.classId) {
+    if (input.audienceFilter) {
+      const resolved = await resolveAudience(tx, {
+        actorRoles: input.actorRoles, academyId: input.academyId, filter: input.audienceFilter,
+      });
+      if (!resolved) return { kind: "FORBIDDEN" as const, reason: "대상 산정 권한 없음" };
+      recipientUserIds = resolved.guardianUserIds;
+    } else if (input.classId) {
       const cls = (await tx.select({ id: s.dbClasses.id }).from(s.dbClasses).where(and(
         eq(s.dbClasses.id, input.classId), eq(s.dbClasses.academyId, input.academyId),
       )))[0];
@@ -65,7 +74,11 @@ export async function publishNotice(db: Db, input: {
     await recordAudit(tx, {
       academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "ACADEMY",
       action: "notice.published", targetType: "Notice", targetId: noticeId,
-      detail: { audience: input.audience, recipients: guardians.length, classId: input.classId ?? null },
+      detail: {
+        audience: input.audience, recipients: guardians.length,
+        classId: input.classId ?? null,
+        audienceFilter: input.audienceFilter ?? null, // ID·플래그만 — PII 없음
+      },
       success: true,
     }, nowISO);
     await recordOutbox(tx, {
@@ -86,6 +99,43 @@ export async function markNoticeRead(db: Db, input: {
     isNull(s.noticeReceipts.readAt), // 최초 읽음 시각 보존(멱등)
   ));
   return { ok: true };
+}
+
+export type NoticeRemindResult =
+  | { kind: "OK"; reminded: number }
+  | { kind: "FORBIDDEN"; reason: string }
+  | { kind: "INVALID"; reason: string };
+
+/** 공지 재알림(#45) — 미열람 receipt 보유자에게만 다시 보낸다(전체 재발송 금지).
+   listNotices 의 unread 카운트와 같은 정본(receipt.readAt is null)을 쓴다.
+   실 발송은 Outbox(NOTICE_REMINDER) — 디스패처가 인앱 알림 생성, 알림톡은 사업자 연동 트랙. */
+export async function remindNotice(db: Db, input: {
+  actorUserId: string; actorRoles: readonly string[]; academyId: string; noticeId: string;
+}, nowISO: string): Promise<NoticeRemindResult> {
+  if (!isStaff(input.actorRoles)) return { kind: "FORBIDDEN", reason: "재알림은 원장·데스크만" };
+  return db.transaction(async (tx) => {
+    const notice = (await tx.select().from(s.dbNotices).where(and(
+      eq(s.dbNotices.id, input.noticeId), eq(s.dbNotices.academyId, input.academyId),
+    )))[0];
+    if (!notice) return { kind: "INVALID" as const, reason: "공지 없음(학원 불일치 포함)" };
+    const unread = await tx.select({ userId: s.noticeReceipts.userId }).from(s.noticeReceipts)
+      .where(and(
+        eq(s.noticeReceipts.noticeId, input.noticeId),
+        eq(s.noticeReceipts.academyId, input.academyId),
+        isNull(s.noticeReceipts.readAt),
+      ));
+    if (unread.length === 0) return { kind: "OK" as const, reminded: 0 }; // 전원 열람 — 발송 없음
+    await recordAudit(tx, {
+      academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "ACADEMY",
+      action: "notice.reminded", targetType: "Notice", targetId: input.noticeId,
+      detail: { recipients: unread.length }, success: true,
+    }, nowISO);
+    await recordOutbox(tx, {
+      academyId: input.academyId, eventType: "NOTICE_REMINDER",
+      payload: { noticeId: input.noticeId, title: notice.title, userIds: unread.map((u) => u.userId) },
+    }, nowISO);
+    return { kind: "OK" as const, reminded: unread.length };
+  });
 }
 
 export async function listNotices(db: Db, input: {

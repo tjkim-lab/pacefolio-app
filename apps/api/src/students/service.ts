@@ -1,12 +1,15 @@
 /* 학생 수명주기 + 반 배정 — 기본선 2단계(#23, docs/15)
    등록(선등록 보호자 연락처 포함) · 상태 전이(체험/재원/휴원/퇴원 상태머신) ·
    반 배정(정원 FOR UPDATE 검증) · 배정 종료. 전부 staff(OWNER·DESK) 전용. */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { schema as s } from "@pacefolio/db";
-import { canTransitionParticipantStatus, type ParticipantStatus } from "@pacefolio/domain";
+import {
+  canTransitionParticipantStatus, FREE_PARTICIPANT_LIMIT, type ParticipantStatus,
+} from "@pacefolio/domain";
 import { newId } from "../crypto";
 import { hashPhone, encryptPii } from "../crypto-pii";
 import { recordAudit, recordOutbox } from "../audit";
+import { checkFeature } from "../billing/plan";
 import type { Db } from "../sessions/service";
 
 const isStaff = (roles: readonly string[]) => roles.includes("OWNER") || roles.includes("DESK");
@@ -16,15 +19,35 @@ export type StudentResult =
   | { kind: "FORBIDDEN"; reason: string }
   | { kind: "INVALID"; reason: string }
   | { kind: "CONFLICT"; reason: string };
+/* 등록 전용 — FREE 원생 상한(#49)은 신규 등록에서만 발생 */
+export type CreateStudentResult =
+  | StudentResult
+  | { kind: "UPGRADE"; reason: string; currentPlan: string; requiredPlan: string };
 
 export async function createParticipant(db: Db, input: {
   actorUserId: string; actorRoles: readonly string[]; academyId: string;
   name: string; birth: string; ageLabel: string;
   status?: Extract<ParticipantStatus, "TRIAL" | "ENROLLED">;
   guardianPhone?: string; // 선등록 보호자 연락처 — OTP 연결 결합 근거
-}, nowISO: string): Promise<StudentResult> {
+}, nowISO: string): Promise<CreateStudentResult> {
   if (!isStaff(input.actorRoles)) return { kind: "FORBIDDEN", reason: "학생 등록은 원장·데스크만" };
   return db.transaction(async (tx) => {
+    /* #49: FREE 원생 상한(퇴원 제외 재적) — 같은 tx 안에서 세어 동시 등록 초과 방지.
+       상한 도달 = 402 안내(업그레이드). #50: UNLIMITED_PARTICIPANTS grant 예외 인정. */
+    const denied = await checkFeature(tx, input.academyId, "UNLIMITED_PARTICIPANTS", nowISO);
+    if (denied) {
+      const cnt = (await tx.select({ n: sql<number>`count(*)::int` }).from(s.participants).where(and(
+        eq(s.participants.academyId, input.academyId),
+        ne(s.participants.status, "WITHDRAWN"),
+      )))[0];
+      if ((cnt?.n ?? 0) >= FREE_PARTICIPANT_LIMIT) {
+        return {
+          kind: "UPGRADE" as const,
+          reason: `무료 플랜 원생 상한(${FREE_PARTICIPANT_LIMIT}명) — BASIC 부터 무제한`,
+          currentPlan: denied.currentPlan, requiredPlan: denied.requiredPlan,
+        };
+      }
+    }
     const participantId = newId("p");
     await tx.insert(s.participants).values({
       id: participantId, academyId: input.academyId,
@@ -50,7 +73,8 @@ export async function createParticipant(db: Db, input: {
 }
 
 /** 원생 목록(#40) — staff 전용. AudienceFilter 2단계·청구 초안·명단 화면의 기반.
-   연락처 등 PII 미포함 — 이름·상태·연령 라벨만. */
+   연락처 등 PII 미포함 — 이름·상태·연령 라벨만.
+   #51: 반 이름(ACTIVE 배정)·미납 여부(open 청구 존재) 동봉 — owner 모바일 원생 목록 정본. */
 export async function listParticipants(db: Db, input: {
   actorRoles: readonly string[]; academyId: string; status?: ParticipantStatus;
 }) {
@@ -63,7 +87,122 @@ export async function listParticipants(db: Db, input: {
   }).from(s.participants)
     .where(eq(s.participants.academyId, input.academyId))
     .orderBy(s.participants.name);
-  return input.status ? rows.filter((r) => r.status === input.status) : rows;
+  const ids = rows.map((r) => r.participantId);
+  const enrolls = ids.length
+    ? await db.select({
+        participantId: s.dbEnrollments.participantId,
+        className: s.dbClasses.name,
+      }).from(s.dbEnrollments)
+        .innerJoin(s.dbClasses, eq(s.dbClasses.id, s.dbEnrollments.classId))
+        .where(and(
+          eq(s.dbEnrollments.academyId, input.academyId),
+          inArray(s.dbEnrollments.participantId, ids),
+          eq(s.dbEnrollments.status, "ACTIVE"),
+        ))
+    : [];
+  const openInv = ids.length
+    ? await db.select({ participantId: s.invoices.participantId }).from(s.invoices)
+        .where(and(
+          eq(s.invoices.academyId, input.academyId),
+          inArray(s.invoices.participantId, ids),
+          inArray(s.invoices.status, ["ISSUED", "PARTIALLY_PAID", "OVERDUE"]),
+        ))
+    : [];
+  const unpaidSet = new Set(openInv.map((i) => i.participantId));
+  const enriched = rows.map((r) => ({
+    ...r,
+    classNames: enrolls.filter((e) => e.participantId === r.participantId).map((e) => e.className),
+    unpaid: unpaidSet.has(r.participantId),
+  }));
+  return input.status ? enriched.filter((r) => r.status === input.status) : enriched;
+}
+
+/** 원생 상세(#52) — staff 전용. owner 모바일·PC 원생 상세의 서버 정본.
+   동봉: 반·담당 코치 이름 / 보호자 연결(관계·검증·결제권한 — 이름·연락처 미포함) /
+   청구서(금액 포함 — 원장 수납 화면, DRAFT 포함). 없음·타학원 = null(404 은닉). */
+export async function getParticipantDetail(db: Db, input: {
+  actorRoles: readonly string[]; academyId: string; participantId: string;
+}) {
+  if (!isStaff(input.actorRoles)) return null;
+  const p = (await db.select().from(s.participants).where(and(
+    eq(s.participants.id, input.participantId),
+    eq(s.participants.academyId, input.academyId),
+  )))[0];
+  if (!p) return null;
+  const enrolls = await db.select({
+    classId: s.dbClasses.id,
+    className: s.dbClasses.name,
+  }).from(s.dbEnrollments)
+    .innerJoin(s.dbClasses, eq(s.dbClasses.id, s.dbEnrollments.classId))
+    .where(and(
+      eq(s.dbEnrollments.academyId, input.academyId),
+      eq(s.dbEnrollments.participantId, p.id),
+      eq(s.dbEnrollments.status, "ACTIVE"),
+    ));
+  const classIds = enrolls.map((e) => e.classId);
+  const coaches = classIds.length
+    ? await db.select({
+        classId: s.classAssignments.classId,
+        coachName: s.users.name,
+      }).from(s.classAssignments)
+        .innerJoin(s.users, eq(s.users.id, s.classAssignments.coachUserId))
+        .where(and(
+          eq(s.classAssignments.academyId, input.academyId),
+          inArray(s.classAssignments.classId, classIds),
+          eq(s.classAssignments.status, "ACTIVE"),
+        ))
+    : [];
+  const links = await db.select({
+    relationshipType: s.guardianParticipantLinks.relationshipType,
+    isPrimaryGuardian: s.guardianParticipantLinks.isPrimaryGuardian,
+    verificationStatus: s.guardianParticipantLinks.verificationStatus,
+    canPay: s.guardianParticipantLinks.canPay,
+  }).from(s.guardianParticipantLinks).where(and(
+    eq(s.guardianParticipantLinks.participantId, p.id),
+    eq(s.guardianParticipantLinks.academyId, input.academyId),
+  ));
+  /* #53: 출석 집계 — 실제 출결 기록(코치 확정) 기준. 예정 통보와 절대 합치지 않는다.
+     출석률 = (PRESENT+LATE+EARLY_LEAVE)/전체 기록 — "왔는데 늦은 아이"는 출석으로 센다 */
+  const [att] = await db.select({
+    total: sql<number>`count(*)::int`,
+    present: sql<number>`count(*) filter (where ${s.attendanceRecords.status} = 'PRESENT')::int`,
+    absent: sql<number>`count(*) filter (where ${s.attendanceRecords.status} = 'ABSENT')::int`,
+    late: sql<number>`count(*) filter (where ${s.attendanceRecords.status} = 'LATE')::int`,
+    earlyLeave: sql<number>`count(*) filter (where ${s.attendanceRecords.status} = 'EARLY_LEAVE')::int`,
+    excused: sql<number>`count(*) filter (where ${s.attendanceRecords.status} = 'EXCUSED')::int`,
+  }).from(s.attendanceRecords).where(and(
+    eq(s.attendanceRecords.academyId, input.academyId),
+    eq(s.attendanceRecords.participantId, p.id),
+  ));
+  const attended = att.present + att.late + att.earlyLeave;
+  const invs = await db.select().from(s.invoices).where(and(
+    eq(s.invoices.participantId, p.id),
+    eq(s.invoices.academyId, input.academyId),
+  ));
+  const lines = invs.length
+    ? await db.select().from(s.invoiceLines)
+        .where(inArray(s.invoiceLines.invoiceId, invs.map((i) => i.id)))
+    : [];
+  return {
+    participant: {
+      participantId: p.id, name: p.name, birth: p.birth,
+      ageLabel: p.ageLabel, status: p.status,
+    },
+    enrollments: enrolls.map((e) => ({
+      classId: e.classId, className: e.className,
+      coachNames: coaches.filter((c) => c.classId === e.classId).map((c) => c.coachName),
+    })),
+    guardians: links,
+    attendance: {
+      ...att,
+      ratePct: att.total > 0 ? Math.round((attended / att.total) * 100) : null,
+    },
+    invoices: invs.map((inv) => ({
+      invoiceId: inv.id, status: inv.status, total: inv.total, dueDate: inv.dueDate,
+      lines: lines.filter((l) => l.invoiceId === inv.id)
+        .map((l) => ({ type: l.type, label: l.label, amount: l.amount })),
+    })),
+  };
 }
 
 export async function changeParticipantStatus(db: Db, input: {

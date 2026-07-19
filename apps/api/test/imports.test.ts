@@ -76,6 +76,11 @@ before(async () => {
     { id: "a_test", organizationId: "o", name: "샘플학원", themeColor: "#12B5A5", themeInk: "#087F73", logoEmoji: "🏫", ownerName: "원장A", billingCycleDefault: 3 },
     { id: "a_other", organizationId: "o2", name: "타학원", themeColor: "#000", themeInk: "#000", logoEmoji: "🏫", ownerName: "원장B", billingCycleDefault: 3 },
   ]);
+  // #49: 프로그램 CSV 가져오기 = PRO 게이트 — 두 학원 모두 PRO(테넌트 격리 테스트 유지)
+  await db.insert(s.academySubscriptions).values([
+    { id: "sub_t", academyId: "a_test", plan: "PRO", status: "ACTIVE", priceKrwMonthly: 99000, startedAt: NOW, createdAt: NOW, updatedAt: NOW },
+    { id: "sub_x", academyId: "a_other", plan: "PRO", status: "ACTIVE", priceKrwMonthly: 99000, startedAt: NOW, createdAt: NOW, updatedAt: NOW },
+  ]);
   owner = await login("owner");
   coach = await login("coach");
   otherOwner = await login("other");

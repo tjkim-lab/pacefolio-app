@@ -34,10 +34,10 @@ export async function seedWondergym(db: Db, nowISO: string): Promise<void> {
     // PLATFORM_ADMIN — 일반 앱 guard 가 차단, /admin 경계만 통과(#27)
     { id: "m_platform_tj", userId: "u_platform_tj", academyId: "a_wondergym", roles: ["PLATFORM_ADMIN"], status: "ACTIVE", joinedAt: "2024-01-01" },
   ]);
-  // 원더짐 = 고객 0번 — 구독 데모(가격 확정 2026-07-18: BASIC 29,000 / PRO 99,000)
+  // 원더짐 = 고객 0번, PRO 자가 검증(#49 — 3단 FREE/BASIC/PRO, FREE=구독 행 없음)
   await db.insert(s.academySubscriptions).values({
-    id: "sub_wondergym", academyId: "a_wondergym", plan: "BASIC", status: "ACTIVE",
-    priceKrwMonthly: 29000, startedAt: nowISO, createdAt: nowISO, updatedAt: nowISO,
+    id: "sub_wondergym", academyId: "a_wondergym", plan: "PRO", status: "ACTIVE",
+    priceKrwMonthly: 99000, startedAt: nowISO, createdAt: nowISO, updatedAt: nowISO,
   });
   await db.insert(s.participants).values([
     { id: "p_dodam", academyId: "a_wondergym", name: "김도담", birth: "2017-04-10", ageLabel: "8세" },
@@ -140,5 +140,23 @@ export async function seedWondergym(db: Db, nowISO: string): Promise<void> {
   });
   await db.insert(s.chatMessageAcks).values({
     id: "cma_ksj_1", messageId: "cm_brief_1", academyId: "a_wondergym", userId: "u_coach_ksj",
+  });
+
+  /* ── #45: 원장 홈 "오늘 처리할 일" 데모 ──
+     공지 1건(박서연 미열람 → 재알림 대상) + 긴급결석 통보 1건(도담 · 원장 확인 대상).
+     미납 리마인드는 위 ISSUED 청구 2건이 그대로 대상. */
+  await db.insert(s.dbNotices).values({
+    id: "nt_autumn_comp", academyId: "a_wondergym",
+    title: "가을 대회 참가 안내", body: "가을 대회 참가 신청을 받아요 — 앱에서 신청해주세요.",
+    audience: "전체", publishedAt: nowISO, createdByUserId: "u_owner", createdAt: nowISO,
+  });
+  await db.insert(s.noticeReceipts).values({
+    id: "ntr_psy_autumn", noticeId: "nt_autumn_comp", academyId: "a_wondergym",
+    userId: "u_guardian_psy", // readAt 없음 = 미열람 — 재알림 데모 대상
+  });
+  await db.insert(s.dbAttendanceNotices).values({
+    id: "an_dodam_today", academyId: "a_wondergym", participantId: "p_dodam",
+    date: nowISO.slice(0, 10), type: "ABSENCE", reason: "아파요",
+    createdByUserId: "u_guardian_psy", createdAt: nowISO,
   });
 }

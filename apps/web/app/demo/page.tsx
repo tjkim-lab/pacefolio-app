@@ -25,7 +25,8 @@ const apps = [
     group: "데스크톱 콘솔",
     items: [
       { href: "/pc", emoji: "🖥️", label: "원장 PC 콘솔", desc: "운영 관리의 중심", icon: IconBuilding, tone: "#8b5cf6" },
-      { href: "/admin", emoji: "⚙️", label: "관리자 콘솔", desc: "멀티테넌트 · 플랫폼 운영", icon: IconGrid, tone: "#0e9384" },
+      /* B5(#54): admin 은 분리 배포(apps/console-admin, dev :3002) — 절대 URL 진입 */
+      { href: "http://localhost:3002/admin", emoji: "⚙️", label: "관리자 콘솔 (분리 배포)", desc: "멀티테넌트 · 플랫폼 운영 · :3002", icon: IconGrid, tone: "#0e9384" },
     ],
   },
 ];

@@ -205,3 +205,64 @@ export async function createAttendanceNotice(db: Db, input: {
     return { kind: "CREATED" as const, noticeId };
   });
 }
+
+/** 통보 목록(#45) — 원장 홈 "긴급결석" 카드의 서버 정본. staff 만(보호자 접수 원문 포함). */
+export async function listAttendanceNotices(db: Db, input: {
+  actorRoles: readonly string[]; academyId: string;
+}) {
+  if (!isStaff(input.actorRoles)) return null;
+  const rows = await db.select({
+    noticeId: s.dbAttendanceNotices.id,
+    participantId: s.dbAttendanceNotices.participantId,
+    participantName: s.participants.name,
+    date: s.dbAttendanceNotices.date,
+    type: s.dbAttendanceNotices.type,
+    reason: s.dbAttendanceNotices.reason,
+    createdAt: s.dbAttendanceNotices.createdAt,
+    acknowledgedAt: s.dbAttendanceNotices.acknowledgedAt,
+  }).from(s.dbAttendanceNotices)
+    .innerJoin(s.participants, and(
+      eq(s.participants.id, s.dbAttendanceNotices.participantId),
+      eq(s.participants.academyId, s.dbAttendanceNotices.academyId),
+    ))
+    .where(eq(s.dbAttendanceNotices.academyId, input.academyId))
+    .orderBy(sql`${s.dbAttendanceNotices.createdAt} desc`)
+    .limit(50);
+  return rows.map((r) => ({ ...r, acknowledgedAt: r.acknowledgedAt ?? undefined }));
+}
+
+export type AckNoticeResult =
+  | { kind: "OK"; noticeId: string; alreadyAcknowledged: boolean }
+  | { kind: "FORBIDDEN"; reason: string }
+  | { kind: "INVALID"; reason: string };
+
+/** 원장 확인(#45) — "확인했어요"만 전달. 보강 자동 생성 아님(헌법: 보강 단순화).
+   멱등 — 최초 확인 시각·확인자 보존. 보호자에겐 Outbox → 인앱 알림. */
+export async function acknowledgeAttendanceNotice(db: Db, input: {
+  actorUserId: string; actorRoles: readonly string[]; academyId: string; noticeId: string;
+}, nowISO: string): Promise<AckNoticeResult> {
+  if (!isStaff(input.actorRoles)) return { kind: "FORBIDDEN", reason: "확인은 원장·데스크만" };
+  return db.transaction(async (tx) => {
+    const notice = (await tx.select().from(s.dbAttendanceNotices).where(and(
+      eq(s.dbAttendanceNotices.id, input.noticeId),
+      eq(s.dbAttendanceNotices.academyId, input.academyId),
+    )).for("update"))[0];
+    if (!notice) return { kind: "INVALID" as const, reason: "통보 없음(학원 불일치 포함)" };
+    if (notice.acknowledgedAt) {
+      return { kind: "OK" as const, noticeId: notice.id, alreadyAcknowledged: true };
+    }
+    await tx.update(s.dbAttendanceNotices).set({
+      acknowledgedAt: nowISO, acknowledgedByUserId: input.actorUserId,
+    }).where(eq(s.dbAttendanceNotices.id, notice.id));
+    await recordAudit(tx, {
+      academyId: input.academyId, actorUserId: input.actorUserId, actorRole: "ACADEMY",
+      action: "attendance_notice.acknowledged", targetType: "AttendanceNotice", targetId: notice.id,
+      detail: { participantId: notice.participantId, date: notice.date }, success: true,
+    }, nowISO);
+    await recordOutbox(tx, { // 접수한 보호자에게 "확인했어요" — 전화 루프 종결
+      academyId: input.academyId, eventType: "ATTENDANCE_NOTICE_ACKED",
+      payload: { noticeId: notice.id, participantId: notice.participantId, guardianUserId: notice.createdByUserId },
+    }, nowISO);
+    return { kind: "OK" as const, noticeId: notice.id, alreadyAcknowledged: false };
+  });
+}

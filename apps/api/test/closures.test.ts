@@ -64,6 +64,11 @@ before(async () => {
     id: "a_wg", organizationId: "o", name: "원더짐", themeColor: "#12B5A5", themeInk: "#087F73",
     logoEmoji: "🐯", ownerName: "김도윤", billingCycleDefault: 3,
   });
+  // #49: 반 일괄 청구 = BASIC+ 게이트 — 테스트 학원에 구독 부여
+  await db.insert(s.academySubscriptions).values({
+    id: "sub_wg", academyId: "a_wg", plan: "BASIC", status: "ACTIVE",
+    priceKrwMonthly: 29000, startedAt: NOW, createdAt: NOW, updatedAt: NOW,
+  });
   owner = await login("owner"); coach = await login("coach");
   await db.insert(s.academyMemberships).values([
     { id: "m_o", userId: owner.userId, academyId: "a_wg", roles: ["OWNER"], status: "ACTIVE", joinedAt: "2024-03-01" },

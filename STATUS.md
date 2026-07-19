@@ -1,4 +1,4 @@
-# PACEFOLIO — 진행 현황 · 핸드오프 (2026-07-19)
+# PACEFOLIO — 진행 현황 · 핸드오프 (2026-07-19 #44~#48 반영)
 
 > 유소년 스포츠·교육 아카데미 운영 플랫폼. 원더짐 = 고객 0번, 멀티테넌트 day 1.
 > 완료 표기는 저장소 증거(테스트·타입·CI) 기준으로만 ✅. 이 문서가 핸드오프 정본 —
@@ -7,7 +7,7 @@
 ## 한 줄
 백엔드 착공(R5 GO 8.7) 이후 **기본선 수명주기 전 구간 실 API + 4역할 화면 실연결 +
 가격 확정·Admin 관제 + 13차 A~E·14차 A–D 리뷰 반영 + 사진 파이프라인 코어**까지 완료.
-테스트 **api 137 · domain 141 · db 15 · web 10 · Playwright e2e 3** — CI 2 job(verify+e2e) 그린.
+테스트 **api 212 · domain 141 · db 15 · web 10 · Playwright e2e 13** — CI 2 job(verify+e2e) 그린.
 
 ## 검증 방법 (재현 가능)
 ```bash
@@ -34,16 +34,29 @@ npm run dev                      # :3000 웹 + :3001 API(PGlite in-memory 자동
 | 품질 인프라 | CI verify+e2e · PG 동시성 경쟁 테스트(같은 측 재승인·동시 전송 멱등 등) · openapi drift 가드 | .github/workflows |
 | PC draft 정본화(#38~42) | 13B FAIL 잔여 전 구간 서버 정본 — 휴무 event→회차 재계산·중간입회 견적(payment-engine 이식 정합)+청구 초안 저장·원생 목록·그룹(반) 일괄 발송(초안 전수→일괄 ISSUED·기존 청구 제외·멱등)·강사 교체(배정 행 교체 이력보존·회수 3모드 고아 반 방지·인수인계 브리핑 outbox→인앱) | closures/·coaches/swap.ts·billing/issue.ts |
 | 프로그램 스튜디오 PS3~5(디자인 터미널) | CSV 가져오기 스테이징(업로드→미리보기→커밋→되돌리기)·반 적용·수업 계획·결과 확정·경험 이벤트·기술/클리어/뱃지(자동 클리어 금지·발급 1회) | docs/20·programs/ |
+| AudienceFilter 2단계(#44) | 대상 산정 공용 리졸버 서버 정본(반·코치·요일·상태·미납, 축 내 OR·축 간 AND) — 원생 화면 READY 실구동·공지 audienceFilter·대회 초대(공지 엔진 재사용 실발송)·수납 미납 명단·CSV 반출(감사 기록·PII 최소·staff 전용·테넌트 격리) | audience/·API 8건·e2e 2건 |
+| 양방향 채팅 UI(#46) | 학부모 학원 1:1(GUARDIAN_DM) 실연결 — 자녀 컨텍스트 개설(find-or-create)·송수신(clientMessageId 멱등)·열람=read 기록(READ≠ACK)·"읽음" 표시 양측 반영. 원장 방 열람도 read 기록. 서버는 Batch 14 chat 그대로(신규 서버 코드 없음) | parent/chat/·e2e 왕복 1건 |
+| E2E 확대(#47) | 코치 수업 완료 여정 + 반 일괄 청구(#41) e2e 추가 — 과정에서 실 갭 2건 발견·수정: READY 출석 저장이 서버 recordAttendance 미배선(저장된 척 금지·성공 후에만 전진) · 서버 사진 판정이 발송 가드(photoChecked) 미해제로 발송 검토 진입 불가 | coach-session-complete·pc-billing-bulk |
+| 원장 홈 처리할 일(#45) | "오늘 처리할 일" 서버 정본 — 공지 재알림(미열람 receipt 보유자만·전체 재발송 금지)·미납 리마인드(open 청구 원생의 VERIFIED·canPay 보호자, 금액 미표시=헌법)·긴급결석 통보 목록+원장 "확인했어요"(멱등·보강 자동생성 아님·보호자 인앱 회신 = 전화 루프 종결). migration 0028 | billing/remind.ts·owner-dashboard.test 6건 |
+| owner 모바일 홈 실연결(#48) | 모바일 원장 홈 READY = 서버 정본 — 처리할 일 카드(#45 재사용: 긴급결석 확인·공지 재알림·미납 리마인드)·타일·수납 스트립(홈 금액 비노출 헌법 — 건수·수납률만, e2e 로 ₩ 미표시 검증)·출석률 등 서버 정본 없는 수치는 READY 미표시(위장 금지) | owner/page.tsx·e2e 1건 |
+| 플랜 3단+게이트(#49) | FREE(0원·구독 행 없음·원생 30명 상한)/BASIC/PRO 확정 — 운영 코어는 FREE 부터 전부(북극성·락인 비가둠), 게이트 정본 domain/plan.ts, 402 PLAN_UPGRADE_REQUIRED(current/requiredPlan 동봉), CANCELED=FREE 강등·PAST_DUE 유예. 원더짐 seed=PRO | plan-gate.test 4건 |
+| 기능 예외 grant(#50) | 영업 "한두 달 열어주기"(TJ 실경험 근거) — 학원×기능 grant(migration 0029): 사유 필수·기간/무기한·철회 즉시 복귀·만료 lazy 자동 잠금·감사·append-only. 원생 상한 예외 = UNLIMITED_PARTICIPANTS. admin 학원 관리 행 "기능 예외…" 패널 실연결 | plan-gate.test +2건 |
+| 원장 대시보드 완결(#49·#50 e2e) | 반별 정원 서버 집계(listClasses enrolled=ACTIVE 등록·READY 정원 패널 복원) + PC 대시보드 E2E(KPI·정원·공지 재알림 왕복 — 긴급결석·미납 왕복은 owner-home.spec 이 같은 엔드포인트 검증) | classes.test·pc-dashboard.spec |
+| owner·PC 원생 여정(#51~54) | listParticipants 에 반·미납 동봉(#51) → getParticipantDetail 서버 정본(#52: 반·담당코치·보호자 연결(관계·검증·결제권한, **연락처·이름 미포함**)·청구서(금액 포함)) → 출석 집계 동봉(#53: 실제 출결 기록만·예정 통보 미합산·ratePct=출석+지각+조퇴/전체) → PC 상세도 같은 API 재사용(#54). owner·PC 양쪽 목록→상세 서버정본 완결. READY 없는 차량·보강 카드는 미표시(위장 금지) | students/service.ts·owner-dashboard.test |
+| B5 admin 물리분리(#55) | apps/console-admin 신설(:3002) — 교차테넌트 개인정보 최대 리스크 표면을 학원 앱 배포에서 격리(아키텍처 B 완결). app/admin 전체 이동·admin 전용 proxy(PLATFORM_ADMIN 정본 검증·전 응답 no-store/noindex·실패 전부 404 은닉)·API Origin allowlist :3002 추가·web 에서 admin 표면 제거. 공용 UI·fixtures 는 임시 복제(packages/ui 승격 전) | console-admin/·e2e 16/16 |
 
 ### ⏸️ 결정 대기 (TJ) — 이것만 정하면 다음이 풀림
-1. **사진 저장소 사업자** — 추천 AWS S3 서울(또는 NCP). 결정 → 어댑터 1파일(반나절)로 사진 완성
-2. **플랜 기능 구분**(BASIC vs PRO) — 추천 A안(운영=기본, 성장·마케팅=PRO). 결정 → 기능 gate 배선
-3. **데모 배지(#33)** — 디자인 터미널에 비주얼 규약 지시(판별 로직은 준비됨)
+1. ~~사진 저장소 사업자~~ → **NCP 확정 (2026-07-19 TJ: "쓰던 곳을 쓴다")**. 코드 완성·주입 배선 완료 —
+   잔여 = 운영 준비물만: NCP 버킷 생성 + API 키 발급 + env 4개(`PACEFOLIO_STORAGE_*`). 미설정 시 501 fail-closed
+2. ~~플랜 기능 구분~~ → **3단 FREE/BASIC/PRO 확정 (2026-07-19 TJ)**. 정본 = domain/plan.ts·docs/17 §A.
+   v1 게이트 배선 완료(#49): FREE 원생 30명 상한 · BASIC=반 일괄 청구 · PRO=CSV 가져오기·복제·뱃지 (402)
+3. **데모 배지(#33)** — 디자인 터미널에 비주얼 규약 지시(판별 로직·중립 최소형 배지는 이미 동작 중)
 4. **법률 검토 발주** — 학원법 환불 기준·업종 분류·처리방침·수탁 모델 4종 묶음. **실 PG 전 필수(헌법)**
 
 ### ▶️ 다음 개발 후보 (결정 무관)
-- **PC draft 서버 정본화**(대형, E 리뷰 13B FAIL 잔여): 휴무 이벤트→회차 재계산·중간입회 청구 초안·그룹 일괄 발송·강사 교체 — 새 도메인 슬라이스
-- AudienceFilter 2단계(수납·대회·CSV) · 양방향 채팅 UI · E2E 범위 확대 · owner 모바일 잔여 실연결
+- ~~AudienceFilter 2단계~~ ✅#44 · ~~양방향 채팅 UI~~ ✅#46 · ~~E2E 확대~~ ✅#47 · ~~owner 모바일 홈~~ ✅#48 · ~~원장 대시보드 완결~~ ✅#49·50 · ~~owner·PC 원생 여정~~ ✅#51~54
+- **남은 소품 후보**: 원생 상세에 안전 특이사항 동봉 · 출결 이력 목록(상세) · PC students 목록/상세 통합 · E2E 계속 확대
+- **대형 트랙**: B5(console-admin 물리분리, **옆 터미널 진행 중 2026-07-19**) · AudienceFilter 저장 프리셋 · 외부 준비물 해소 후 Gate 3(실 로그인·PG)
 
 ### 🔌 외부 준비물 (Gate 3 전제)
 카카오 개발자 키(실 로그인) · PG sandbox(정산 방식: 결제선생 모델 벤치마크, RESEARCH B1) ·

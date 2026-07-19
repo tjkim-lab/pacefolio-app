@@ -2,8 +2,11 @@
 
 /* 원장 홈 (13A — docs/13-owner-product-plan.md §B)
    원칙: 모바일 = "오늘 확인하고 바로 처리" — 모든 숫자는 버튼(클릭 → 명단 →
-   다음 행동). 홈 첫 화면에 금액 비노출(명단 연 후 표시). 작성·대량 발송은 PC. */
+   다음 행동). 홈 첫 화면에 금액 비노출(명단 연 후 표시). 작성·대량 발송은 PC.
+   #48: READY = "오늘 처리할 일"·타일·수납 스트립이 서버 정본(#45 엔드포인트 재사용,
+   pc/_live 공유) — 홈 금액 비노출 헌법대로 건수·수납률만. FIXTURE = 기존 데모. */
 import { useRef, useState } from "react";
+import { OwnerLiveProvider, useOwnerLive } from "../pc/_live";
 import { AppScroll } from "@/components/mobile/MobileShell";
 import { HomeBanner } from "@/components/mobile/HomeBanner";
 import { Card, Button, cn } from "@/components/ui";
@@ -63,9 +66,103 @@ interface TodoState {
 const ACT_BTN = "grid h-9 w-[80px] shrink-0 place-items-center rounded-[10px] text-[12px] font-bold";
 
 export default function OwnerHome() {
+  return (
+    <OwnerLiveProvider>
+      <OwnerHomeBody />
+    </OwnerLiveProvider>
+  );
+}
+
+/* READY 카드 — 서버 정본에서 파생(pc/page.tsx #45 와 같은 산정) */
+interface LiveTodo {
+  key: string;
+  hot?: boolean;
+  icon: "mega" | "card" | "trophy" | "alert";
+  title: string;
+  sub: string;
+  action: string;
+  run: () => void;
+}
+const AN_TYPE_KO: Record<string, string> = { ABSENCE: "긴급결석", LATE: "지각 예정", EARLY_LEAVE: "조퇴 예정" };
+
+function OwnerHomeBody() {
   const { toast, toastNode } = useToast();
   const { confirm, confirmNode } = useConfirm();
   const todoCardRef = useRef<HTMLDivElement>(null);
+  const live = useOwnerLive();
+  const ready = live.state === "READY";
+  const [liveDone, setLiveDone] = useState<Record<string, string>>({}); // key → 완료 문구
+  const [liveBusy, setLiveBusy] = useState<Record<string, boolean>>({});
+  const [openLive, setOpenLive] = useState<string | null>(null);
+  const completeLive = (key: string, msg: string) => setLiveDone((d) => ({ ...d, [key]: msg }));
+
+  const liveTodos: LiveTodo[] = [];
+  if (ready) {
+    for (const an of live.attendanceNotices) {
+      if (an.acknowledgedAt && !liveDone[`an:${an.noticeId}`]) continue;
+      liveTodos.push({
+        key: `an:${an.noticeId}`, hot: an.type === "ABSENCE", icon: "alert",
+        title: `${AN_TYPE_KO[an.type] ?? an.type} — ${an.participantName}`,
+        sub: `${an.date} · 사유: "${an.reason}" · 학부모 접수 · 실제 출결은 코치 확정`,
+        action: "확인",
+        run: () => {
+          const key = `an:${an.noticeId}`;
+          if (liveBusy[key]) return;
+          setLiveBusy((b) => ({ ...b, [key]: true }));
+          void live.ackAttendanceNotice(an.noticeId).then((r) => {
+            setLiveBusy((b) => ({ ...b, [key]: false }));
+            toast(r.message);
+            if (r.ok) completeLive(key, "원장 확인 완료 — 학부모에게 '확인했어요' 전달");
+          });
+        },
+      });
+    }
+    for (const n of live.notices) {
+      const unread = n.unread ?? 0;
+      if (unread === 0 && !liveDone[`nt:${n.noticeId}`]) continue;
+      const recipients = n.recipients ?? 0;
+      liveTodos.push({
+        key: `nt:${n.noticeId}`, icon: "mega",
+        title: `공지 미열람 보호자 ${unread}명`,
+        sub: `"${n.title}" · 읽음 ${recipients - unread}/${recipients} · 안 읽은 보호자에게만 다시 가요`,
+        action: "다시 알림",
+        run: () => confirm({
+          title: "공지 재알림",
+          rows: [["공지", n.title], ["미열람 보호자", `${unread}명`]],
+          warn: "안 읽은 보호자에게만 다시 보냅니다 — 전체 재발송이 아니에요.",
+          label: `${unread}명에게 다시 알림`,
+          onConfirm: () => {
+            void live.remindNotice(n.noticeId).then((r) => {
+              toast(r.message);
+              if (r.ok) completeLive(`nt:${n.noticeId}`, "재알림 발송 완료 · 읽음 추적 계속");
+            });
+          },
+        }),
+      });
+    }
+    const sum = live.summary;
+    if (sum && (sum.unpaidCount > 0 || liveDone["unpaid"])) {
+      liveTodos.push({
+        key: "unpaid", icon: "card",
+        title: `수강료 미납 ${sum.unpaidCount}건`,
+        // 홈 금액 비노출(헌법) — 금액은 수납 탭에서
+        sub: "입금 시 자동 확인 · 금액은 수납 탭에서 확인",
+        action: "리마인드",
+        run: () => confirm({
+          title: "미납 리마인드",
+          rows: [["미납 청구", `${sum.unpaidCount}건`], ["수신", "결제 권한 보호자만(인앱)"], ["알림톡", "사업자 연동 후"]],
+          label: "리마인드 발송",
+          onConfirm: () => {
+            void live.remindUnpaid().then((r) => {
+              toast(r.message);
+              if (r.ok) completeLive("unpaid", "리마인드 발송 완료 · 결제 대기 추적");
+            });
+          },
+        }),
+      });
+    }
+  }
+  const liveLeft = liveTodos.filter((t) => !liveDone[t.key]).length;
 
   // 오늘 처리할 일
   const [todos, setTodos] = useState<Record<TodoKey, TodoState>>(() =>
@@ -158,17 +255,37 @@ export default function OwnerHome() {
 
   const sheet = paySheet ? PAY_SHEETS[paySheet] : null;
 
+  const shownLeft = ready ? liveLeft : left;
+  const sum = live.summary;
+  const liveRate = sum && sum.billedKrw > 0 ? Math.round((sum.paidKrw / sum.billedKrw) * 100) : 0;
+
   return (
     <>
       <AppScroll>
         <Greeting
           title={<>원장님, 좋은 아침이에요 ☀️</>}
-          sub="원더짐 아카데미 · 원생 93명 · 10월 27일 (월)"
+          sub={ready ? `원더짐 아카데미 · 원생 ${live.participants.length}명 · 실 데이터` : "원더짐 아카데미 · 원생 93명 · 10월 27일 (월)"}
           bellDot
           bell={<IconBell size={20} />}
         />
 
-        {/* ① 공용 배너(144px 규격) — 슬라이드 1 수납 요약: 금액은 홈 비노출, 숫자 = 버튼 */}
+        {/* ① READY = 서버 수납 스트립(금액 비노출 — 건수·수납률만) · FIXTURE = 데모 배너 */}
+        {ready && sum && (
+          <Card className="!p-4">
+            <div className="flex items-center gap-1.5 text-[12px] font-bold text-ink3">
+              <span className="text-accent"><IconCard size={16} /></span> 수납 현황
+              <span className="inline-flex items-center gap-1 text-[10.5px] font-extrabold text-brand"><span className="h-[7px] w-[7px] rounded-full bg-accent" />실 데이터</span>
+            </div>
+            <div className="mt-2 flex items-center gap-2.5">
+              <div className="flex-1"><Meter pct={liveRate} /></div>
+              <span className="text-[12px] font-bold text-ink2 whitespace-nowrap">수납률 {liveRate}%</span>
+            </div>
+            <div className="mt-1.5 text-[12px] font-semibold text-ink3">
+              수납 {sum.paidCount}건 · 미납 {sum.unpaidCount}건 — 금액은 수납 탭에서 확인
+            </div>
+          </Card>
+        )}
+        {!ready && (
         <HomeBanner
           ariaLabel="원장 운영 요약 배너"
           slides={[
@@ -235,16 +352,77 @@ export default function OwnerHome() {
             </Card>,
           ]}
         />
+        )}
 
-        {/* 요약 타일 3개 */}
+        {/* 요약 타일 3개 — READY 는 서버 집계(출석률은 서버 정본 없어 미표시·위장 금지) */}
         <div className="grid grid-cols-3 gap-2.5">
-          <TileStat value="93명" label="전체 원생" tone="accent" />
-          <TileStat value="89%" label="이번 주 출석률" tone="gold" />
-          <TileStat value={`${left}건`} label="처리 필요" tone="danger" />
+          {ready && sum ? (
+            <>
+              <TileStat value={`${live.participants.length}명`} label="전체 원생" tone="accent" />
+              <TileStat value={`${sum.unpaidCount}건`} label="미납 청구" tone="gold" />
+              <TileStat value={`${shownLeft}건`} label="처리 필요" tone="danger" />
+            </>
+          ) : (
+            <>
+              <TileStat value="93명" label="전체 원생" tone="accent" />
+              <TileStat value="89%" label="이번 주 출석률" tone="gold" />
+              <TileStat value={`${left}건`} label="처리 필요" tone="danger" />
+            </>
+          )}
         </div>
 
         {/* ② 오늘 처리할 일 — compact row (설명 기본 숨김 · 행 클릭 = 펼침) */}
         <div ref={todoCardRef}>
+        {ready ? (
+        <Card>
+          <CardH4 note={liveLeft > 0 ? `${liveLeft}건 남음 · 실 데이터` : "모두 완료 · 실 데이터"}>오늘 처리할 일</CardH4>
+          {liveTodos.length === 0 ? (
+            <div className="py-6 text-center">
+              <div className="text-[34px]">🎉</div>
+              <div className="mt-2 text-[15px] font-extrabold text-accent-ink">오늘 할 일 끝!</div>
+              <div className="mt-1 text-[12px] font-medium text-ink3">알림·리마인드는 시스템이 이어서 추적할게요</div>
+            </div>
+          ) : (
+            liveTodos.map((t) => {
+              const doneMsg = liveDone[t.key];
+              const open = openLive === t.key;
+              return (
+                <div key={t.key} className={cn("border-b border-line2 last:border-b-0", doneMsg && "opacity-60")}>
+                  <div className="flex min-h-[52px] items-center gap-2.5 py-1.5">
+                    <div className={cn(
+                      "grid h-8 w-8 shrink-0 place-items-center rounded-[10px]",
+                      t.hot ? "bg-danger-weak text-danger" : "bg-fill text-ink2",
+                    )}>
+                      <TodoIcon kind={t.icon} />
+                    </div>
+                    <button
+                      onClick={() => setOpenLive(open ? null : t.key)}
+                      className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                      aria-expanded={open}
+                    >
+                      <span className="truncate text-[13.5px] font-semibold text-ink">{t.title}</span>
+                      <Chev open={open} />
+                    </button>
+                    {doneMsg ? (
+                      <span className={cn(ACT_BTN, "bg-fill !text-[11px] text-accent-ink")}>완료 ✓</span>
+                    ) : (
+                      <button onClick={t.run} disabled={liveBusy[t.key]}
+                        className={cn(ACT_BTN, "bg-accent-strong text-white disabled:opacity-50")}>
+                        {liveBusy[t.key] ? "..." : t.action}
+                      </button>
+                    )}
+                  </div>
+                  {open && (
+                    <div className="pb-2.5 pl-[42px] text-[12px] font-medium leading-normal text-ink3">
+                      {doneMsg ?? t.sub}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </Card>
+        ) : (
         <Card>
           <CardH4 note={left > 0 ? `${left}건 남음` : "모두 완료"}>오늘 처리할 일</CardH4>
           {left === 0 ? (
@@ -309,6 +487,7 @@ export default function OwnerHome() {
             </>
           )}
         </Card>
+        )}
         </div>
 
         {/* ③ 반별 정원 — 요일 OR 필터 + 기본 접힘 accordion */}
