@@ -33,6 +33,23 @@ export async function dispatchPendingOutbox(db: Db, nowISO: string, limit = 50):
           })));
         }
       }
+      if (evt.eventType === "COACH_SWAPPED" && evt.academyId) {
+        /* #42: 새 코치에게 인수인계 브리핑 알림 — "노하우는 학원에 남는다" 진입점.
+           보호자 알림은 외부 채널(알림톡) 사업자 연동 트랙 — 행 보존으로 유실 없음. */
+        const payload = JSON.parse(evt.payload) as {
+          toCoachUserId?: string; classIds?: string[]; effectiveDate?: string; affectedParticipants?: number;
+        };
+        if (payload.toCoachUserId) {
+          await tx.insert(s.inAppNotifications).values({
+            id: newId("ntf"), academyId: evt.academyId, userId: payload.toCoachUserId,
+            category: "HANDOVER",
+            title: "인수인계 브리핑",
+            body: `${payload.effectiveDate ?? ""}부터 반 ${payload.classIds?.length ?? 0}개 · 원생 ${payload.affectedParticipants ?? 0}명을 맡게 됐어요 — 진도·기록을 확인해주세요`,
+            refType: "CoachSwap", refId: evt.id,
+            createdAt: nowISO,
+          });
+        }
+      }
       await tx.update(s.outboxEvents).set({
         publishedAt: nowISO, attempts: evt.attempts + 1,
       }).where(eq(s.outboxEvents.id, evt.id));

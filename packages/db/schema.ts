@@ -1289,6 +1289,138 @@ export const participantExperienceEvents = pgTable("participant_experience_event
   foreignKey({ name: "fk_pxe_domain_academy", columns: [t.growthDomainId, t.academyId], foreignColumns: [growthDomains.id, growthDomains.academyId] }),
 ]);
 
+/* ── 기술·클리어·뱃지 PS5 (docs/20 §2 · 지시서 §6.5·§6.9) ──
+   반복 횟수만으로 자동 클리어 금지 — 권한 코치가 기준 확인 후 확정(CLEARED)해야만
+   뱃지 발급. 같은 반 안에서도 아이별 현재 기술이 다르다(progress 는 원생×기술).
+   뱃지 중복 발급 = partial UNIQUE 가 DB 레벨 차단. 정정은 이력 보존(CORRECTED). */
+export const skillProgressStatusEnum = pgEnum("skill_progress_status", [
+  "NOT_STARTED", "INTRODUCED", "ASSISTED", "PRACTICING",
+  "INDEPENDENT", "READY_FOR_CLEARANCE", "CLEARED",
+]);
+export const badgeAwardStatusEnum = pgEnum("badge_award_status", ["AWARDED", "CORRECTED"]);
+
+/* 기술 — 버전 콘텐츠(단계 소속·DRAFT 에서만 편집). 기술명은 데이터(enum 금지) */
+export const skills = pgTable("skills", {
+  id: text("id").primaryKey(),                     // skl_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  programVersionId: text("program_version_id").notNull(),
+  programLevelId: text("program_level_id").notNull(), // S/C/B/A 등 단계 소속
+  name: text("name").notNull(),
+  description: text("description"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  recommendedPracticeMin: integer("recommended_practice_min"),
+  recommendedPracticeMax: integer("recommended_practice_max"),
+  previousSkillId: text("previous_skill_id"),      // 선행 기술(선택)
+  active: boolean("active").notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex("uq_skl_id_academy").on(t.id, t.academyId),
+  uniqueIndex("uq_skl_level_name").on(t.programLevelId, t.name),
+  index("ix_skl_version").on(t.programVersionId),
+  foreignKey({ name: "fk_skl_version_academy", columns: [t.programVersionId, t.academyId], foreignColumns: [programVersions.id, programVersions.academyId] }),
+  foreignKey({ name: "fk_skl_level_academy", columns: [t.programLevelId, t.academyId], foreignColumns: [programLevels.id, programLevels.academyId] }),
+]);
+
+/* 클리어 기준 — required 전부 확인돼야 확정(자동 클리어 방지의 실체) */
+export const skillClearanceCriteria = pgTable("skill_clearance_criteria", {
+  id: text("id").primaryKey(),                     // scc_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  skillId: text("skill_id").notNull(),
+  label: text("label").notNull(),
+  description: text("description"),
+  required: boolean("required").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (t) => [
+  index("ix_scc_skill").on(t.skillId),
+  foreignKey({ name: "fk_scc_skill_academy", columns: [t.skillId, t.academyId], foreignColumns: [skills.id, skills.academyId] }),
+]);
+
+/* 뱃지 정의 — 학원이 만드는 데이터(기술 연결 선택) */
+export const badgeDefinitions = pgTable("badge_definitions", {
+  id: text("id").primaryKey(),                     // bdg_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  skillId: text("skill_id"),
+  name: text("name").notNull(),
+  description: text("description"),
+  imageStorageKey: text("image_storage_key"),
+  active: boolean("active").notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex("uq_bdg_id_academy").on(t.id, t.academyId),
+  // 기술당 활성 뱃지 1개(정의 중복 방지 — 발급 중복은 badge_awards 가 차단)
+  uniqueIndex("uq_bdg_skill_active").on(t.skillId).where(sql`${t.active} = true AND ${t.skillId} IS NOT NULL`),
+  foreignKey({ name: "fk_bdg_skill_academy", columns: [t.skillId, t.academyId], foreignColumns: [skills.id, skills.academyId] }),
+]);
+
+/* 원생×기술 진행 — 같은 반 안에서 아이별로 다르다. UNIQUE(원생,기술) */
+export const participantSkillProgress = pgTable("participant_skill_progress", {
+  id: text("id").primaryKey(),                     // psp_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  participantId: text("participant_id").notNull(),
+  skillId: text("skill_id").notNull(),
+  status: skillProgressStatusEnum("status").notNull().default("NOT_STARTED"),
+  practiceCount: integer("practice_count").notNull().default(0),
+  firstPracticedAt: timestamp("first_practiced_at", { withTimezone: true, mode: "string" }),
+  lastPracticedAt: timestamp("last_practiced_at", { withTimezone: true, mode: "string" }),
+  clearanceReadyAt: timestamp("clearance_ready_at", { withTimezone: true, mode: "string" }),
+  clearedAt: timestamp("cleared_at", { withTimezone: true, mode: "string" }),
+  clearedByUserId: text("cleared_by_user_id"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: version(),                              // 동시 클리어 낙관 잠금 + FOR UPDATE
+}, (t) => [
+  uniqueIndex("uq_psp_participant_skill").on(t.participantId, t.skillId),
+  index("ix_psp_participant").on(t.participantId),
+  index("ix_psp_skill").on(t.skillId),
+  foreignKey({ name: "fk_psp_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+  foreignKey({ name: "fk_psp_skill_academy", columns: [t.skillId, t.academyId], foreignColumns: [skills.id, skills.academyId] }),
+]);
+
+/* 연습 기록 — append-only. 코치 관찰(CLEARED 는 관찰값이 아님 — 도메인 강제) */
+export const skillPracticeEvents = pgTable("skill_practice_events", {
+  id: text("id").primaryKey(),                     // spe_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  participantId: text("participant_id").notNull(),
+  skillId: text("skill_id").notNull(),
+  classSessionId: text("class_session_id"),
+  result: text("result").notNull(),                // PracticeObservation(도메인 검증)
+  coachNote: text("coach_note"),
+  recordedByUserId: text("recorded_by_user_id").notNull().references(() => users.id),
+  recordedAt: timestamp("recorded_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (t) => [
+  index("ix_spe_participant_skill").on(t.participantId, t.skillId),
+  foreignKey({ name: "fk_spe_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+  foreignKey({ name: "fk_spe_skill_academy", columns: [t.skillId, t.academyId], foreignColumns: [skills.id, skills.academyId] }),
+  foreignKey({ name: "fk_spe_session_academy", columns: [t.classSessionId, t.academyId], foreignColumns: [classSessions.id, classSessions.academyId] }),
+  check("ck_spe_result", sql`${t.result} IN ('INTRODUCED','ASSISTED','PRACTICING','INDEPENDENT','READY_FOR_CLEARANCE')`),
+]);
+
+/* 뱃지 발급 — 활성 발급은 아이×뱃지 1회(partial UNIQUE). 정정 = 이력 보존 */
+export const badgeAwards = pgTable("badge_awards", {
+  id: text("id").primaryKey(),                     // baw_xxx
+  academyId: text("academy_id").notNull().references(() => academies.id),
+  participantId: text("participant_id").notNull(),
+  badgeDefinitionId: text("badge_definition_id").notNull(),
+  skillId: text("skill_id"),
+  status: badgeAwardStatusEnum("status").notNull().default("AWARDED"),
+  awardedAt: timestamp("awarded_at", { withTimezone: true, mode: "string" }).notNull(),
+  awardedByUserId: text("awarded_by_user_id").notNull().references(() => users.id),
+  sourceClassSessionId: text("source_class_session_id"),
+  correctedAt: timestamp("corrected_at", { withTimezone: true, mode: "string" }),
+  correctedByUserId: text("corrected_by_user_id"),
+  correctionReason: text("correction_reason"),
+}, (t) => [
+  // 지시서 §6.9 필수: 동일 아이 동일 뱃지 중복 발급 차단(정정 후 재발급은 허용)
+  uniqueIndex("uq_baw_active").on(t.participantId, t.badgeDefinitionId)
+    .where(sql`${t.status} = 'AWARDED'`),
+  index("ix_baw_participant").on(t.participantId),
+  foreignKey({ name: "fk_baw_participant_academy", columns: [t.participantId, t.academyId], foreignColumns: [participants.id, participants.academyId] }),
+  foreignKey({ name: "fk_baw_badge_academy", columns: [t.badgeDefinitionId, t.academyId], foreignColumns: [badgeDefinitions.id, badgeDefinitions.academyId] }),
+  foreignKey({ name: "fk_baw_skill_academy", columns: [t.skillId, t.academyId], foreignColumns: [skills.id, skills.academyId] }),
+]);
+
 export const refundAllocations = pgTable("refund_allocations", {
   id: text("id").primaryKey(),                    // ra_xxx
   refundId: text("refund_id").notNull().references(() => refunds.id),

@@ -39,12 +39,17 @@ import {
   confirmSessionResults, getExperienceMap,
 } from "./programs/execution";
 import {
+  createSkill, setSkillCriteria, listSkills, createBadgeDefinition,
+  recordSkillPractice, clearSkill, correctBadgeAward, getSkillBook, getClassSkillBoard,
+} from "./programs/mastery";
+import {
   recordAttendance, completeSession, listSessionAttendance, createAttendanceNotice,
 } from "./attendance/service";
 import {
   createBillingPeriod, createInvoice, issueInvoice, voidInvoice, recordOfflinePayment,
   bulkCreateClassDrafts, bulkIssueClassDrafts,
 } from "./billing/issue";
+import { swapCoach, COACH_REVOKE_MODES } from "./coaches/swap";
 import { publishNotice, markNoticeRead, listNotices } from "./notices/service";
 import { reportIncident, listIncidents } from "./safety/service";
 import { listMyNotifications, markNotificationRead } from "./notifications/service";
@@ -679,6 +684,94 @@ export function createApp(cfg: ApiConfig) {
     return c.json(r);
   });
 
+  /* ── 기술·클리어·뱃지 PS5 — 자동 클리어 금지·뱃지 1회·정정 이력 ── */
+  const CreateSkillBody = z.object({
+    programLevelId: z.string().min(1).max(64),
+    name: z.string().min(1).max(80),
+    description: z.string().max(2000).optional(),
+    sortOrder: z.number().int().min(0).max(9999).optional(),
+    recommendedPracticeMin: z.number().int().min(0).max(999).optional(),
+    recommendedPracticeMax: z.number().int().min(0).max(999).optional(),
+    previousSkillId: z.string().max(64).optional(),
+  }).strict();
+  app.post("/academies/:academyId/versions/:versionId/skills", guard, csrf, academyCtx, async (c) => {
+    const p = CreateSkillBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await createSkill(cfg.db, {
+      ...actor(c), versionId: c.req.param("versionId")!, ...p.data,
+    }, now()));
+  });
+  app.get("/academies/:academyId/versions/:versionId/skills", guard, academyCtx, async (c) => {
+    return c.json({ skills: await listSkills(cfg.db, c.req.param("academyId")!, c.req.param("versionId")!) });
+  });
+  const CriteriaBody = z.object({
+    criteria: z.array(z.object({
+      label: z.string().min(1).max(200),
+      description: z.string().max(1000).optional(),
+      required: z.boolean().optional(),
+    })).max(20),
+  }).strict();
+  app.put("/academies/:academyId/skills/:skillId/criteria", guard, csrf, academyCtx, async (c) => {
+    const p = CriteriaBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await setSkillCriteria(cfg.db, {
+      ...actor(c), skillId: c.req.param("skillId")!, ...p.data,
+    }, now()));
+  });
+  const BadgeDefBody = z.object({
+    skillId: z.string().max(64).optional(),
+    name: z.string().min(1).max(80),
+    description: z.string().max(1000).optional(),
+  }).strict();
+  app.post("/academies/:academyId/badge-definitions", guard, csrf, academyCtx, async (c) => {
+    const p = BadgeDefBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await createBadgeDefinition(cfg.db, { ...actor(c), ...p.data }, now()));
+  });
+  const PracticeBody = z.object({
+    result: z.string().min(1).max(30),
+    classSessionId: z.string().max(64).optional(),
+    coachNote: z.string().max(1000).optional(),
+  }).strict();
+  app.post("/academies/:academyId/participants/:participantId/skills/:skillId/practice", guard, csrf, academyCtx, async (c) => {
+    const p = PracticeBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await recordSkillPractice(cfg.db, {
+      ...actor(c), participantId: c.req.param("participantId")!,
+      skillId: c.req.param("skillId")!, ...p.data,
+    }, now()));
+  });
+  const ClearanceBody = z.object({
+    checkedCriteriaIds: z.array(z.string().min(1).max(64)).max(20),
+    classSessionId: z.string().max(64).optional(),
+  }).strict();
+  app.post("/academies/:academyId/participants/:participantId/skills/:skillId/clearance", guard, csrf, academyCtx, async (c) => {
+    const p = ClearanceBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await clearSkill(cfg.db, {
+      ...actor(c), participantId: c.req.param("participantId")!,
+      skillId: c.req.param("skillId")!, ...p.data,
+    }, now()));
+  });
+  const CorrectionBody = z.object({ reason: z.string().min(1).max(500) }).strict();
+  app.post("/academies/:academyId/badge-awards/:awardId/correction", guard, csrf, academyCtx, async (c) => {
+    const p = CorrectionBody.safeParse(await jsonBody(c));
+    if (!p.success) return c.json({ error: "INVALID_BODY" }, 422);
+    return studioResult(c, await correctBadgeAward(cfg.db, {
+      ...actor(c), awardId: c.req.param("awardId")!, ...p.data,
+    }, now()));
+  });
+  app.get("/academies/:academyId/participants/:participantId/skill-book", guard, academyCtx, async (c) => {
+    const r = await getSkillBook(cfg.db, c.req.param("academyId")!, c.req.param("participantId")!);
+    if (!r) return c.json({ error: "NOT_FOUND" }, 404);
+    return c.json(r);
+  });
+  app.get("/academies/:academyId/classes/:classId/skill-board", guard, academyCtx, async (c) => {
+    const r = await getClassSkillBoard(cfg.db, { ...actor(c), classId: c.req.param("classId")! });
+    if (r === "FORBIDDEN") return c.json({ error: "FORBIDDEN" }, 403);
+    return c.json(r);
+  });
+
   /* ── 기본선 3단계(#24): 학원 생성 · 직원 초대 ── */
   const CreateAcademyBody = z.object({
     name: z.string().min(1).max(60),
@@ -1288,6 +1381,27 @@ export function createApp(cfg: ApiConfig) {
     });
     if (!rows) return c.json({ error: "FORBIDDEN" }, 403);
     return c.json({ participants: rows });
+  });
+
+  /* 코치 교체(#42) — 배정 행 교체(이력 보존)·권한 회수는 원장 결정·outbox 브리핑 */
+  const CoachSwapBody = z.object({
+    fromCoachUserId: z.string().min(1).max(64),
+    toCoachUserId: z.string().min(1).max(64),
+    classIds: z.array(z.string().min(1).max(64)).min(1).max(50),
+    effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    revokeMode: z.enum(COACH_REVOKE_MODES),
+  }).strict();
+  app.post("/academies/:academyId/coach-swaps", guard, csrf, academyCtx, async (c) => {
+    const parsed = CoachSwapBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "INVALID_BODY" }, 422);
+    const auth = c.get("auth"); const m = c.get("membership");
+    const r = await swapCoach(cfg.db, {
+      actorUserId: auth.userId, actorRoles: m.roles,
+      academyId: c.req.param("academyId")!, ...parsed.data,
+    }, now());
+    if (r.kind === "FORBIDDEN") return c.json({ error: "FORBIDDEN", reason: r.reason }, 403);
+    if (r.kind !== "OK") return c.json({ error: "UNPROCESSABLE", reason: r.reason }, 422);
+    return c.json({ swapped: r.swapped, affectedParticipants: r.affectedParticipants, revoked: r.revoked }, 200);
   });
 
   /* 멤버 목록(#31) — staff 전용. 코치 전달사항 대상 선택의 정본(PII 미포함) */

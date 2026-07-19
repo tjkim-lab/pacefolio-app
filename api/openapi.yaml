@@ -234,6 +234,18 @@ paths:
       responses:
         '201': { description: '{ billingPeriodId, periodStart, periodEnd } — 기존 행 반환 시에도 동일 형식' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /academies/{academyId}/coach-swaps:
+    post:
+      tags: [attendance]
+      summary: >
+        담당 코치 교체 — 배정 행 교체(기존 ENDED+신규 ACTIVE, 이력 보존). 권한 회수는
+        원장 결정(IMMEDIATE/ON_EFFECTIVE/KEEP): IMMEDIATE 는 담당 반이 남으면 422(고아 반 방지),
+        허용 시 멤버십 ENDED. outbox COACH_SWAPPED → 새 코치 인수인계 인앱 알림. staff 전용. (구현됨 #42)
+      parameters: [ { $ref: '#/components/parameters/AcademyId' } ]
+      responses:
+        '200': { description: '{ swapped, affectedParticipants, revoked }' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: 같은 코치·비담당 반·재직 아닌 새 코치·즉시 회수 잔여 반 }
   /academies/{academyId}/classes/{classId}/bulk-invoice-drafts:
     post:
       tags: [billing]
@@ -1224,6 +1236,80 @@ paths:
       tags: [program-execution]
       summary: 경험지도 — 영역별 경험 횟수·서로 다른 활동 수·최근성(능력 점수 아님·순위 없음)
       responses: { '200': { description: 'domains[]' }, '404': { description: 원생 없음(교차 테넌트 포함) } }
+
+  # ── 기술·클리어·뱃지 PS5 (docs/20 §2 · 지시서 §6.5·§6.9·§9) —
+  #    반복 횟수만으로 자동 클리어 금지·뱃지 활성 발급 1회(partial UNIQUE)·정정 이력 보존.
+  /academies/{academyId}/versions/{versionId}/skills:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: versionId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [skill-mastery]
+      summary: 기술 생성(단계 소속·DRAFT 만·기술명은 데이터) — 같은 단계 중복 이름 422
+      responses: { '201': { description: skillId }, '422': { description: 게시본·중복 이름·단계 없음 } }
+    get:
+      tags: [skill-mastery]
+      summary: 기술 목록 — 기준·활성 뱃지 포함
+      responses: { '200': { description: 'skills[]' } }
+  /academies/{academyId}/skills/{skillId}/criteria:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: skillId, in: path, required: true, schema: { type: string } }
+    put:
+      tags: [skill-mastery]
+      summary: 클리어 기준 세트 교체(DRAFT 만) — required 기준이 자동 클리어 방지의 실체
+      responses: { '200': { description: 교체됨 } }
+  /academies/{academyId}/badge-definitions:
+    parameters: [{ $ref: '#/components/parameters/AcademyId' }]
+    post:
+      tags: [skill-mastery]
+      summary: 뱃지 정의 — 기술당 활성 뱃지 1개
+      responses: { '201': { description: badgeDefinitionId }, '422': { description: 활성 뱃지 중복 } }
+  /academies/{academyId}/participants/{participantId}/skills/{skillId}/practice:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: participantId, in: path, required: true, schema: { type: string } }
+      - { name: skillId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [skill-mastery]
+      summary: 연습 기록(담당 코치/스태프) — 관찰이 정본·CLEARED 는 관찰값 아님(422)
+      responses: { '200': { description: status·practiceCount }, '403': { description: 비담당 코치 } }
+  /academies/{academyId}/participants/{participantId}/skills/{skillId}/clearance:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: participantId, in: path, required: true, schema: { type: string } }
+      - { name: skillId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [skill-mastery]
+      summary: 클리어 확정 — 필수 기준 전부 확인해야(422). CLEARED+뱃지+감사+outbox+보호자 알림 동일 tx·멱등
+      responses:
+        '200': { description: alreadyCleared·badgeAwarded }
+        '403': { description: 비담당·권한 종료 코치 }
+        '422': { description: 필수 기준 미확인 }
+  /academies/{academyId}/badge-awards/{awardId}/correction:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: awardId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [skill-mastery]
+      summary: 뱃지 정정(원장·사유 필수) — 이력 보존(CORRECTED)·정정 후 재발급 가능·멱등
+      responses: { '200': { description: 정정됨 } }
+  /academies/{academyId}/participants/{participantId}/skill-book:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: participantId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [skill-mastery]
+      summary: 뱃지북 — 기술 진행·연습 횟수·획득 뱃지(점수·순위 없음)
+      responses: { '200': { description: 'skills[]·badges[]' }, '404': { description: 원생 없음 } }
+  /academies/{academyId}/classes/{classId}/skill-board:
+    parameters:
+      - { $ref: '#/components/parameters/AcademyId' }
+      - { name: classId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [skill-mastery]
+      summary: 반 기술 현황판 — 같은 반 아이별 다른 진도(코치 그룹화용)
+      responses: { '200': { description: 'participants[]' }, '403': { description: 비담당 코치 } }
 
 components:
   securitySchemes:

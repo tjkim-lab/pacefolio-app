@@ -177,6 +177,7 @@ export const DOMAIN_EVENT_TYPE = [
   "REFUND_COMPLETED",
   "SAFETY_INCIDENT_REPORTED", // #32 — 원장 알림(REQUIRED tier) 트랙
   "CLOSURE_CREATED",          // #38 — 휴무 이벤트(보강·보호자 공지 트랙 소비)
+  "COACH_SWAPPED",            // #42 — 담당 교체(새 코치 인수인계 브리핑·보호자 공지 트랙)
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPE)[number];
 

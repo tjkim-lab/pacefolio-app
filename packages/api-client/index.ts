@@ -104,6 +104,7 @@ const BillingPeriodCreate = z.object({ billingPeriodId: z.string() });
 const InvoiceCreate = z.object({ invoiceId: z.string(), total: z.number().int() });
 const BulkDrafts = z.object({ created: z.number().int(), skipped: z.number().int(), invoiceIds: z.array(z.string()) });
 const BulkIssue = z.object({ issued: z.number().int() });
+const CoachSwap = z.object({ swapped: z.number().int(), affectedParticipants: z.number().int(), revoked: z.boolean() });
 
 /* 휴무·일할(#38 — PC draft 정본화 1) */
 const ClosureCreate = z.object({ closureId: z.string(), canceledSessions: z.number().int() });
@@ -411,6 +412,14 @@ export function createApiClient(cfg: ApiClientConfig = {}) {
       lines: { type: string; label: string; amount: number }[];
     }) =>
       call(InvoiceCreate, `/academies/${academyId}/invoices`, {
+        method: "POST", csrf: true, body: JSON.stringify(body),
+      }),
+    /* 코치 교체(#42) — 배정 행 교체 + 권한 회수(원장 결정) + outbox 브리핑 */
+    swapCoach: (academyId: string, body: {
+      fromCoachUserId: string; toCoachUserId: string; classIds: string[];
+      effectiveDate: string; revokeMode: "IMMEDIATE" | "ON_EFFECTIVE" | "KEEP";
+    }) =>
+      call(CoachSwap, `/academies/${academyId}/coach-swaps`, {
         method: "POST", csrf: true, body: JSON.stringify(body),
       }),
     /* 그룹 일괄 발송(#41) — 반 단위 초안 전수 생성 → 검토 → 일괄 ISSUED */

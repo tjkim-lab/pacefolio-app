@@ -26,7 +26,7 @@ interface OwnerLiveCtx {
   summary?: BillingSummaryData;
   publish: (input: { title: string; body: string; audience: string; classId?: string }) =>
     Promise<{ ok: boolean; recipients: number; message: string }>;
-  classes: { classId: string; name: string }[]; // AudienceFilter 1단계 — 반 칩의 정본
+  classes: { classId: string; name: string; coachUserIds: string[] }[]; // AudienceFilter 1단계 — 반 칩의 정본
   refreshNotices: () => Promise<void>;
   refreshSummary: () => Promise<void>;
   /* #38: 휴무 event → 서버 세션 취소·회차 재계산 / 중간입회 일할 견적(헌법 수식) */
@@ -48,6 +48,12 @@ interface OwnerLiveCtx {
     Promise<{ ok: boolean; message: string; created?: number; skipped?: number }>;
   bulkIssue: (classId: string, input: { periodStart: string; periodEnd: string }) =>
     Promise<{ ok: boolean; message: string; issued?: number }>;
+  /* #42: 코치 교체 — 배정 행 교체(이력 보존)·권한 회수는 원장 결정·브리핑 outbox */
+  swapCoach: (input: {
+    fromCoachUserId: string; toCoachUserId: string; classIds: string[];
+    effectiveDate: string; revokeMode: "IMMEDIATE" | "ON_EFFECTIVE" | "KEEP";
+  }) => Promise<{ ok: boolean; message: string; swapped?: number; affectedParticipants?: number }>;
+  refreshClasses: () => Promise<void>;
   /* #31: 코치 전달사항 — DM 개설→ACK_REQUIRED 전송, READ/ACK 은 서버 상태 재조회 */
   coaches: CoachMember[];
   sendCoachDirective: (coachUserId: string, body: string, urgent: boolean) =>
@@ -69,7 +75,7 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
   const [notices, setNotices] = useState<OwnerNotice[]>([]);
   const [summary, setSummary] = useState<BillingSummaryData>();
   const [coaches, setCoaches] = useState<CoachMember[]>([]);
-  const [classes, setClasses] = useState<{ classId: string; name: string }[]>([]);
+  const [classes, setClasses] = useState<{ classId: string; name: string; coachUserIds: string[] }[]>([]);
   const [participants, setParticipants] = useState<{ participantId: string; name: string; ageLabel: string; status: string }[]>([]);
 
   useEffect(() => {
@@ -110,7 +116,7 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
         setNotices(nt.notices);
         setSummary(sum);
         setCoaches(mem.members);
-        setClasses(cls.classes.map((x) => ({ classId: x.classId, name: x.name })));
+        setClasses(cls.classes.map((x) => ({ classId: x.classId, name: x.name, coachUserIds: x.coachUserIds })));
         setParticipants(pts.participants);
         setState("READY");
       } catch (e) {
@@ -176,6 +182,34 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
       return { ok: false, message: e instanceof ApiError ? `저장 실패(${e.status}: ${e.code})` : "저장 실패 — 네트워크 확인" };
     }
   }, [academyId]);
+
+  const refreshClasses = useCallback(async () => {
+    if (!academyId) return;
+    const cls = await api.listClasses(academyId);
+    setClasses(cls.classes.map((x) => ({ classId: x.classId, name: x.name, coachUserIds: x.coachUserIds })));
+  }, [academyId]);
+
+  const swapCoach = useCallback(async (input: {
+    fromCoachUserId: string; toCoachUserId: string; classIds: string[];
+    effectiveDate: string; revokeMode: "IMMEDIATE" | "ON_EFFECTIVE" | "KEEP";
+  }) => {
+    if (!academyId) return { ok: false, message: "학원 컨텍스트 없음" };
+    let r;
+    try { r = await api.swapCoach(academyId, input); }
+    catch (e) {
+      if (e instanceof ApiError && e.status === 422) {
+        const reason = (e.body as { reason?: string } | undefined)?.reason;
+        return { ok: false, message: reason ?? `교체 불가(${e.code})` };
+      }
+      return { ok: false, message: e instanceof ApiError ? `교체 실패(${e.status}: ${e.code})` : "교체 실패 — 네트워크 확인" };
+    }
+    /* mutation 성공과 목록 갱신 실패 분리 — 성공 위장 금지 */
+    try { await refreshClasses(); } catch { /* 갱신은 새로고침으로 */ }
+    return {
+      ok: true, swapped: r.swapped, affectedParticipants: r.affectedParticipants,
+      message: `교체 완료 — 반 ${r.swapped}개 · 원생 ${r.affectedParticipants}명, 새 코치에게 인수인계 브리핑이 가요`,
+    };
+  }, [academyId, refreshClasses]);
 
   const bulkDrafts = useCallback(async (classId: string, input: {
     periodStart: string; periodEnd: string; dueDate: string; baseFee: number;
@@ -271,6 +305,7 @@ export function OwnerLiveProvider({ children }: { children: ReactNode }) {
       state, errorMsg, academyId, notices, summary, publish, classes,
       refreshNotices, refreshSummary, coaches, sendCoachDirective, refreshDirective,
       createClosure, prorationQuote, participants, saveDraftInvoice, bulkDrafts, bulkIssue,
+      swapCoach, refreshClasses,
     }}>
       {children}
     </Ctx.Provider>

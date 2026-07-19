@@ -18,4 +18,5 @@ export * from "./scheduling";
 export * from "./photo";
 export * from "./program-studio";
 export * from "./import-staging";
+export * from "./skill-mastery";
 export * from "./proration";
