@@ -7,7 +7,7 @@ import { Panel, RL, Note, DChip, CheckMark, useOverlays } from "../../_ui";
 import { Button } from "@/components/ui";
 import { IconArrowLeft, IconCheck } from "@/components/ui/icons";
 import { SWAP_CLASSES, SWAP_DATES, SWAP_REVOKE } from "../../_data";
-import { useOwnerLive } from "../../_live";
+import { OwnerLiveProvider, useOwnerLive } from "../../_live";
 
 const WT = ["", "① 새 코치 가입 확인", "② 담당 수업 선택", "③ 교체 시점", "④ 권한 회수", "⑤ 최종 확인 · 알림 발송"];
 /* #42: READY 회수 옵션 — 서버 revokeMode 와 1:1 (자동 회수 아님, 원장 결정) */
@@ -17,7 +17,15 @@ const LIVE_REVOKE = [
   { v: "KEEP", t: "권한 유지", sub: "다른 반 담당·수습 기간 등 — 기록만 남겨요" },
 ] as const;
 
-export default function CoachSwap() {
+export default function CoachSwapPage() {
+  return (
+    <OwnerLiveProvider>
+      <CoachSwap />
+    </OwnerLiveProvider>
+  );
+}
+
+function CoachSwap() {
   const router = useRouter();
   const { confirm, toast, overlays } = useOverlays();
   const live = useOwnerLive();
