@@ -32,6 +32,8 @@ npm run dev                      # :3000 웹 + :3001 API(PGlite in-memory 자동
 | 컴플라이언스 | PII 암호화(전화 원문 제거·fail-closed)·proxy 역할 검증(세션 정본·404 fail-closed)·처리방침 초안 | docs/16 |
 | 리뷰 대응 | 13차 A~E 반영 완료(docs/18 트리아지) · **14차 재검토: A·D 승인, B P0·C P1 전부 반영**(fixture fail-open 제거 포함) · 자체 멀티에이전트 리뷰 13건 수정(미납 이중계상 P1 등) | docs/REVIEW-REQUEST-14 |
 | 품질 인프라 | CI verify+e2e · PG 동시성 경쟁 테스트(같은 측 재승인·동시 전송 멱등 등) · openapi drift 가드 | .github/workflows |
+| PC draft 정본화(#38~42) | 13B FAIL 잔여 전 구간 서버 정본 — 휴무 event→회차 재계산·중간입회 견적(payment-engine 이식 정합)+청구 초안 저장·원생 목록·그룹(반) 일괄 발송(초안 전수→일괄 ISSUED·기존 청구 제외·멱등)·강사 교체(배정 행 교체 이력보존·회수 3모드 고아 반 방지·인수인계 브리핑 outbox→인앱) | closures/·coaches/swap.ts·billing/issue.ts |
+| 프로그램 스튜디오 PS3~5(디자인 터미널) | CSV 가져오기 스테이징(업로드→미리보기→커밋→되돌리기)·반 적용·수업 계획·결과 확정·경험 이벤트·기술/클리어/뱃지(자동 클리어 금지·발급 1회) | docs/20·programs/ |
 
 ### ⏸️ 결정 대기 (TJ) — 이것만 정하면 다음이 풀림
 1. **사진 저장소 사업자** — 추천 AWS S3 서울(또는 NCP). 결정 → 어댑터 1파일(반나절)로 사진 완성
